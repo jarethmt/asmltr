@@ -19,6 +19,7 @@
  * Usage: node scripts/update.js [--channel stable|edge] [--ref <tag|sha>] [--dry-run] [--force]
  *                               [--no-dashboard] [--by <who>] [--json]
  * Exit: 0 ok · 1 preflight/usage · 2 rolled back · 3 manual intervention · 4 already up to date · 5 busy
+ *       · 6 externally managed (no-op — the platform owns updates)
  */
 require('../shared/loadenv');
 const fs = require('fs');
@@ -99,6 +100,15 @@ function done(code, summary) {
   if (!version.VALID_CHANNELS.includes(CHANNEL)) { log(`invalid channel '${CHANNEL}'`); if (JSON_OUT) console.log(JSON.stringify({ ok: false, error: 'invalid channel' })); process.exit(1); }
 
   // preflight
+  // Externally-managed install: the platform (a package, an image, a config-management deploy) owns
+  // the code, not a git checkout we can rewrite. Report & no-op with a distinct code instead of
+  // failing like a broken updater. --force lets an operator override & try an in-place update anyway.
+  const managed = version.getManaged();
+  if (managed.managed && !FORCE) {
+    log(`updates managed by ${managed.manager}; not updating in place (use --force to override)`);
+    if (JSON_OUT) console.log(JSON.stringify({ ok: true, code: 6, managed: true, manager: managed.manager }));
+    process.exit(6);
+  }
   if (!fs.existsSync(path.join(REPO, '.git'))) { log('not a git checkout — cannot update'); process.exit(1); }
   if (git('rev-parse', 'HEAD').code !== 0) { log('git not usable'); process.exit(1); }
 
