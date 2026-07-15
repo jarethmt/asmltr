@@ -14,6 +14,7 @@ const { execFileSync } = require('child_process');
 
 const REPO = path.join(__dirname, '..');
 const CHANNEL_FILE = process.env.ASMLTR_UPDATE_CHANNEL_FILE || path.join(os.homedir(), '.asmltr', 'update-channel');
+const MANAGED_FILE = process.env.ASMLTR_MANAGED_FILE || path.join(os.homedir(), '.asmltr', 'managed');
 
 function git(...args) {
   try { return execFileSync('git', ['-C', REPO, ...args], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
@@ -42,9 +43,22 @@ function setChannel(c) {
   return getChannel();
 }
 
+// Is this install's code owned by an external platform (a package, an image, a config-management
+// deploy) rather than a git checkout the updater can rewrite in place? Env wins & its value names the
+// manager; otherwise a `~/.asmltr/managed` flag file, whose first token names the manager (bare file
+// => 'external'). Same file-flag pattern as the channel & auto-update flags.
+function getManaged() {
+  const env = process.env.ASMLTR_UPDATE_MANAGED;
+  if (env && env.trim()) return { managed: true, manager: env.trim() };
+  try {
+    const c = fs.readFileSync(MANAGED_FILE, 'utf8').trim();
+    return { managed: true, manager: c ? c.split(/\s+/)[0] : 'external' };
+  } catch (_) { return { managed: false, manager: null }; }
+}
+
 // Compact object the /version endpoints and the updater share.
 function info() {
   return { version: readVersion(), sha: gitSha(), tag: gitTag(), channel: getChannel() };
 }
 
-module.exports = { readVersion, gitSha, gitTag, getChannel, setChannel, info, REPO, VALID_CHANNELS };
+module.exports = { readVersion, gitSha, gitTag, getChannel, setChannel, getManaged, info, REPO, VALID_CHANNELS };
