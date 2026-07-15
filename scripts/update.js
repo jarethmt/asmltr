@@ -73,6 +73,21 @@ function run(cmd, args, o = {}) {
   return { code: r.status == null ? 1 : r.status, out };
 }
 
+// Install workspace deps as deterministically as the install allows. `npm ci` needs a committed
+// package-lock.json that matches the manifests; when it's present we get an exact-match clean
+// install. If there's no lockfile (a bespoke checkout) or the lock has drifted, fall back to a
+// plain `npm install`, which also refreshes the lock. Returns { code, mode } so the caller can log
+// which path ran and roll back on failure.
+function installDeps() {
+  if (fs.existsSync(path.join(REPO, 'package-lock.json'))) {
+    const ci = run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+    if (ci.code === 0) return { code: 0, mode: 'npm ci' };
+    log('npm ci failed (no lockfile match / partial tree); falling back to npm install');
+  }
+  const ni = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+  return { code: ni.code, mode: 'npm install' };
+}
+
 // ---- lock ----
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { return false; } }
 function acquireLock() {
@@ -136,7 +151,7 @@ function done(code, summary) {
 
   if (DRY) {
     const plan = { ok: true, dryRun: true, channel: CHANNEL, from: fromSha, to: toShort, target: targetLabel, behind, changelog,
-      steps: ['git checkout ' + targetLabel, 'run setup.d steps', 'reconcile .env', 'npm install (root workspace)', NO_DASH ? 'skip dashboard' : 'docker compose up -d --build (dashboard)', 'restart-with-rollback.sh (pm2 restart + verify + auto-rollback)'] };
+      steps: ['git checkout ' + targetLabel, 'run setup.d steps', 'reconcile .env', 'install deps (npm ci if lockfile, else npm install)', NO_DASH ? 'skip dashboard' : 'docker compose up -d --build (dashboard)', 'restart-with-rollback.sh (pm2 restart + verify + auto-rollback)'] };
     log('DRY RUN — no changes made.');
     if (JSON_OUT) console.log(JSON.stringify(plan, null, 2));
     releaseLock();
@@ -156,15 +171,16 @@ function done(code, summary) {
   phase('reconcile .env');
   run(process.execPath, [path.join(REPO, 'scripts', 'reconcile-env.js')]);
 
-  // deps (root workspace install). Failure here → roll the code back BEFORE touching services.
-  phase('npm install (root workspace)');
-  const inst = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
+  // deps (root workspace). Failure here → roll the code back BEFORE touching services.
+  phase('install deps (root workspace)');
+  const inst = installDeps();
   if (inst.code !== 0) {
-    log('npm install FAILED — rolling back code (services untouched, still on old build)');
+    log(`dep install FAILED (${inst.mode}); rolling back code (services untouched, still on old build)`);
     git('reset', '--hard', rollbackSha);
-    run('npm', ['install', '--no-audit', '--no-fund'], { cwd: REPO, timeout: 20 * 60 * 1000 });
-    return done(2, { error: 'npm install failed; rolled back', from: fromSha, to: fromSha });
+    installDeps();
+    return done(2, { error: 'dep install failed; rolled back', from: fromSha, to: fromSha });
   }
+  log(`deps installed via ${inst.mode}`);
 
   // dashboard (Docker) — separate lifecycle; best-effort, does not gate the core update
   if (!NO_DASH) {
