@@ -24,6 +24,7 @@ const git = async (...args) => (await execFileP('git', ['-C', REPO, ...args], { 
 /** How far behind the channel target are we? Never throws. Includes version + channel + changelog. */
 async function getUpdateStatus({ fetch = true, channel } = {}) {
   channel = channel || version.getChannel();
+  const managed = version.getManaged();
   try {
     if (fetch) { try { await git('fetch', '--quiet', '--tags', 'origin', 'main'); } catch (_) {} }
     const head = await git('rev-parse', 'HEAD');
@@ -39,9 +40,11 @@ async function getUpdateStatus({ fetch = true, channel } = {}) {
       behind = Number(await git('rev-list', '--count', `HEAD..${target}`)) || 0;
       if (behind) changelog = (await git('log', '--oneline', '--no-decorate', '-20', `HEAD..${target}`)).split('\n').filter(Boolean);
     }
-    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0, head: head.slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
+    // Managed installs surface how far behind they are (telemetry) but never report `available`: the
+    // platform owns updates, so nothing should offer an in-place Update button or auto-trigger.
+    return { ok: true, channel, version: version.readVersion(), latest_version: latestVersion, behind, available: behind > 0 && !managed.managed, managed: managed.managed, manager: managed.manager, head: head.slice(0, 7), remote: String(target).slice(0, 7), target: targetName, changelog, checked_at: Date.now() };
   } catch (e) {
-    return { ok: false, channel, version: version.readVersion(), behind: 0, available: false, error: e.message, checked_at: Date.now() };
+    return { ok: false, channel, version: version.readVersion(), behind: 0, available: false, managed: managed.managed, manager: managed.manager, error: e.message, checked_at: Date.now() };
   }
 }
 
@@ -61,6 +64,10 @@ function setAutoUpdate(on) {
  * updater (scripts/update.js). `mode: 'agent'` runs the LLM update session as an escape hatch.
  */
 function spawnUpdateSession({ by = 'operator', mode = 'deterministic', channel } = {}) {
+  // On a managed install the platform owns the code; neither the deterministic updater nor the agent
+  // escape hatch can rewrite it. Refuse instead of spawning a process that dies at the preflight.
+  const managed = version.getManaged();
+  if (managed.managed) return { managed: true, manager: managed.manager, started_at: Date.now() };
   const script = mode === 'agent' ? 'run-update-session.js' : 'update.js';
   const args = [path.join(__dirname, '..', 'scripts', script)];
   if (mode !== 'agent') { args.push('--by', by); if (channel) args.push('--channel', channel); }
@@ -69,8 +76,10 @@ function spawnUpdateSession({ by = 'operator', mode = 'deterministic', channel }
   return { pid: child.pid, started_at: Date.now(), mode };
 }
 
-// channel get/set live in shared/version; re-exported here so callers have one update surface.
+// channel get/set & the managed check live in shared/version; re-exported here so callers have one
+// update surface.
 const getChannel = version.getChannel;
 const setChannel = version.setChannel;
+const getManaged = version.getManaged;
 
-module.exports = { getUpdateStatus, isAutoUpdate, setAutoUpdate, spawnUpdateSession, getChannel, setChannel, REPO, AUTO_FLAG };
+module.exports = { getUpdateStatus, isAutoUpdate, setAutoUpdate, spawnUpdateSession, getChannel, setChannel, getManaged, REPO, AUTO_FLAG };
