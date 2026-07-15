@@ -17,6 +17,7 @@ const { spawnSync } = require('child_process');
 const REPO = path.join(__dirname, '..');
 const VERSION_FILE = path.join(REPO, 'VERSION');
 const CHANGELOG = path.join(REPO, 'CHANGELOG.md');
+const LOCK_FILE = path.join(REPO, 'package-lock.json');
 const PKG_FILES = ['package.json', 'core/package.json', 'connectors/package.json', 'cli/package.json', 'insights/collector/package.json', 'insights/dashboard/package.json'].map((p) => path.join(REPO, p));
 
 const argv = process.argv.slice(2);
@@ -64,7 +65,17 @@ if (cl.includes(marker)) {
 }
 
 const bumpPkg = (p) => { const t = fs.readFileSync(p, 'utf8'); return t.replace(/("version"\s*:\s*")[^"]+(")/, `$1${next}$2`); };
-const plan = { from: cur, to: next, tag, files: ['VERSION', 'CHANGELOG.md', ...PKG_FILES.map((p) => path.relative(REPO, p))], push: PUSH, gh: GH };
+
+// Refresh package-lock.json so the tag ships a lock matching the bumped manifests; `npm ci` on a
+// `stable`-channel install depends on it. Resolve-only (--package-lock-only): no node_modules, no
+// native build. Best-effort — a missing npm shouldn't sink a release, but a stale lock would.
+function refreshLock() {
+  const r = spawnSync('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund'], { cwd: REPO, encoding: 'utf8' });
+  if (r.status !== 0) { console.error('release: lockfile refresh failed, continuing without it: ' + ((r.stderr || '').trim().split('\n').pop() || '')); return false; }
+  return fs.existsSync(LOCK_FILE);
+}
+
+const plan = { from: cur, to: next, tag, files: ['VERSION', 'CHANGELOG.md', ...PKG_FILES.map((p) => path.relative(REPO, p)), ...(fs.existsSync(LOCK_FILE) ? ['package-lock.json'] : [])], push: PUSH, gh: GH };
 
 if (DRY) { console.log('DRY RUN release plan:\n' + JSON.stringify(plan, null, 2)); process.exit(0); }
 
@@ -73,7 +84,10 @@ fs.writeFileSync(VERSION_FILE, next + '\n');
 fs.writeFileSync(CHANGELOG, cl);
 for (const p of PKG_FILES) { try { fs.writeFileSync(p, bumpPkg(p)); } catch (e) { console.error('skip ' + p + ': ' + e.message); } }
 
-git('add', 'VERSION', 'CHANGELOG.md', ...PKG_FILES.map((p) => path.relative(REPO, p)));
+const lockRefreshed = refreshLock();
+const addFiles = ['VERSION', 'CHANGELOG.md', ...PKG_FILES.map((p) => path.relative(REPO, p))];
+if (lockRefreshed) addFiles.push('package-lock.json');
+git('add', ...addFiles);
 git('commit', '-m', `release: ${tag}`);
 git('tag', '-a', tag, '-m', notes ? `${tag}\n\n${notes}` : tag);
 console.log(`✅ committed + tagged ${tag} (was v${cur})`);
