@@ -78,6 +78,28 @@ The agent update session ([`scripts/run-update-session.js`](../scripts/run-updat
 `asmltr update --agent`. Use it only when the deterministic path fails on a genuinely novel install —
 you keep the "wild install" adaptability without depending on an LLM for routine updates.
 
+## Externally managed installs
+
+The updater assumes a writable git checkout it can `git reset --hard` & `npm install` into. That's the
+PM2-on-the-host install. Some installs don't have that shape: a package, an image, or a
+config-management deploy owns the code, & the tree may be read-only with no `.git`. On those, updating
+in place is the platform's job, not asmltr's.
+
+Mark such an install managed with `ASMLTR_UPDATE_MANAGED=<manager>` (the value names the manager, e.g.
+`host` or `docker`) or a `~/.asmltr/managed` flag file. When set:
+
+- [`scripts/update.js`](../scripts/update.js) exits early with code `6` & logs
+  `updates managed by <manager>; not updating in place`, before the git-checkout preflight. `--force`
+  overrides for a deliberate in-place attempt.
+- `GET /v2/update/status` reports `managed: true` & the manager name. It still shows how far behind the
+  install is (telemetry), but `available` stays `false`, so nothing offers an in-place Update button or
+  auto-triggers.
+- `POST /v2/update/run` refuses & returns `{ managed: true, manager }` rather than spawning a process
+  that would die at the preflight.
+
+Updates on a managed install come from the platform: rebuild the image, bump the package, re-run the
+config-management deploy.
+
 ## What is never touched on update
 
 Gitignored config + all runtime state: `.env`, `core/src/trust/seed.json`,
