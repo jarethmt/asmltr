@@ -42,7 +42,7 @@ const A = {
 };
 const SURFACE_COLOR = {
   discord: A.mag, telegram: A.cyn, github: A.grn, mcp: A.yel,
-  'eve-assistant-web': A.cyn, 'eve-assistant-native': A.cyn, 'claude-code': A.bold, core: A.bold, system: A.dim,
+  'assistant-web': A.cyn, 'assistant-native': A.cyn, 'eve-assistant-web': A.cyn, 'eve-assistant-native': A.cyn, 'claude-code': A.bold, core: A.bold, system: A.dim,
 };
 const paint = (surface, s) => (SURFACE_COLOR[surface] || ((x) => x))(s);
 
@@ -318,7 +318,7 @@ async function cmdAnnounce(rest) {
   }
   const text = words.join(' ');
   if (!text) throw new Error('usage: asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]\n' +
-    '  target: * (all) · a session id · surface:discord · identity:jareth');
+    '  target: * (all) · a session id · surface:discord · identity:<name>');
   const body = { text, target: opts.target, priority: opts.priority, from: opts.from, ttl: opts.ttl };
   const r = await fetch(CORE_BASE + '/v2/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then((x) => x.json()).catch((e) => ({ error: e.message }));

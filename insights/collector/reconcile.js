@@ -2,8 +2,8 @@
 /**
  * asmltr-insights — session reconciler (plan §B3).
  *
- * /tmp/eve-sessions-enhanced.json stays the SOURCE OF TRUTH for Claude Code
- * session liveness (driven by the existing hooks, read by the morning brief).
+ * The host session tracker (ASMLTR_TRACKER_PATH) stays the SOURCE OF TRUTH for
+ * Claude Code session liveness (driven by the host hooks).
  * We MIRROR it into the sessions table — never write back — and apply a
  * LIVENESS CORRECTION: if a row says status=active but its pid is dead, we
  * record it as ended. That's what makes the dashboard's instance count honest
@@ -16,7 +16,7 @@ const path = require('path');
 
 // Tracker sources to mirror. Each entry becomes a session row. A source sets the
 // DEFAULTS for its entries (fields on the entry itself win). Both are optional.
-//  - ASMLTR_TRACKER_PATH: the host hook tracker (e.g. Eve's) — screen-based, one identity.
+//  - ASMLTR_TRACKER_PATH: the host hook tracker — screen-based, one identity.
 //  - ASMLTR_CLI_TRACKER_PATH: `asmltr claude` wrapped sessions — tmux, per-entry identity.
 const TRACKER_PATH = process.env.ASMLTR_TRACKER_PATH || '';
 const CLI_TRACKER_PATH = process.env.ASMLTR_CLI_TRACKER_PATH || path.join(os.homedir(), '.asmltr', 'cli-sessions.json');

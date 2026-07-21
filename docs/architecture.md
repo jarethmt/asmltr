@@ -106,8 +106,8 @@ module, so the wire format cannot drift. Each event is one JSON object:
   "payload": {}, "source": "core" }
 ```
 
-- **`surface`** — one of `discord`, `telegram`, `voice`, `eve-assistant-web`,
-  `eve-assistant-native`, `mcp`, `github`, `openai`, `claude-code`, `system`, `core`.
+- **`surface`** — one of `discord`, `telegram`, `voice`, `assistant-web`,
+  `assistant-native`, `mcp`, `github`, `openai`, `claude-code`, `system`, `core`.
 - **`event_type`** — `inbound`, `outbound`, `thinking`, `tool`, `tool_result`,
   `token-usage`, `identity_resolved`, `moderation_decision`, `session-start`,
   `session-end`, `system-sample`, `notification`, `control`.

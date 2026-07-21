@@ -48,7 +48,7 @@ Discoverable live at `GET /types` on the manager. From the connector's `configSc
 |---|---|---|
 | `repos` | — | List of `{ owner, repo }` to watch (**required**). |
 | `pat_bws_key` | — | Secret key name for this account's GitHub PAT (**required**). |
-| `mention` | `*eve` | Literal trigger token that wakes the assistant (e.g. `@bot`). |
+| `mention` | `*<assistant-name>` | Literal trigger token that wakes the assistant (e.g. `@bot`). |
 | `poll_interval_ms` | `20000` | How often to poll each repo. |
 | `workspace_dir` | `~/.asmltr/github-repos` | Where repos are shallow-cloned. |
 | `clone_repos` | `true` | Clone repos for code-awareness. |

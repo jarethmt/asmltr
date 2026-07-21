@@ -27,8 +27,11 @@ connectors/types/discord/channel-aliases.json
 
 # Private per-install working notes
 CLAUDE.local.md
-insights/docker-compose.eve.yml
+insights/docker-compose.*.yml
 connectors/types/openai/keys.json
 
 # asmltr per-install MCP registry (secret-bearing env)
 .asmltr/mcp.json
+
+# generated docs build output (deployed via mkdocs gh-deploy, not from here)
+/site/

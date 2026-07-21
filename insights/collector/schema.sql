@@ -11,7 +11,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS events (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   ts          INTEGER NOT NULL,                 -- unix ms
-  surface     TEXT    NOT NULL,                 -- discord|telegram|eve-assistant-web|eve-assistant-native|mcp|github|claude-code|system|core
+  surface     TEXT    NOT NULL,                 -- discord|telegram|assistant-web|assistant-native|mcp|github|claude-code|system|core
   session_id  TEXT,                             -- conversation/session id (nullable for system events)
   identity    TEXT,                             -- resolved user/channel key
   event_type  TEXT    NOT NULL,                 -- inbound|outbound|tool|token-usage|identity_resolved|moderation_decision|session-start|session-end|system-sample|notification|control
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   working_dir        TEXT,
   task               TEXT,
   title              TEXT,                      -- short generated label for the session card
-  location           TEXT,                      -- human origin, e.g. "FabLabz · #eve" (Discord server · channel)
+  location           TEXT,                      -- human origin, e.g. "Acme · #general" (Discord server · channel)
   status             TEXT,                      -- active|idle|ended|paused
   started_unix       INTEGER,
   last_activity_unix INTEGER,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   engine_session_id  TEXT,                      -- claude session uuid for --resume
   worktree           TEXT,                      -- git worktree path for diff/attach cwd
   claim_state        TEXT DEFAULT 'free',       -- free|channel-running|terminal-claimed|paused
-  claimed_by         TEXT,                      -- e.g. cli:eve@pts/3 or dashboard:<user>
+  claimed_by         TEXT,                      -- e.g. cli:user@pts/3 or dashboard:<user>
   multiplexer        TEXT DEFAULT 'none',       -- none|tmux|screen
   tmux_target        TEXT,                      -- tmux session name when taken over
   updated_unix       INTEGER NOT NULL

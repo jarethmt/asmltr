@@ -94,7 +94,7 @@ Portable defaults; override to relocate the SQLite stores and workspaces.
 
 | Variable | Default | What |
 |---|---|---|
-| `ASMLTR_CORE_DB` | `core/data/eve-core.db` | Sessions store |
+| `ASMLTR_CORE_DB` | `core/data/asmltr-core.db` | Sessions store |
 | `ASMLTR_TRUST_DB` | `core/data/trust.db` | Trust store (principals/identifiers/roles/grants) |
 | `ASMLTR_TRUST_SEED` | `core/src/trust/seed.json` | Trust seed file |
 | `ASMLTR_INSIGHTS_DB` | `insights/collector/data/insights.db` | Collector telemetry store |
@@ -141,7 +141,7 @@ or read `connectors/types/<type>/index.js`. Highlights (defaults shown):
 | `discord` | `bot_token_bws_key` (**required**), `http_port` (3016), `dm_allowed_user_id`, `channels_default`, `voice_id`, `elevenlabs_key_name`, autonomous-response limits |
 | `telegram` | `bot_token_bws_key` (**required**), `allowed_chat_ids`, `http_port` (3008), `photo_dir` |
 | `mcp` | `port` (3018), `bind_host` (127.0.0.1), `base_url` |
-| `github` | `repos` + `pat_bws_key` (**required**), `mention` (`*eve`), `poll_interval_ms`, `clone_repos`, `stream`, `dry_run` (default true) |
+| `github` | `repos` + `pat_bws_key` (**required**), `mention` (`*<assistant-name>`), `poll_interval_ms`, `clone_repos`, `stream`, `dry_run` (default true) |
 | `openai` | `port` (3025), `bind_host` (127.0.0.1), `model_name` (`asmltr`), `keys_file`, `require_key` (true) |
 
 Config that carries secrets is stored as a **secret key name** (e.g. `bot_token_bws_key`,

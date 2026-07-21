@@ -88,7 +88,7 @@ async function onSubmit() {
           v-model="form.display_name"
           type="text"
           class="field-input"
-          placeholder="e.g. Trevor Yahn"
+          placeholder="e.g. Jane Doe"
         />
       </div>
 

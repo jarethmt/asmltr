@@ -103,6 +103,6 @@ you keep the "wild install" adaptability without depending on an LLM for routine
 
 Gitignored config + all runtime state: `.env`, `core/src/trust/seed.json`,
 `connectors/types/mcp/clients.json`, `connectors/types/discord/channel-aliases.json`,
-`connectors/types/openai/keys.json`, `insights/docker-compose.eve.yml`, `CLAUDE.local.md`, the SQLite
+`connectors/types/openai/keys.json`, `insights/docker-compose.<instance>.yml`, `CLAUDE.local.md`, the SQLite
 databases (`core/data`, `connectors/manager/data`, `insights/collector/data`, `data/trust.db`),
 `~/.asmltr/`, and the GitHub worktree cache. `git reset --hard` leaves gitignored paths alone by design.

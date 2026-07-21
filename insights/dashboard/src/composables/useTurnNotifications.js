@@ -37,7 +37,7 @@ function payloadOf(ev) {
 function fire(ev) {
   if (!supported || Notification.permission !== 'granted') return
   // Skip the dashboard's own web chats — you're already looking at those replies.
-  if (ev.surface === 'eve-assistant-web') return
+  if (ev.surface === 'assistant-web' || ev.surface === 'eve-assistant-web') return // legacy id
   const body = String(payloadOf(ev).text || '').replace(/\s+/g, ' ').slice(0, 140) || 'A session turn just completed.'
   try {
     const n = new Notification(`${cap(ev.surface || 'session')} · reply ready`, {

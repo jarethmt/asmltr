@@ -214,7 +214,10 @@ function done(code, summary) {
 
   // dashboard (Docker) — separate lifecycle; best-effort, does not gate the core update
   if (!NO_DASH) {
-    const compose = ['insights/docker-compose.eve.yml', 'insights/docker-compose.yml'].map((f) => path.join(REPO, f)).find((f) => fs.existsSync(f));
+    // Prefer a per-instance override (insights/docker-compose.<name>.yml, gitignored), else the base file.
+    const insightsDir = path.join(REPO, 'insights');
+    const overrides = (() => { try { return fs.readdirSync(insightsDir).filter((f) => /^docker-compose\..+\.yml$/.test(f)).map((f) => path.join(insightsDir, f)); } catch (_) { return []; } })();
+    const compose = [...overrides, path.join(insightsDir, 'docker-compose.yml')].find((f) => fs.existsSync(f));
     const hasDocker = run('docker', ['--version']).code === 0;
     if (compose && hasDocker) {
       phase('rebuild dashboard (docker compose)');

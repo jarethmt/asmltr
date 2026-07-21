@@ -44,8 +44,8 @@ key name, not the secret** — and resolved from the vault only when the integra
   "type": "webdav",
   "name": "3DPP Nextcloud",
   "config": {
-    "base_url": "https://files.example.com/remote.php/dav/files/eve",
-    "username": "eve@example.com",
+    "base_url": "https://files.example.com/remote.php/dav/files/user",
+    "username": "assistant@example.com",
     "root": "asmltr-silos",
     "password_ref": "nextcloud_password"   // ← vault key name; the secret lives in the vault
   }

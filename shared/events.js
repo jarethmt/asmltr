@@ -5,7 +5,7 @@
  * This is the ONE interface between asmltr-core (producer) and asmltr-insights
  * collector (consumer). Both tracks import this module so the wire format can
  * never drift between them. The bots and the Claude Code hook also emit this
- * shape (see insights/collector + scripts/automation/hooks/eve-session-emit.sh).
+ * shape (see insights/collector + the host session-emit hook).
  *
  * Wire shape (one JSON object per event):
  *   { v, ts, surface, session_id, identity, event_type,
@@ -20,7 +20,9 @@ const SURFACES = Object.freeze([
   'telegram',
   'email',       // SMTP/IMAP mailbox (the assistant's own address)
   'voice',       // voice-channel sessions (e.g. Discord voice / meetings)
-  'eve-assistant-web',
+  'assistant-web',       // browser dashboard acting as a connector
+  'assistant-native',    // native/mobile assistant app
+  'eve-assistant-web',   // legacy ids (pre-0.8 emitters) — kept valid for historical events
   'eve-assistant-native',
   'mcp',
   'github',

@@ -3,7 +3,7 @@
  * Auto-provision a `<agent-name>` command alias for `asmltr claude`.
  *
  * When an install sets its ASSISTANT_NAME, we can drop a tiny executable shim named after the agent
- * (e.g. `eve`) onto PATH so the operator launches a monitored session by just typing the assistant's
+ * (e.g. `aria`) onto PATH so the operator launches a monitored session by just typing the assistant's
  * name — the muscle-memory entrypoint, now backed by asmltr. Part of the identity/Likeness plane:
  * the name you configure becomes the name you invoke.
  *

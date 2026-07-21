@@ -88,7 +88,7 @@ const TYPE_FIELDS = {
   local: [{ key: 'root', label: 'Root path', placeholder: '/data/asmltr', mono: true }],
   webdav: [
     { key: 'base_url', label: 'Base URL', placeholder: 'https://dav.example.com/remote.php/dav', mono: true },
-    { key: 'username', label: 'Username', placeholder: 'eve' },
+    { key: 'username', label: 'Username', placeholder: 'user' },
     { key: 'root', label: 'Root', placeholder: '/asmltr', mono: true },
     { key: 'password_ref', label: 'Password', ref: true }
   ],

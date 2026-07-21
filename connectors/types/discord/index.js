@@ -1,9 +1,9 @@
 'use strict';
 /**
- * asmltr connector type: DISCORD — full-feature port of eve-discord-bot.
+ * asmltr connector type: DISCORD — full-feature Discord adapter.
  *
  * All Discord-specific behavior stays HERE (the plugin): hierarchical memory,
- * autonomous-participation logic, !eve control commands, code-block reformat +
+ * autonomous-participation logic, control commands, code-block reformat +
  * chunking, and the /send-message HTTP endpoint (message-discord depends on it).
  * The LLM turn goes through asmltr-core: the rich Discord context + server-aware
  * authorization rides as `system_prompt_extra`; content.text is the clean user
@@ -317,9 +317,9 @@ async function start(ctx) {
 - THIS message is from **${message.author.username}**. ${mentionLine} Address your reply to ${message.author.username}. Do NOT greet or address anyone else unless THIS message is literally from them — a mention of someone is not that person speaking.
 
 MULTI-AGENT CHANNEL — CRITICAL:
-This channel may contain OTHER AI assistants and bots besides you. A message is FOR YOU only if it @-mentions you, addresses you by name ("${NAME}"), directly continues/answers something YOU said, or is an open question to the room that you are clearly the right one to answer. A message is NOT for you if it addresses a DIFFERENT agent or bot by name (e.g. someone saying "moneo, ..." or testing another bot), is a reply aimed at another agent, or simply isn't directed at you. **If the message is not for you, you MUST NOT reply — output ONLY the token ${NO_REPLY} and nothing else.** When unsure in a busy multi-agent channel, choose ${NO_REPLY}.
+This channel may contain OTHER AI assistants and bots besides you. A message is FOR YOU only if it @-mentions you, addresses you by name ("${NAME}"), directly continues/answers something YOU said, or is an open question to the room that you are clearly the right one to answer. A message is NOT for you if it addresses a DIFFERENT agent or bot by name (e.g. someone saying "some-other-bot, ..." or testing another bot), is a reply aimed at another agent, or simply isn't directed at you. **If the message is not for you, you MUST NOT reply — output ONLY the token ${NO_REPLY} and nothing else.** When unsure in a busy multi-agent channel, choose ${NO_REPLY}.
 
-Those other agents are CONVERSATIONAL PEERS in this channel — not tools, systems, or data sources. If someone asks you to ask / relay / check something WITH another agent (e.g. "ask Thor what time it is"), do NOT try to answer on their behalf and do NOT look them up with your tools or search. Just post a normal message addressing that agent by name (e.g. "Thor, what time is it for Jareth?") — they read this channel and will answer for themselves. Talking TO another agent by name is a valid reply here.
+Those other agents are CONVERSATIONAL PEERS in this channel — not tools, systems, or data sources. If someone asks you to ask / relay / check something WITH another agent (e.g. "ask the finance-bot for the numbers"), do NOT try to answer on their behalf and do NOT look them up with your tools or search. Just post a normal message addressing that agent by name (e.g. "finance-bot, can you pull the numbers?") — they read this channel and will answer for themselves. Talking TO another agent by name is a valid reply here.
 
 The running back-and-forth of THIS channel is already in your session history (including messages you observed but didn't reply to, folded in as context) — don't ask for it to be repeated.${cross}
 
@@ -378,13 +378,13 @@ RESPONSE RULES:
       const context = getRelevantContext(message);
       const sid = message.guild?.id;
       // per-CHANNEL session (was per-guild): prevents cross-channel/cross-speaker
-      // context bleed — e.g. resuming a Moneo-heavy guild session in a different
-      // channel and continuing to address Moneo.
+      // context bleed — e.g. resuming a session dominated by one other agent in a
+      // different channel and continuing to address that agent.
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
       let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
       text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
       // Vision: download supported image attachments and pass them as real image
-      // content (base64) so the assistant actually SEES them — not a CDN URL she can't open.
+      // content (base64) so the assistant actually SEES them — not a CDN URL it can't open.
       // Non-image / oversized / unsupported attachments stay as a text URL mention.
       const SUPPORTED_IMG = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       const MAX_IMG_BYTES = 5 * 1024 * 1024;
@@ -437,11 +437,11 @@ RESPONSE RULES:
 
       // Directly-addressed messages can't be [[NO_REPLY]], so it's safe to stream intermediary
       // narration blocks to the thread LIVE. "Addressed" = @-mention, DM, forced, OR the message
-      // leads/trails with the assistant's NAME (addressesEve) — the common "Eve, do X" case that was
+      // leads/trails with the assistant's NAME (addressesName) — the common "<name>, do X" case that was
       // previously falling back to the non-streaming path and dumping everything at the end. Passive
       // multi-agent listening (name absent) still uses the non-streaming path.
       const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user)
-        || addressesEve(message.cleanContent || message.content || '');
+        || addressesName(message.cleanContent || message.content || '');
       let replyText = '';
       if (streamSteps && addressed) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
@@ -495,7 +495,7 @@ RESPONSE RULES:
   // we stay current on messages addressed to OTHER agents (or ambient chatter) without answering
   // them — decoupling "receive" from "reply" (the OpenClaw model). Fire-and-forget; returns [].
   // Discord "reply" reference → a short prefix so the model knows WHAT a message is answering. Without
-  // it, in a busy multi-agent channel the agent can't tell that e.g. Moneo replied to one specific
+  // it, in a busy multi-agent channel the agent can't tell that e.g. another agent replied to one specific
   // earlier line vs. spoke into the room. Resolves the referenced message's author + a snippet; marks
   // the assistant's own messages as "(you)". Best-effort (deleted/unfetchable reference → no prefix).
   async function replyRef(message) {
@@ -584,7 +584,7 @@ RESPONSE RULES:
   // --- gatekeeper: does this spoken utterance ADDRESS the assistant? (heuristic v1) --------
   // Cheap/free/instant — no per-utterance model call. Upgrade path: a Haiku confirm
   // for ambiguous "the assistant" mentions. Conservative on purpose to avoid interrupting.
-  function addressesEve(text) {
+  function addressesName(text) {
     const t = text.trim().toLowerCase();
     return new RegExp(`^(hey |hi |ok |okay |yo |so |well |um+ |uh+ |,|\\s)*${WAKE}\\b`).test(t) // LEADS with the name ("<name>, do X")
         || new RegExp(`\\b(hey|ok|okay|hi|yo) ${WAKE}\\b`).test(t)                              // "hey <name>" anywhere
@@ -666,7 +666,7 @@ RESPONSE RULES:
     const active = (voiceActive.get(guildId) || 0) > Date.now();
 
     // spoken "leave voice" → actually disconnect from the voice channel
-    if ((addressesEve(text) || active) && LEAVE_RE.test(lc)) {
+    if ((addressesName(text) || active) && LEAVE_RE.test(lc)) {
       voiceActive.delete(guildId); voiceText.delete(guildId); voice.leave(guildId); setVoiceStatus(null);
       if (ch) ch.send('👋 Left the voice channel.').catch(() => {});
       await uploadTranscript(guildId, ch); // ship the full-session .txt to the origin channel
@@ -681,7 +681,7 @@ RESPONSE RULES:
     }
 
     // For me? addressed by name, or inside an active follow-up window. Otherwise just transcribe.
-    if (!addressesEve(text) && !active) return;
+    if (!addressesName(text) && !active) return;
 
     if (voiceBusy.has(guildId)) return; // don't stack replies
     voiceBusy.add(guildId);

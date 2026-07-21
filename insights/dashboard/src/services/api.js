@@ -203,7 +203,7 @@ export const update = {
   setChannel: (channel) => postCore('/v2/update/channel', { channel }),
 }
 
-// Web chat — the browser acts as a connector. Post an `eve-assistant-web` envelope to the core's
+// Web chat — the browser acts as a connector. Post an `assistant-web` envelope to the core's
 // streaming endpoint and get the reply token-by-token; the core records the whole exchange, so the
 // session shows up in Live like any other. The operator identity is resolved server-side (the
 // dashboard never hardcodes it), so `sender` here is just a placeholder the core overwrites.
@@ -213,7 +213,7 @@ export const webChat = {
   send({ conversation_key, text, attachments = [], working_dir = null, system_prompt_extra = null }, handlers = {}) {
     const ac = new AbortController()
     const envelope = {
-      channel: 'eve-assistant-web',
+      channel: 'assistant-web',
       conversation_key,
       sender: { raw_id: 'dashboard', raw_username: 'dashboard' },
       content: { text, attachments },
@@ -294,7 +294,7 @@ export const voice = {
   speak({ conversation_key, text }, handlers = {}) {
     const ac = new AbortController()
     const envelope = {
-      channel: 'eve-assistant-web', conversation_key,
+      channel: 'assistant-web', conversation_key,
       sender: { raw_id: 'dashboard', raw_username: 'dashboard' },
       content: { text }, delivery: 'sync', public: false
     }

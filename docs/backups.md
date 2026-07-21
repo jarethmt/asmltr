@@ -10,7 +10,7 @@ the CLI **or** the dashboard.
 |-----------|--------|-----|
 | **SQLite DBs** | core sessions, trust store, insights | the SQLite **online-backup API** — a *consistent* snapshot, safe against the live running services (never a torn file copy) |
 | **Home store** | `~/.asmltr` | identity + facets, `integrations.json`, the **silos** (Self + data), `context.d` |
-| **Repo config** | gitignored, secret-bearing | `.env`, connector configs, trust `seed.json`, the Eve compose file, `CLAUDE.local.md` |
+| **Repo config** | gitignored, secret-bearing | `.env`, connector configs, trust `seed.json`, the instance compose override, `CLAUDE.local.md` |
 
 A `manifest.json` (version, label, timestamp, component list, per-artifact SHA-256) rides inside the archive.
 

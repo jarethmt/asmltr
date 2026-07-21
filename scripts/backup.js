@@ -8,7 +8,7 @@
  *     snapshot safe against the live, running services (never a torn file copy);
  *   • the `~/.asmltr` home store — identity + facets, integrations.json, the silos (Self + data), context.d;
  *   • the restore-critical repo config (gitignored, secret-bearing): .env, connector configs, trust seed,
- *     the Eve compose file, CLAUDE.local.md.
+ *     the instance compose override, CLAUDE.local.md.
  *
  * The archive is a gzipped tar, encrypted with **AES-256-GCM under a key derived from a passphrase**
  * (scrypt) — deliberately independent of the TRUST vault, so a *vault loss is itself recoverable* from a
@@ -46,7 +46,7 @@ function requireBetterSqlite() {
 
 // Consistent-snapshot sources. Paths mirror the modules that own them (env overrides respected).
 const SQLITE_DBS = [
-  { key: 'core', path: process.env.ASMLTR_CORE_DB || path.join(REPO, 'core', 'data', 'eve-core.db') },
+  { key: 'core', path: require('../core/src/db-path').coreDbPath() },
   { key: 'trust', path: process.env.ASMLTR_TRUST_DB || path.join(REPO, 'core', 'data', 'trust.db') },
   { key: 'insights', path: process.env.ASMLTR_INSIGHTS_DB || path.join(REPO, 'insights', 'collector', 'data', 'insights.db') },
 ];
@@ -60,8 +60,12 @@ const CONFIG_FILES = (process.env.ASMLTR_BACKUP_CONFIG_FILES != null
     'connectors/types/openai/keys.json',
     'connectors/types/discord/channel-aliases.json',
     'core/src/trust/seed.json',
-    'insights/docker-compose.eve.yml',
   ]);
+// Also capture any per-instance dashboard compose override (insights/docker-compose.<name>.yml,
+// gitignored) so a restore can redeploy the dashboard. Skipped when the file list is env-overridden.
+if (process.env.ASMLTR_BACKUP_CONFIG_FILES == null) {
+  try { for (const f of fs.readdirSync(path.join(REPO, 'insights')).filter((n) => /^docker-compose\..+\.yml$/.test(n))) CONFIG_FILES.push('insights/' + f); } catch (_) {}
+}
 
 // ── crypto ───────────────────────────────────────────────────────────────────
 function deriveKey(passphrase, salt) { return crypto.scryptSync(Buffer.from(passphrase, 'utf8'), salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }); }

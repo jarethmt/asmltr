@@ -64,7 +64,7 @@ order explains all the behavior:
 6. **Voice-session suppression** → while it's in an active voice session in this guild, it answers
    by *voice* only; non-`@mention` text is dropped (prevents a doubled spoken + text reply).
 7. **Directed at another agent** → if `ignore_other_mentions` (default on) and the message `@mentions`
-   another user/bot **or leads with another agent's name** ("Moneo, …") and *not* her → ignore.
+   another user/bot **or leads with another agent's name** ("some-other-bot, …") and *not* the assistant → ignore.
    (Plain names aren't real Discord `@`-mentions, so both cases are checked.)
 8. **Silenced** → if `silence`d, only respond to a direct `@mention`.
 9. **Autonomous participation** (`shouldRespondTo`) → otherwise, respond if `@mentioned`, the message

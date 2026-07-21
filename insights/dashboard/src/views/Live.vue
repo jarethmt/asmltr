@@ -17,7 +17,7 @@ let ticker = null
 
 // --- new web session ---------------------------------------------------------
 // Start a fresh session right from the browser: the dashboard acts as a connector
-// (channel `eve-assistant-web`). The working dir picks the "flavour" — /root gives a
+// (channel `assistant-web`). The working dir picks the "flavour" — /root gives a
 // full root session, a project path gives a scoped one. First message spawns it server-side.
 const newOpen = ref(false)
 const newWorkdir = ref('')
@@ -31,7 +31,7 @@ function startNew() {
   const wd = newWorkdir.value.trim()
   windows.openSession({
     session_id: `web:${uuid}`,
-    surface: 'eve-assistant-web',
+    surface: 'assistant-web',
     kind: 'ephemeral',
     status: 'idle',
     identity: 'web · you',
@@ -198,7 +198,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
     </PageHeader>
 
     <!-- new web session: pick a working dir, then chat -->
-    <ModalShell v-if="newOpen" title="New session" subtitle="Runs right here in the browser (channel: eve-assistant-web)" @close="newOpen = false">
+    <ModalShell v-if="newOpen" title="New session" subtitle="Runs right here in the browser (channel: assistant-web)" @close="newOpen = false">
       <div class="space-y-4">
         <p class="text-sm text-slate-400">
           The dashboard acts as a connector — your messages stream through the core and the session

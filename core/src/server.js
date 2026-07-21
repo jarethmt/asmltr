@@ -19,7 +19,7 @@ require('../../shared/loadenv'); // load <repo>/.env before anything reads confi
  * MUST run on host under PM2 (spawns local claude binary) and bind 127.0.0.1.
  */
 
-// Headless-spawn env hygiene (mirrors eve-query-proxy's working recipe): allow
+// Headless-spawn env hygiene (the known-good recipe): allow
 // the SDK to spawn `claude` even when launched from inside a Claude session, and
 // keep nested spawning unblocked. Harmless under PM2 (these are usually unset).
 // NOTE: deliberately NO ANTHROPIC_API_KEY — execution stays on the Claude subscription.
@@ -111,7 +111,7 @@ const inFlight = new Map();
 function truncate(v, n = 400) { try { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? s.slice(0, n) + '…' : s; } catch { return ''; } }
 
 // A model that decides a message isn't for it should emit the bare [[NO_REPLY]] token — but it often
-// PROSE-refuses instead ("That's addressed to Moneo, not me…"), which then gets POSTED as spam. This
+// PROSE-refuses instead ("That's addressed to another agent, not me…"), which then gets POSTED as spam. This
 // catches that failure mode as a fallback silence: a SHORT reply whose whole content is meta-commentary
 // about not being the addressee / having nothing to add. Length-capped + adjacency-specific to avoid
 // suppressing a real reply that merely mentions who a message was addressed to. Channel-agnostic.
@@ -131,8 +131,9 @@ function toolResultText(content) {
 const NAME = process.env.ASSISTANT_NAME || 'the assistant';
 const CHANNEL_LABELS = {
   discord: 'Discord', telegram: 'Telegram', github: 'GitHub (issue thread)',
-  mcp: 'an MCP client', 'eve-assistant-web': 'a web assistant app',
-  'eve-assistant-native': 'a mobile assistant app', core: 'a direct API call',
+  mcp: 'an MCP client', core: 'a direct API call',
+  'assistant-web': 'a web assistant app', 'assistant-native': 'a mobile assistant app',
+  'eve-assistant-web': 'a web assistant app', 'eve-assistant-native': 'a mobile assistant app', // legacy ids
 };
 function buildChannelAwareness(e, resolved) {
   const NAME = identity.name(); // live (GUI-editable) — not the module-load env const
@@ -262,7 +263,7 @@ async function handle(envelope, opts = {}) {
   // Medium awareness FIRST (applies to every channel) — the model's runtime is
   // Claude Code, but the USER is on this connector's channel. Without this, "what
   // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
-  // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the Thor
+  // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the peer-drift
   // incident) + the living layer (preferences + story). Applies to every channel.
   let systemPrompt = identity.fullIdentity() + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
@@ -914,13 +915,13 @@ app.post('/v2/backups/import', express.raw({ type: 'application/octet-stream', l
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// The dashboard is a browser CONNECTOR: it posts `eve-assistant-web` envelopes but must not
+// The dashboard is a browser CONNECTOR: it posts `assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
-// from config or the reverse proxy's Authelia-resolved user, so the same build works anywhere.
+// from config or the reverse proxy's resolved user, so the same build works anywhere.
 // The browser sends a placeholder sender; we overwrite raw_id with the real owner here.
 function normalizeWebSender(req) {
   const b = req.body;
-  if (!b || b.channel !== 'eve-assistant-web') return;
+  if (!b || (b.channel !== 'assistant-web' && b.channel !== 'eve-assistant-web')) return; // accept legacy id
   const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User');
   if (owner) b.sender = { ...(b.sender || {}), raw_id: String(owner), raw_username: (b.sender && b.sender.raw_username) || 'dashboard' };
 }
@@ -937,11 +938,11 @@ app.post('/v2/upload', (req, res) => {
     if (!buffer.length) return res.status(400).json({ error: 'empty file' });
     const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User') || 'dashboard';
     const rec = require('../../shared/uploads').save({
-      channel: 'eve-assistant-web', buffer, filename, mime,
+      channel: 'assistant-web', buffer, filename, mime,
       sender: 'dashboard', senderId: String(owner), conversationKey: conversation_key || null,
       kind: /^image\//.test(mime || '') ? 'image' : 'document',
     });
-    record({ surface: 'eve-assistant-web', session_id: conversation_key || null, event_type: 'control',
+    record({ surface: 'assistant-web', session_id: conversation_key || null, event_type: 'control',
       identity: String(owner), source: 'core', payload: { action: 'upload', name: rec.filename, path: rec.path, bytes: buffer.length } });
     res.json({ ok: true, file: { path: rec.path, name: rec.filename, mime: rec.mime || mime || null, kind: rec.kind, bytes: buffer.length } });
   } catch (err) {
@@ -1056,7 +1057,7 @@ app.post('/v2/tts', async (req, res) => {
 });
 
 // Serve a local artifact the agent created, for download through the dashboard chat. Guarded by
-// Authelia (jareth-only) in front of the /v2 proxy + localhost-only core. `?stat=1` returns metadata
+// a reverse proxy (owner-only auth) in front of the /v2 proxy + localhost-only core. `?stat=1` returns metadata
 // (the chat uses it to decide whether to show a download chip); otherwise streams as an attachment.
 app.get('/v2/file', (req, res) => {
   const fs = require('fs'), path = require('path'), os = require('os');
@@ -1195,8 +1196,8 @@ app.post('/v2/handle', async (req, res) => {
   }
 });
 
-// Back-compat shim — accepts the exact eve-query-proxy /query request shape so
-// unmigrated channels keep working. Maps the old sessionId to a conversation_key.
+// Back-compat shim — accepts the legacy /query request shape so unmigrated
+// clients keep working. Maps the old sessionId to a conversation_key.
 // NOTE (Phase 1): parity vs the old proxy (incl. system-prompt-wrapped messages)
 // is verified by replaying recorded query-logs before any channel cuts over.
 app.post('/query', async (req, res) => {

@@ -92,7 +92,7 @@ function startListening(guildId, client, { transcribe, onUtterance, log = () => 
     decoder.on('end', async () => {
       active.delete(userId);
       const pcm = Buffer.concat(chunks);
-      if (pcm.length < 48000 * 2 * 2 * 0.3) return; // < ~0.3s → too short (still keeps a crisp "Eve")
+      if (pcm.length < 48000 * 2 * 2 * 0.3) return; // < ~0.3s → too short (still keeps a crisp wake word)
       if (rmsInt16(pcm) < 300) return;              // near-silent → skip (kills STT silence-hallucinations)
       try {
         const text = (await transcribe(pcmToWav(pcm)) || '').trim();

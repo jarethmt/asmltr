@@ -13,7 +13,7 @@
 const path = require('path');
 const Database = require('better-sqlite3');
 
-const DB_PATH = process.env.ASMLTR_CORE_DB || path.join(__dirname, '..', 'data', 'eve-core.db');
+const DB_PATH = require('./db-path').coreDbPath();
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.exec(`CREATE TABLE IF NOT EXISTS drafts (

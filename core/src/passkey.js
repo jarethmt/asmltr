@@ -6,7 +6,7 @@
  *
  * RP binding: passkeys are tied to a domain. `rpID` + `origin` come from env
  * (ASMLTR_AUTH_RP_ID / ASMLTR_AUTH_ORIGIN) or are derived from the request's Origin header, so it works
- * on Eve's box (asmltr.eve.thoughtspacedesigns.com) without extra config.
+ * on a single-host install without extra config.
  */
 const {
   generateRegistrationOptions, verifyRegistrationResponse,

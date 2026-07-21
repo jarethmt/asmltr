@@ -1,6 +1,6 @@
 'use strict';
 /**
- * asmltr connector type: TELEGRAM (thin adapter — the eve-messaging replacement).
+ * asmltr connector type: TELEGRAM (thin adapter over the Bot API).
  *
  * Transport stays here (it's HOW Telegram works): polling, photo download,
  * sendMessage/Photo/Document, and the :3008 HTTP endpoints that outbound helper scripts and
@@ -11,7 +11,7 @@
  * conversation_key = telegram:<instanceId>:user:<userId>
  *
  * NOTE: only ONE poller may hold a bot token at a time — register this DISABLED
- * and enable it only after stopping the old eve-messaging bot (the cutover).
+ * and enable it only after stopping any other poller on the same token (the cutover).
  */
 
 const fs = require('fs');

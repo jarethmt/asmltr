@@ -115,7 +115,7 @@ proxy-value tokens), not the UI's.
 If your install currently resolves secrets from another provider (e.g. Bitwarden via
 `ASMLTR_SECRET_CMD`), enabling the vault is additive: the vault is tried first, the old provider is the
 fallback. Migrate at your pace — copy each secret into the vault, verify it resolves, then disable the
-old provider. On Eve's reference install every runtime secret (connector tokens + voice keys) lives in
+old provider. On a reference install every runtime secret (connector tokens + voice keys) lives in
 the vault and the Bitwarden provider is off.
 
 ## KMS (encryption-at-rest)

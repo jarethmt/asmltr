@@ -14,7 +14,7 @@ const fs = require('fs');
 const os = require('os');
 const Database = require('better-sqlite3');
 
-const DB_PATH = process.env.ASMLTR_CORE_DB || path.join(__dirname, '..', 'data', 'eve-core.db');
+const DB_PATH = require('./db-path').coreDbPath();
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);

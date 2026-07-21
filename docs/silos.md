@@ -10,7 +10,7 @@ A directory is a silo **iff** it carries a `.silo/manifest.json` marker — exac
 directory a repo. The manifest records identity + provenance:
 
 ```json
-{ "id": "self", "name": "Eve — Self", "type": "self",
+{ "id": "self", "name": "Assistant — Self", "type": "self",
   "manifest_version": 1, "created_with": "0.5.0", "min_asmltr": "0.5.0",
   "created_at": 1752633600000, "storage": { "backend": "local" } }
 ```

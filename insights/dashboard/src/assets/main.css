@@ -6,7 +6,7 @@
 
 @layer base {
   /* Brand colors as RGB channels — the identity "signature colors" override these live at runtime
-     (useBrandTheme). Defaults = Eve's violet/pink. */
+     (useBrandTheme). Defaults = a violet/pink palette. */
   :root {
     --brand-violet: 139 92 246;
     --brand-pink: 236 72 153;

@@ -2,8 +2,8 @@
 /**
  * asmltr-core — moderation (plan §A4).
  *
- * Lifted VERBATIM (prompts + thresholds) from eve-query-proxy.js so behaviour is
- * identical (the Nov-2025 false-positive tuning is preserved). The only change:
+ * Lifted verbatim (prompts + thresholds) from the prior query-proxy implementation so behaviour is
+ * identical (the earlier false-positive tuning is preserved). The only change:
  * it receives the already-clean user message and the already-resolved identity
  * from the resolver, instead of re-extracting from a system-prompt wrapper.
  *

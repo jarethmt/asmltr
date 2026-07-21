@@ -72,8 +72,8 @@ Each launches that harness inside a multiplexer, tracked in the dashboard (Live)
 like the original `asmltr claude`.
 
 - **Default engine.** Settings → **Engines** lists every known harness (installed? version? default?) and lets
-  you pick the **default** — which is what the `<agent-name>` terminal command points at (so `eve` ≡
-  `asmltr <default>`). Also `POST /v2/engines/default`.
+  you pick the **default** — which is what the `<agent-name>` terminal command points at (so the
+  `<agent-name>` shim ≡ `asmltr <default>`). Also `POST /v2/engines/default`.
 - **Install / update / auto-update from the GUI.** The Engines tab shows each harness's installed version,
   checks npm for a newer one, and offers a one-click **Install** (if missing) or **Update** button
   (`npm i -g <pkg>@latest`). Each engine also has an **Auto-update** toggle — a 6-hourly background sweep

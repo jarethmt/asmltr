@@ -109,7 +109,7 @@ handshake** (owner identity + signed baseline — see security).
 // .silo/manifest.json  (authoritative fields are owner-signed)
 {
   "id": "self",                       // uuid for project silos
-  "name": "Eve — Self",
+  "name": "Assistant — Self",
   "type": "self",                     // the template it was created from
   "manifest_version": 1,
   "created_with": "0.5.0",
@@ -266,7 +266,7 @@ files across the system. Three reinforcing layers, weakest → strongest:
    cwd default into a silo workspace, so relative writes land in the silo without the agent thinking
    about it. Explicit "work on repo X" overrides it. Gravity well, not jail.
 3. **Capture (automatic).** A filesystem watcher auto-indexes anything created (same pattern as the
-   eve-search watcher); the claude-code `PostToolUse` hook auto-records an `external_ref` pointer when
+   a filesystem watcher); the claude-code `PostToolUse` hook auto-records an `external_ref` pointer when
    a `Write`/`Edit` lands *outside* the silo. So "99% captured" survives agent forgetfulness — the
    agent's `put --tags` is enrichment, not something we depend on.
 

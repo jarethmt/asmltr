@@ -2,8 +2,9 @@
 /**
  * asmltr-insights — JSONL tailer (plan §B4, day-one fallback).
  *
- * Ingests the existing eve-query-proxy logs so the dashboard works BEFORE the
- * core/bots emit directly. Retired once those producers post to /ingest.
+ * Optionally ingests an external proxy's query/moderation JSONL logs (paths via
+ * ASMLTR_QUERY_LOG_DIR / ASMLTR_MOD_LOG_DIR_SRC; disabled when unset) so a dashboard
+ * can show history before the core/connectors emit directly to /ingest.
  *
  * By default it seeks to end-of-file on first sight (only new activity) to avoid
  * backfilling history and double-counting; set ASMLTR_TAILER_BACKFILL=1 to read

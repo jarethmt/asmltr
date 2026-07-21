@@ -196,11 +196,11 @@ context (e.g. `CLAUDE.md`), NOT in the shipped skill.
 
 ### 7c. Provision the agent-name alias (type the assistant's name to launch a session)
 
-So the operator can start a monitored session by just typing the assistant's name (e.g. `eve`
+So the operator can start a monitored session by just typing the assistant's name (e.g. `aria`
 instead of `asmltr claude`):
 
 ```bash
-asmltr provision-alias      # ASSISTANT_NAME=Eve → an `eve` shim → `asmltr claude`
+asmltr provision-alias      # ASSISTANT_NAME=Aria → an `aria` shim → `asmltr claude`
 ```
 
 It derives the command from `ASSISTANT_NAME`, **conflict-checks** it (refuses to shadow an existing

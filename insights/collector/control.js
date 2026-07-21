@@ -12,8 +12,8 @@
 const fs = require('fs');
 const { execFile } = require('child_process');
 
-const PM2_DAEMONS = new Set(['eve-query-proxy', 'asmltr-core', 'asmltr-insights-collector']);
-const DOCKER_DAEMONS = new Set(['eve-discord-bot', 'eve-messaging']);
+const PM2_DAEMONS = new Set(['asmltr-core', 'asmltr-insights-collector', 'asmltr-connector-manager']);
+const DOCKER_DAEMONS = new Set();
 
 function procComm(pid) {
   try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return null; }

@@ -32,7 +32,7 @@ onMounted(() => {
 onUnmounted(() => { clearInterval(nowTimer); clearInterval(obsTimer) })
 
 // synthetic "session" for the observer — a web session on a stable key
-const observerSession = { session_id: 'web:self-observer', surface: 'eve-assistant-web', kind: 'ephemeral', status: 'active', identity: 'proprioception', working_dir: null }
+const observerSession = { session_id: 'web:self-observer', surface: 'assistant-web', kind: 'ephemeral', status: 'active', identity: 'proprioception', working_dir: null }
 const observerTitle = computed(() => `The Observer — ${obsName.value} as a whole`)
 
 // per-turn system-prompt context: the live body (parts + links) + the reflector's deduced goal

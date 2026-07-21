@@ -69,5 +69,5 @@ asmltr update --agent    # runs the LLM update session instead
 
 ## What it never touches
 
-`.env`, trust seed, connector configs, `docker-compose.eve.yml`, `CLAUDE.local.md`, the SQLite
+`.env`, trust seed, connector configs, `docker-compose.<instance>.yml`, `CLAUDE.local.md`, the SQLite
 databases, and `~/.asmltr/` all survive — `git reset --hard` leaves gitignored paths alone.

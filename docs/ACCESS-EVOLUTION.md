@@ -37,10 +37,10 @@ disabling the relationship block changes nothing else.
 - **`self` principal** — the assistant is itself a cast member (the anchor for `self→other` relationships).
 - **`buildRelationshipPrompt(resolved, envelope)`** at the prompt seam: *who you're talking to* +
   their **cross-channel identity** ("the same person you also know as @x, @y, z@…") + *your relationship* +
-  **peer agents present** ("you share this channel with Moneo, Thor — a message to one of them isn't for you").
-- **`/trust/{profiles,relationships,engagement}`** endpoints for management; seeded `self` + Moneo + Thor.
+  **peer agents present** ("you share this channel with other agents — a message to one of them isn't for you").
+- **`/trust/{profiles,relationships,engagement}`** endpoints for management; seeded `self` + example peers.
 
-**Effect:** peer agents (Moneo, Thor) are recognized by name on any channel with no per-channel config,
+**Effect:** peer agents are recognized by name on any channel with no per-channel config,
 and a person is understood as one identity across all their channels — from day one.
 
 ### Phase 1 — one tamper-evident action ledger (audit) — *next*

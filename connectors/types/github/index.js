@@ -3,12 +3,12 @@
  * asmltr connector type: GITHUB (mention-driven, conversational).
  *
  * the assistant only wakes when a comment or issue body literally contains the mention
- * token (default "@eve"). She is NOT autonomous and never replies to anything
+ * token (defaults to *<assistant-name>). It is NOT autonomous and never replies to anything
  * untagged. Each issue is a persistent session (conversation_key per issue →
- * the core resumes the SDK session forever), so re-invoking @eve on the same
+ * the core resumes the SDK session forever), so re-invoking the trigger token on the same
  * issue continues the same conversation.
  *
- * On invocation she posts ONE comment and live-edits it as the turn streams
+ * On invocation it posts ONE comment and live-edits it as the turn streams
  * (thinking + tool steps in a collapsed <details>), then swaps in the final
  * answer. Self-loop safety: the comment ids the assistant creates are tracked and never
  * treated as triggers (so a human can post from the bot account too).
@@ -45,7 +45,7 @@ const meta = {
       repos: { type: 'array', title: 'Repositories', items: { type: 'object',
         properties: { owner: { type: 'string' }, repo: { type: 'string' } }, required: ['owner', 'repo'] } },
       pat_bws_key: { type: 'string', title: 'PAT secret key', description: 'secret key name for this account\'s GitHub PAT, e.g. my_github_pat' },
-      mention: { type: 'string', title: 'Trigger token', description: 'Literal token that wakes the assistant in an issue/comment (e.g. *eve, @bot)', default: '*eve' },
+      mention: { type: 'string', title: 'Trigger token', description: 'Literal token that wakes the assistant in an issue/comment. Blank → defaults to *<assistant-name> (e.g. @bot).' },
       poll_interval_ms: { type: 'integer', title: 'Poll interval (ms)', default: 20000 },
       workspace_dir: { type: 'string', title: 'Local clone workspace', default: '', description: 'Where repos are shallow-cloned. Empty = ~/.asmltr/github-repos' },
       clone_repos: { type: 'boolean', title: 'Clone repos for code-awareness', default: true },
@@ -167,8 +167,8 @@ function packComments(head, traceBlocks) {
 
 function start(ctx) {
   const cfg = ctx.config || {};
-  const mention = cfg.mention || '*eve';
-  // require no word-char before the token so emails ("me@eve.com") don't trigger
+  const mention = cfg.mention || ('*' + (process.env.ASSISTANT_NAME || 'assistant').toLowerCase());
+  // require no word-char before the token so emails ("me@example.com") don't trigger
   const mentionRe = new RegExp('(?<!\\w)' + mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
   const dryRun = cfg.dry_run !== false;
   const doStream = cfg.stream !== false && !dryRun;
@@ -340,7 +340,7 @@ function start(ctx) {
       try { await handleTrigger({ full, issueNumber: Number(m[1]), requestText: c.body || '', author: c.user.login }); }
       catch (e) { ctx.log(`${full}#${m[1]} failed: ${e.message}`); }
     }
-    // 2) recently-updated open issues whose BODY tags @eve (e.g. a freshly opened issue)
+    // 2) recently-updated open issues whose BODY carries the trigger token (e.g. a freshly opened issue)
     const issues = await gh(pat, 'GET', `/repos/${full}/issues?since=${enc}&state=open&sort=updated&direction=asc&per_page=50`);
     for (const issue of issues || []) {
       if (issue.pull_request) continue;

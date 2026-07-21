@@ -32,7 +32,7 @@ function setName(n) {
 }
 function hostname() { try { return os.hostname(); } catch (_) { return 'this host'; } }
 
-/** A shell-command-safe alias derived from the assistant name (e.g. "Eve" → "eve"). null if empty. */
+/** A shell-command-safe alias derived from the assistant name (e.g. "Aria" → "aria"). null if empty. */
 function aliasName() { return (name() || '').toLowerCase().replace(/[^a-z0-9._-]/g, '') || null; }
 
 /** Where the canonical self-description lives. $ASMLTR_IDENTITY_FILE → ~/.asmltr/identity.md. */

@@ -2,11 +2,11 @@
 /**
  * asmltr connector type: MCP (Model Context Protocol).
  *
- * Ports the the assistant Oracle MCP server (HTTP/SSE + OAuth 2.1) onto the connector
+ * Ports an MCP server (HTTP/SSE + OAuth 2.1) onto the connector
  * platform. Transport + OAuth stay here (that's HOW MCP works): the SSE server,
  * the OAuth 2.1 authorization server (RFC 8414/9728/7636/8707, PKCE,
  * pre-registered clients, token validation) and the consent page are all carried
- * over unchanged from eve-oracle-mcp.
+ * over unchanged from the prior MCP server implementation.
  *
  * The ONE behavioral change: `ask_oracle` no longer builds a hardcoded system
  * prompt (the MCP warning + client/owner boundary blocks) and POSTs the query
@@ -153,7 +153,7 @@ async function start(ctx) {
 
   function createMCPServer(clientIdentity) {
     const server = new Server(
-      { name: 'eve-oracle-mcp', version: '1.0.0' },
+      { name: 'asmltr-mcp', version: '1.0.0' },
       { capabilities: { tools: {} } }
     );
 
@@ -221,7 +221,7 @@ async function start(ctx) {
         res.end();
         return;
       }
-      const consentHtml = fs.readFileSync(path.join(__dirname, 'consent.html'), 'utf-8');
+      const consentHtml = fs.readFileSync(path.join(__dirname, 'consent.html'), 'utf-8').replace(/__ASSISTANT__/g, NAME);
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(consentHtml);
       return;
@@ -344,7 +344,7 @@ async function start(ctx) {
         try {
           switch (msg.method) {
             case 'initialize':
-              return ok({ protocolVersion: msg.params?.protocolVersion || '2024-11-05', serverInfo: { name: 'eve-oracle-mcp', version: '1.0.0' }, capabilities: { tools: {} } });
+              return ok({ protocolVersion: msg.params?.protocolVersion || '2024-11-05', serverInfo: { name: 'asmltr-mcp', version: '1.0.0' }, capabilities: { tools: {} } });
             case 'ping':
               return ok({});
             case 'tools/list':
@@ -411,7 +411,7 @@ async function start(ctx) {
       // /message?sessionId=<sid>, and reads responses back on THIS stream. An LLM
       // client has multi-second think-time before its first tools/call, so an idle
       // stream must be kept warm or the client/proxy drops it and the session is lost
-      // (the delayed POST then 404s — the a client/Thor bug, 2026-06-24). Emit an SSE
+      // (the delayed POST then 404s — the a client bug, 2026-06-24). Emit an SSE
       // comment heartbeat; ': ...' lines are valid SSE and ignored by clients.
       const HB_MS = Number(ctx.config.heartbeat_ms) || 10000;
       const hb = setInterval(() => { try { res.write(`: hb ${Date.now()}\n\n`); } catch (_) {} }, HB_MS);
