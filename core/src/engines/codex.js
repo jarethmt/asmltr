@@ -20,6 +20,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const engines = require('../../../shared/engines');
+const { composePrompt } = require('../../../shared/prompt-compose');
 
 const id = 'codex';
 const cheapModel = process.env.ASMLTR_CODEX_TITLE_MODEL || 'o4-mini';
@@ -48,7 +49,7 @@ function baseUrlArgs() {
     '-c', `model_providers.${P}.env_key=OPENAI_API_KEY`];
 }
 
-async function runTurn({ prompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
   const mdl = model || engines.modelFor('codex');
   const lastMsgFile = path.join(os.tmpdir(), `asmltr-codex-${process.pid}-${Date.now().toString(36)}.txt`);
   const args = ['exec'];
@@ -59,7 +60,7 @@ async function runTurn({ prompt, resume = null, cwd, model, abortController, onD
   args.push(...baseUrlArgs());
   try { args.push(...require('../../../shared/mcp-registry').codexArgs()); } catch (_) {} // shared MCP registry
   if (cwd) args.push('-C', cwd);
-  args.push(prompt || '');
+  args.push(composePrompt(systemPrompt, prompt));
 
   // stdin = /dev/null: the prompt is an arg, so give codex immediate EOF instead of blocking on stdin.
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: await launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -111,8 +112,8 @@ async function runTurn({ prompt, resume = null, cwd, model, abortController, onD
 }
 
 /** One-shot completion for labelers — a fresh codex turn, return the final text. */
-async function complete({ prompt, model }) {
-  const r = await runTurn({ prompt, model: model || cheapModel });
+async function complete({ prompt, model, appendSystemPrompt = null }) {
+  const r = await runTurn({ prompt, systemPrompt: appendSystemPrompt, model: model || cheapModel });
   return r.text || '';
 }
 

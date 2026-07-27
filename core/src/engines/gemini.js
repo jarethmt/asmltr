@@ -18,6 +18,7 @@
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const engines = require('../../../shared/engines');
+const { composePrompt } = require('../../../shared/prompt-compose');
 
 const id = 'gemini';
 const cheapModel = process.env.ASMLTR_GEMINI_TITLE_MODEL || 'gemini-2.5-flash';
@@ -47,12 +48,12 @@ function extractText(obj) {
 }
 
 let _mcpSynced = false;
-async function runTurn({ prompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
   const mdl = model || engines.modelFor('gemini');
   // MCP: gemini persists servers in its own config → reconcile the shared registry once per process.
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGemini(bin()); } catch (_) {} }
   const sessionId = resume || crypto.randomUUID();
-  const args = ['-p', prompt || '', '-o', 'stream-json', '-y', '--skip-trust', '--session-id', sessionId];
+  const args = ['-p', composePrompt(systemPrompt, prompt), '-o', 'stream-json', '-y', '--skip-trust', '--session-id', sessionId];
   if (mdl) args.push('-m', mdl);
 
   // stdin = /dev/null: prompt is passed via -p, so don't let gemini block reading stdin.
@@ -96,8 +97,8 @@ async function runTurn({ prompt, resume = null, cwd, model, abortController, onD
 }
 
 /** One-shot completion for labelers — plain-text output, no session. */
-async function complete({ prompt, model }) {
-  const args = ['-p', prompt || '', '-o', 'text', '-y', '--skip-trust'];
+async function complete({ prompt, model, appendSystemPrompt = null }) {
+  const args = ['-p', composePrompt(appendSystemPrompt, prompt), '-o', 'text', '-y', '--skip-trust'];
   const mdl = model || cheapModel; if (mdl) args.push('-m', mdl);
   const child = spawn(bin(), args, { env: await launchEnv() });
   let out = ''; child.stdout.on('data', (d) => { out += d.toString(); });
