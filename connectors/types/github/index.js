@@ -25,7 +25,11 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
-const GH_API = 'https://api.github.com';
+const GH_API = process.env.ASMLTR_GITHUB_API_BASE || 'https://api.github.com';
+// Every GitHub request is time-boxed. Without this, a stalled connection (a network/proxy blip that
+// never returns) hangs the poll `await` forever; over days those dead sockets exhaust undici's pool
+// and the poller goes silently deaf while the process stays alive (the #34 "deaf but running" class).
+const GH_FETCH_TIMEOUT_MS = Number(process.env.ASMLTR_GITHUB_FETCH_TIMEOUT_MS) || 15000;
 const NAME = process.env.ASSISTANT_NAME || 'Assistant'; // display name in comments/prompt
 const { redactSecrets } = require('../../../shared/redact');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -65,6 +69,7 @@ async function gh(pat, method, urlPath, body) {
       'User-Agent': 'asmltr-github-connector',
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS), // never hang forever on a stalled connection
   });
   if (!res.ok) throw new Error(`GitHub ${method} ${urlPath} → ${res.status} ${(await res.text()).slice(0, 200)}`);
   return res.status === 204 ? null : res.json();
@@ -72,7 +77,7 @@ async function gh(pat, method, urlPath, body) {
 
 function execp(cmd, args, opts) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+    execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 120000, ...opts }, (err, stdout, stderr) => {
       if (err) reject(new Error(`${cmd} ${args.join(' ')}: ${stderr || err.message}`));
       else resolve(stdout);
     });
@@ -362,6 +367,9 @@ function start(ctx) {
     }
     since = started; // next poll only needs activity since this poll began (dedup covers overlap)
     saveState();
+    // Liveness: reaching here means the poll cycle completed (the fetches returned/failed, didn't hang),
+    // so the I/O loop is alive. A wedged tick never gets here → the manager surfaces heartbeat:stale (#34).
+    try { ctx.heartbeat(); } catch (_) {}
   }
 
   (async () => {
@@ -391,4 +399,4 @@ function start(ctx) {
   };
 }
 
-module.exports = { meta, start };
+module.exports = { meta, start, gh };
