@@ -8,6 +8,44 @@ is still the shared core.
 
 ---
 
+## First-time setup: create the application, bot, and token
+
+Before asmltr can run a Discord instance, you need a Discord **application** with a **bot** and its
+**token**. This is a one-time job in the
+[Discord Developer Portal](https://discord.com/developers/applications), and it comes before the
+invite step below.
+
+1. **New Application**, then name it. This name is the identity people see in Discord.
+2. Open the **Bot** tab. Under **Token**, click **Reset Token** and copy it once (Discord shows it a
+   single time). Store it where your `bot_token_bws_key` resolves: with the default key
+   `discord_bot_token`, that means `DISCORD_BOT_TOKEN=<token>` in `.env`.
+3. Enable the **Message Content** intent (next section). This is the step most setups miss.
+
+### Enable the Message Content intent (required)
+
+On the **Bot** tab, under **Privileged Gateway Intents**, turn **MESSAGE CONTENT INTENT** on & save.
+
+The connector requests it (`GatewayIntentBits.MessageContent` in
+`connectors/types/discord/index.js`), and Discord refuses the gateway connection for a privileged
+intent the application hasn't enabled. Leave it off & the instance fails to start with
+`Used disallowed intents` in its logs and restart-loops; a bot that does connect without it reads
+**empty** message text, so every message looks blank & it silently never replies. This is the single
+most common reason a fresh Discord bot looks dead. Turn it on, then start or restart the instance.
+
+- **MESSAGE CONTENT INTENT** — **required.** Without it the bot reads no message text.
+- **SERVER MEMBERS** & **PRESENCE** — not used by the connector; leave them off.
+
+A bot in 100+ servers needs Discord to verify the application before this intent unlocks; a personal
+or single-server bot toggles it freely.
+
+### Direct messages need a shared server
+
+A Discord bot can only DM a user who already shares a server with it. So `dm_allowed_user_id` takes
+effect only once the bot & that user are both in a common server (a private one-person server is
+enough). Invite the bot (next section) first, then open a DM with it.
+
+---
+
 ## Adding / removing the bot from a server
 
 **Adding the bot to a Discord server is a Discord OAuth authorization, not an asmltr config change.**
