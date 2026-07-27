@@ -11,6 +11,31 @@ settings and pointers. Every variable has a sensible default — an unset instal
 |---|---|---|
 | `ASSISTANT_NAME` | `the assistant` | Name used in prompts, channel-awareness, and the Discord voice wake word. Never hardcoded in strings. |
 
+### Identity precedence vs per-engine harness memory
+
+Two layers write a persona into every session, and they load in a fixed order.
+
+The per-engine harness memory file loads first, as the base layer. Each engine spawns a CLI that reads its own memory file from disk before asmltr's prompt is applied: `CLAUDE.md` for the claude engine, `AGENTS.md` for codex, `GEMINI.md` for gemini, each at both project and user scope. The claude engine loads all filesystem settings by default (`core/src/engines/claude.js` never sets `settingSources`), so `~/.claude/CLAUDE.md` reaches the session even when the working directory points at a project.
+
+asmltr's identity plane loads second, on top. `shared/identity.js` builds the identity block (`ASSISTANT_NAME` plus `~/.asmltr/identity.md`, editable from the Self view) and the core appends it through the system prompt after the CLI has already read its harness file.
+
+asmltr does not currently remove or override the harness file. So a harness file that names a different assistant sits under asmltr's identity and contradicts it, which is the cross-agent drift the identity plane exists to prevent. `shared/identity.js` opens by requiring identity be "DECLARED, never inferred from ambiguous context" and calls the plane "the structural fix for cross-agent drift". When the two disagree there are two answers to "who am I" and no code reconciles them.
+
+Which file to edit for what:
+
+| For | Edit |
+|---|---|
+| The asmltr assistant persona | `~/.asmltr/identity.md` (or the Self view), plus `ASSISTANT_NAME` |
+| The claude engine's harness memory | `CLAUDE.md` (project) / `~/.claude/CLAUDE.md` (user) |
+| The codex harness memory | `AGENTS.md` (project + user) |
+| The gemini harness memory | `GEMINI.md` (project + user) |
+
+Keep the harness files free of a second assistant identity, or keep whatever they assert consistent with `ASSISTANT_NAME`. `ASMLTR_SESSION_CWD` sets the working directory a session spawns in, which is what selects the `CLAUDE.md` hierarchy the claude engine reads (see [Core runtime](#core-runtime)).
+
+Before the #43 fix, only the claude engine received asmltr's identity & trust block; codex and gemini dropped it, so the harness file was the only persona in play on those two. With #43 fixed, the block reaches all three engines, so this precedence question applies to all three.
+
+Two larger options are open and not done here: detect a conflicting harness file on session build and surface it in the Self view, and have asmltr own a delimited block inside each engine's harness file so one identity renders across all three. Documenting the precedence is the piece worth having regardless of which follows.
+
 ## Ports & inter-service URLs
 
 All services bind `127.0.0.1`. Front anything public with a reverse proxy.
@@ -48,6 +73,8 @@ and runs open (dev mode).
 | `ASMLTR_MAX_THINKING_TOKENS` | `4000` | Max thinking tokens per turn (`0` disables; adaptive — trivial turns don't think) |
 | `ASMLTR_SELF_AWARE` | on (set `off` to disable) | Inject the "asmltr toolbelt" awareness (cross-session `asmltr` CLI ops) into the system prompt |
 | `ASMLTR_CLAUDE_BIN` | auto-detected | Full path to the `claude` binary (used by `asmltr claude`) |
+
+`ASMLTR_SESSION_CWD` also decides which `CLAUDE.md` the claude engine picks up as harness memory, which loads under asmltr's own identity block; see [Identity precedence vs per-engine harness memory](#identity-precedence-vs-per-engine-harness-memory).
 
 ## Session titles
 
