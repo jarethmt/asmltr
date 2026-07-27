@@ -78,6 +78,7 @@ nav:
     - The design (deep-dive): REASONING-ENGINES.md
   - Connectors:
     - Overview: connectors/index.md
+    - Building a connector: connectors/building.md
     - Discord: connectors/discord.md
     - Telegram: connectors/telegram.md
     - MCP: connectors/mcp.md

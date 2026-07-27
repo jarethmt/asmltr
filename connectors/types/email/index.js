@@ -22,6 +22,20 @@ const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 
+// How often the IMAP watcher proves it's genuinely alive (a NOOP round-trip). Below the manager's
+// default 120s stale threshold so a healthy watcher clears it with room to spare.
+const IMAP_PROBE_MS = Number(process.env.ASMLTR_EMAIL_IMAP_PROBE_MS) || 60000;
+
+// Liveness probe: a NOOP that round-trips to the server, time-boxed. Resolves when the IMAP link is
+// genuinely alive; REJECTS when it's dead or stalled (incl. a half-open TCP that never emits 'close').
+// This is what catches the #34 "IMAP IDLE dropped without a close event → deaf but running" case.
+// Exported for tests.
+async function imapNoopProbe(imap, timeoutMs = 15000) {
+  const np = imap.noop();
+  if (np && typeof np.catch === 'function') np.catch(() => {}); // never let a late rejection go unhandled
+  await Promise.race([np, new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), timeoutMs))]);
+}
+
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
 
 const meta = {
@@ -192,9 +206,24 @@ async function start(ctx) {
     const mb = await imap.mailboxOpen(MAILBOX);
     if (lastUid < 0) lastUid = cfg.process_backlog ? 0 : ((mb.uidNext || 1) - 1); // baseline once, keep across reconnects
     ctx.log(`watching ${address} · ${MAILBOX} · policy=${policy} · from uid>${lastUid}`);
+    try { ctx.heartbeat(); } catch (_) {} // connected + mailbox open → the watcher's I/O path is alive
     await fetchNew().catch((e) => ctx.log(`initial fetch: ${e.message}`));
   }
   connectImap().catch((e) => ctx.log(`imap connect failed: ${e.message}`));
+
+  // Liveness watchdog: IDLE can silently die (a half-open connection that never emits 'close'), leaving
+  // the watcher deaf while the process stays up. A periodic NOOP proves the link end-to-end: success →
+  // heartbeat (the manager sees it healthy); failure/stall → force a reconnect (close() → the 'close'
+  // handler above reconnects). This closes the email half of #34.
+  let probing = false;
+  const probeTimer = setInterval(async () => {
+    if (stopped || probing || !imap || !imap.usable) return; // not connected → connect/close flow owns recovery
+    probing = true;
+    try { await imapNoopProbe(imap); ctx.heartbeat(); }
+    catch (e) { ctx.log(`imap probe failed (${e.message}) — forcing reconnect`); try { imap.close(); } catch (_) {} }
+    finally { probing = false; }
+  }, IMAP_PROBE_MS);
+  if (probeTimer.unref) probeTimer.unref();
 
   // --- mailbox READ/BROWSE (agent-facing) ------------------------------------
   // A SEPARATE IMAP connection so browsing never perturbs the IDLE watcher's selected-mailbox
@@ -294,9 +323,9 @@ async function start(ctx) {
   const httpServer = app.listen(PORT, BIND, () => ctx.log(`email outbound on ${BIND}:${PORT} (from ${address})`));
 
   return {
-    async stop() { stopped = true; try { if (imap) await imap.logout(); } catch (_) {} try { if (readImap) await readImap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
+    async stop() { stopped = true; clearInterval(probeTimer); try { if (imap) await imap.logout(); } catch (_) {} try { if (readImap) await readImap.logout(); } catch (_) {} try { smtp.close(); } catch (_) {} await new Promise((r) => httpServer.close(() => r())); },
     health() { return { address, mailbox: MAILBOX, policy, imap: !!(imap && imap.usable) }; },
   };
 }
 
-module.exports = { meta, start };
+module.exports = { meta, start, imapNoopProbe };
