@@ -40,6 +40,7 @@ const env = require('./envelope');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
+const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
@@ -278,13 +279,21 @@ async function handle(envelope, opts = {}) {
     + 'not a person from earlier in this conversation, not whoever your base instructions (CLAUDE.md) call "your user". '
     + 'This channel can carry multiple people and the speaker can change between turns; this line always reflects who is '
     + 'speaking NOW. If asked "who am I" / "who are you talking to", answer with exactly this identity.';
-  let systemPrompt = identity.fullIdentity() + '\n\n' + currentSpeaker + '\n\n' + buildChannelAwareness(e, resolved) + '\n\n' + trust.buildAuthzPrompt(resolved, e.channel);
+  // The system prompt is built as named PARTS so we can split it into a STABLE block (identity, channel,
+  // toolbelt, uploads instruction — changes only when a store/state changes) and a VOLATILE tail (who's
+  // speaking now, their authz, per-turn context). A history-retaining engine (codex — its resume replays
+  // prior turns) gets the stable block injected ONCE, then only the volatile tail on resumes; claude still
+  // gets the full prompt every turn (its append lands on a cached system channel). See the gating below.
+  const pIdentity = identity.fullIdentity();
+  const pChannel = buildChannelAwareness(e, resolved);
+  const pAuthz = trust.buildAuthzPrompt(resolved, e.channel);
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
-  const relPrompt = trust.buildRelationshipPrompt(resolved, e);
-  if (relPrompt) systemPrompt += '\n\n' + relPrompt;
-  if (e.system_prompt_extra) systemPrompt += '\n\n' + e.system_prompt_extra; // connector-supplied context (e.g. Discord)
+  const pRel = trust.buildRelationshipPrompt(resolved, e) || '';
+  const pExtra = e.system_prompt_extra || ''; // connector-supplied per-turn context (e.g. Discord)
+  let pToolbelt = '';                          // STABLE: asmltr toolbelt / silo / vault / attachments awareness
+  let pUploadsInstr = '', pUploadsList = '', pAnnounce = ''; // uploads-instr = STABLE; uploads-list + announce = VOLATILE
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
-    systemPrompt += '\n\nASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
+    pToolbelt = 'ASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
       'You have an `asmltr` CLI (run `asmltr help` for everything). Key cross-session ops (use the Bash tool):\n' +
       '• `asmltr ls` (active sessions) · `asmltr map` (grouped by working dir) · `asmltr who <path>` (who recently touched a file/dir) — check these before duplicating work another session is already doing.\n' +
       '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
@@ -295,7 +304,7 @@ async function handle(envelope, opts = {}) {
     // Mesh steer is a COERCIVE verb — only advertise it when the operator has enabled it, and always
     // teach the announce-vs-steer distinction so it's used deliberately, not reflexively.
     if (/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
-      systemPrompt += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +
+      pToolbelt += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +
         'directly into ANOTHER session\'s LIVE turn. This is fundamentally different from `announce`: **announce** ' +
         'is an advisory note the other session sees on its NEXT turn and decides for itself whether to act on; ' +
         '**steer** overrides what that session is doing RIGHT NOW and makes it act on your guidance (`--interrupt` ' +
@@ -304,7 +313,7 @@ async function handle(envelope, opts = {}) {
         'announce for everything else. Never steer a session into a loop (don\'t steer one that\'s steering you).';
     }
     if (SELF_SILO_DIR) {
-      systemPrompt += `\n\nSELF SILO — your persistent memory + the DEFAULT home for anything you create is a data silo at \`${SELF_SILO_DIR}\`. ` +
+      pToolbelt += `\n\nSELF SILO — your persistent memory + the DEFAULT home for anything you create is a data silo at \`${SELF_SILO_DIR}\`. ` +
         'When you produce an artifact (a document, image, app, export) and the task doesn\'t specify where, create it UNDER the Self silo — ' +
         'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
         '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
@@ -312,7 +321,7 @@ async function handle(envelope, opts = {}) {
         '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
     }
     if (VAULT_LOCKED) {
-      systemPrompt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
+      pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
         '(fetching API keys/secrets, encrypted-storage keys) will FAIL right now. If a task needs a credential, tell the ' +
         'user the vault is locked and ask them to unlock it (`asmltr vault unseal` or the dashboard Vault page) — do NOT ' +
         'guess, hardcode, or work around a missing secret.';
@@ -320,7 +329,7 @@ async function handle(envelope, opts = {}) {
     // If THIS channel supports attachments, tell the agent exactly how — so it never claims it can't.
     if (e.capabilities && e.capabilities.supports_attachments_out) {
       const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
-      systemPrompt += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${e.channel} ${chTarget} --file <abs-path> [--caption "…"]\`. Do NOT tell the user you can't attach files here or fall back to another channel — you can.`;
+      pToolbelt += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${e.channel} ${chTarget} --file <abs-path> [--caption "…"]\`. Do NOT tell the user you can't attach files here or fall back to another channel — you can.`;
     }
   }
   // Cross-channel file uploads: every file a user sends on ANY channel is saved to one shared
@@ -328,14 +337,14 @@ async function handle(envelope, opts = {}) {
   // different channel/app. Trust-gated: only full-trust (owner) sessions are told about the
   // upload area + shown the recent file list — don't leak the owner's files to lesser callers.
   if (resolved.bypass_moderation) {
-    systemPrompt += '\n\nFILE UPLOADS (shared across ALL channels): every file a user sends on any channel ' +
+    pUploadsInstr = 'FILE UPLOADS (shared across ALL channels): every file a user sends on any channel ' +
       '(Telegram, Discord, …) is saved to ONE shared upload area, tagged with its origin channel. When the user ' +
       'refers to a file they sent/uploaded/shared — even "on Telegram" or from another app — DO NOT claim you ' +
       'can\'t find it before checking here: run `asmltr uploads` (newest first; also `asmltr uploads <search>`, ' +
       '`--channel <name>`, `--since <2h|1d>`), then Read the file at the path it prints.';
     try {
       const recent = require('../../shared/uploads').recentSummary(6);
-      if (recent) systemPrompt += `\n\nRecent uploads (newest first):\n${recent}`;
+      if (recent) pUploadsList = `Recent uploads (newest first):\n${recent}`;
     } catch (_) {}
   }
 
@@ -346,10 +355,21 @@ async function handle(envelope, opts = {}) {
     if (anns.length) {
       const fmt = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
       const lines = anns.map((a) => `• [${fmt(a.created_at)}${a.priority === 'urgent' ? ' · URGENT' : ''}${a.from_session ? ' · from ' + a.from_session : ''}] ${a.text}`);
-      systemPrompt += `\n\n📢 ANNOUNCEMENTS from other sessions on this machine (awareness only — act on them just if relevant to what you're doing):\n${lines.join('\n')}`;
+      pAnnounce = `📢 ANNOUNCEMENTS from other sessions on this machine (awareness only — act on them just if relevant to what you're doing):\n${lines.join('\n')}`;
       record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control', identity: resolved.user_key, source: 'core', payload: { action: 'announcements-received', count: anns.length } });
     }
   } catch (_) {}
+
+  // Compose the prompt from the parts. `systemPrompt` is the FULL block — identical content AND order to
+  // the pre-optimization build, so claude (which gets it every turn on a cached channel) is unchanged.
+  // `stablePrompt`/`volatilePrompt` are the split a history-retaining engine uses; `stableHash` keys the
+  // "has the stable block changed since we last sent it?" decision (identity edit, trust change, vault
+  // lock/unlock, silo path, channel capabilities all move the hash → the stable block is re-sent).
+  const { full: systemPrompt, volatile: volatilePrompt, stableHash } = promptParts.composeSystemPrompts({
+    identity: pIdentity, speaker: currentSpeaker, channel: pChannel, authz: pAuthz, rel: pRel,
+    extra: pExtra, toolbelt: pToolbelt, uploadsInstr: pUploadsInstr, uploadsList: pUploadsList, announce: pAnnounce,
+  });
+
   const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
@@ -365,6 +385,19 @@ async function handle(envelope, opts = {}) {
   const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
   const sessionRow = sessions.get(e.conversation_key);
   const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral /root by default)
+
+  // INJECT-ONCE: which engine runs this turn, and can it skip re-sending the stable block? Only on a
+  // history-retaining engine (codex — its resume replays prior turns), when the stable hash is unchanged
+  // AND was last delivered for THIS same engine (a mid-session engine switch has no replayed stable block,
+  // so it must re-send). Otherwise send the full prompt. A NULL prior hash (fresh, or a turn that never
+  // sent the stable block, e.g. an operator steer) also forces full — the correct, safe default.
+  const engineId = (opts && opts.engine) || require('../../shared/engines').getDefault();
+  // Kill-switch: ASMLTR_INJECT_ONCE=off forces the full prompt every turn (revert to pre-optimization
+  // behavior) without a redeploy — the escape hatch if an engine's resume ever fails to replay the stable block.
+  let canInjectOnce = process.env.ASMLTR_INJECT_ONCE !== 'off';
+  try { canInjectOnce = canInjectOnce && !!require('./engines').resolve(engineId).historyReplaysSystemPrompt; } catch (_) { canInjectOnce = false; }
+  const reuseStable = promptParts.shouldReuseStable({ canInjectOnce, isNew, row: sessionRow, engineId, stableHash });
+  const effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
@@ -418,7 +451,8 @@ async function handle(envelope, opts = {}) {
     const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
     result = await runTurn({
       prompt: catchUp + e.content.text,
-      systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
+      engine: engineId,
       resume,
       cwd,
       abortController,
@@ -459,6 +493,9 @@ async function handle(envelope, opts = {}) {
 
   if (result.engineSessionId) sessions.recordEngineId(e.conversation_key, result.engineSessionId);
   sessions.touch(e.conversation_key);
+  // Mark the stable block as delivered for this engine (inject-once), but only on SUCCESS — a failed turn
+  // leaves the marker stale so the next turn re-sends the full prompt. No-op on claude (canInjectOnce=false).
+  if (canInjectOnce && !result.isError) { try { sessions.recordStable(e.conversation_key, stableHash, engineId); } catch (_) {} }
 
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'token-usage',
     identity: resolved.user_key, source: 'core',

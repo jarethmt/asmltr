@@ -117,4 +117,9 @@ async function complete({ prompt, model, appendSystemPrompt = null }) {
   return r.text || '';
 }
 
-module.exports = { id, cheapModel, runTurn, complete, getLastModel: () => engines.modelFor('codex') };
+// Codex resume (`codex exec resume <thread_id>`) replays the whole prior thread server-side, so a
+// system prompt folded into an EARLIER user turn (via composePrompt) is still visible on later turns.
+// That lets the core inject the big STABLE block once and send only the volatile tail on resumes.
+const historyReplaysSystemPrompt = true;
+
+module.exports = { id, cheapModel, runTurn, complete, historyReplaysSystemPrompt, getLastModel: () => engines.modelFor('codex') };

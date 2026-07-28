@@ -33,13 +33,15 @@ db.exec(`
     claimed_by         TEXT,
     working_dir        TEXT,                               -- where to resume/attach (worktree or default)
     outbound_instance_id TEXT,                             -- connector instance to reply THROUGH for an out-of-band inject
-    outbound_target    TEXT                                -- channel/chat id to reply TO
+    outbound_target    TEXT,                               -- channel/chat id to reply TO
+    last_stable_hash   TEXT,                               -- sha256 of the STABLE system-prompt block last injected (inject-once optimization)
+    last_stable_engine TEXT                                -- which engine that stable block was injected for (guards a mid-session engine switch)
   );
 `);
 
 // Migrations: add columns to a pre-existing table (created before they existed).
 const _cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
-for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target']) {
+for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target', 'last_stable_hash', 'last_stable_engine']) {
   if (!_cols.includes(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
 }
 // Per-session cursor: the highest announcement id this session has already drained.
@@ -76,6 +78,7 @@ const _setEngineId = db.prepare('UPDATE sessions SET engine_session_id = ?, last
 const _touch = db.prepare('UPDATE sessions SET last_activity_at = ?, turn_count = turn_count + 1 WHERE conversation_key = ?');
 const _setClaim = db.prepare('UPDATE sessions SET claim_state = ?, claimed_by = ? WHERE conversation_key = ?');
 const _setRoute = db.prepare('UPDATE sessions SET outbound_instance_id = ?, outbound_target = ? WHERE conversation_key = ?');
+const _setStable = db.prepare('UPDATE sessions SET last_stable_hash = ?, last_stable_engine = ? WHERE conversation_key = ?');
 const _remove = db.prepare('DELETE FROM sessions WHERE conversation_key = ?');
 // Forget a session entirely: the next inbound on this key gets a FRESH engine session (new history).
 function remove(conversation_key) { return _remove.run(conversation_key).changes > 0; }
@@ -173,4 +176,14 @@ function setOutboundRoute(conversation_key, instance_id, target) {
   _setRoute.run(instance_id || null, target != null ? String(target) : null, conversation_key);
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, DB_PATH };
+/**
+ * Record which STABLE system-prompt block (by hash) was last delivered for a session, and for which
+ * engine. Powers the inject-once optimization: on a history-retaining engine (e.g. codex, whose resume
+ * replays prior turns server-side), the next turn re-sends only the small volatile tail when this hash
+ * still matches — instead of folding the whole identity/trust/toolbelt block into every user turn.
+ */
+function recordStable(conversation_key, stable_hash, engine) {
+  _setStable.run(stable_hash || null, engine || null, conversation_key);
+}
+
+module.exports = { db, ensure, resolveForTurn, recordEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, DB_PATH };

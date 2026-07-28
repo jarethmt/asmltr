@@ -16,6 +16,16 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Changed
 
+- **Inject-once system prompt on history-retaining engines** — the composed system prompt (identity,
+  trust/authz, channel-awareness, toolbelt, …) is now split into a STABLE block (changes only when a
+  store/state changes) and a small VOLATILE tail (who's speaking, their authz, per-turn context). On an
+  engine whose resume replays prior turns (codex), the stable block is folded into the user turn **once**
+  and only the volatile tail is re-sent on resumes — instead of prepending the whole multi-thousand-token
+  block to every turn (which the `composePrompt` fix for codex/gemini would otherwise do). Re-injection is
+  keyed on a sha256 of the stable block, so an identity edit, trust change, vault lock/unlock, or silo-path
+  change re-sends it automatically. The Claude engine is unchanged (its append lands on a cached system
+  channel); the full prompt is byte-identical to before. Kill-switch: `ASMLTR_INJECT_ONCE=off`.
+
 ### Fixed
 
 - **Core system prompt was silently dropped on the Claude engine.** `options.appendSystemPrompt` is
