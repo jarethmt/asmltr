@@ -21,7 +21,7 @@ for (const f of fs.readdirSync(path.join(ROOT, 'native', 'res', 'xml'))) {
 
 const mf = path.join(APP, 'AndroidManifest.xml');
 let x = fs.readFileSync(mf, 'utf8');
-const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS'];
+const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.REQUEST_INSTALL_PACKAGES'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
@@ -38,7 +38,23 @@ const services = `
             <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
             <meta-data android:name="android.speech" android:resource="@xml/recognition_service" />
         </service>
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="\${applicationId}.updateprovider" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
 `;
 if (!x.includes('AsmltrVoiceInteractionService')) x = x.replace(/<\/application>/, services + '    </application>');
 fs.writeFileSync(mf, x);
-console.log('patched: java, res/xml, permissions, assist services →', mf);
+
+// --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const vName = pkg.version || '0.0.0';
+const mm = vName.split('.').map((n) => parseInt(n, 10) || 0);
+const vCode = mm[0] * 10000 + mm[1] * 100 + (mm[2] || 0);
+const gradle = path.join(ROOT, 'android', 'app', 'build.gradle');
+let g = fs.readFileSync(gradle, 'utf8');
+g = g.replace(/versionCode\s+\d+/, 'versionCode ' + vCode).replace(/versionName\s+"[^"]*"/, 'versionName "' + vName + '"');
+fs.writeFileSync(gradle, g);
+// Sidecar the connector's /gw/app reads to report the served version.
+fs.writeFileSync(path.join(ROOT, 'app-version.json'), JSON.stringify({ versionCode: vCode, versionName: vName }) + '\n');
+console.log('patched: java, res/xml, permissions, assist services + version', vName, '(' + vCode + ') →', mf);

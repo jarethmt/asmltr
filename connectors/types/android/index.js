@@ -189,7 +189,11 @@ async function start(ctx) {
   // Default: the built debug APK; override with ASMLTR_ANDROID_APK. Install straight from the instance:
   // https://<host>/app/gw/download
   const APK = process.env.ASMLTR_ANDROID_APK || path.join(__dirname, '..', '..', '..', 'mobile', 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
-  app.get('/gw/app', (req, res) => res.json({ available: fs.existsSync(APK), download: '/app/gw/download', filename: 'asmltr.apk' }));
+  const APK_VER = path.join(__dirname, '..', '..', '..', 'mobile', 'app-version.json');
+  app.get('/gw/app', (req, res) => {
+    let v = {}; try { v = JSON.parse(fs.readFileSync(APK_VER, 'utf8')); } catch (_) {}
+    res.json({ available: fs.existsSync(APK), download: '/app/gw/download', filename: 'asmltr.apk', versionCode: v.versionCode || 0, versionName: v.versionName || '' });
+  });
   // Branding: the assistant's signature palette + name, so the app themes itself like the web GUI.
   app.get('/gw/theme', (req, res) => {
     let palette = '', name = '';
