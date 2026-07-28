@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
+const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
 /**
  * asmltr connector manager — registry + supervisor + management API (the plane
  * the dashboard "Integrations" page drives). Host/PM2, bind 127.0.0.1.
@@ -191,7 +192,9 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   try {
     const r = await fetch(`http://127.0.0.1:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, ref }) });
     const j = await r.json().catch(() => ({}));
-    return { ok: r.ok, status: r.ok ? 200 : 502, via: `${inst.type}:${inst.name}`, ...j };
+    // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
+    // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.
+    return settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }
 }
 app.post('/send', requireToken, async (req, res) => { const r = await deliver(req.body || {}); res.status(r.status).json(r); });
@@ -214,7 +217,7 @@ async function readSource(body) {
     const { channel: _c, instance_id: _i, ...args } = body;
     const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
     const j = await r.json().catch(() => ({}));
-    return { ok: r.ok, status: r.ok ? 200 : 502, via: `${inst.type}:${inst.name}`, ...j };
+    return settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }
 }
 app.post('/read', requireToken, async (req, res) => { const r = await readSource(req.body || {}); res.status(r.status).json(r); });

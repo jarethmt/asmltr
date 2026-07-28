@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
+const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
  * asmltr-core — HTTP server + the core handle() pipeline (plan §A4/§A5).
  *
@@ -1383,17 +1384,20 @@ app.post('/v2/send', async (req, res) => {
     if (process.env.ASMLTR_MANAGER_TOKEN) headers.Authorization = 'Bearer ' + process.env.ASMLTR_MANAGER_TOKEN;
     const r = await fetch(`${mgr}/send`, { method: 'POST', headers, body: JSON.stringify(b) });
     const j = await r.json().catch(() => ({}));
+    // The manager's body `ok` is authoritative (a real delivery), so status follows it, not the raw
+    // fetch status — otherwise a delivered message can surface as an HTTP failure. See shared/send-result.js.
+    const settled = settleDelivery(r.ok, j);
     const key = j && j.conversation_key;
     // Assimilate a TEXT post into the destination session (skip if it IS the sending session).
     let assimilated = false;
-    if (r.ok && b.text && String(b.text).trim() && key && key !== b.from_session) {
+    if (settled.ok && b.text && String(b.text).trim() && key && key !== b.from_session) {
       pushSelfSent(key, b.text, b.from_session || null);
       assimilated = true;
       record({ surface: 'core', session_id: key, event_type: 'control', identity: 'assistant', source: 'core',
         payload: { action: 'self-sent-assimilated', from: b.from_session || null, chars: String(b.text).length } });
     }
-    res.status(r.ok ? 200 : 502).json({ ...j, assimilated });
-  } catch (e) { res.status(502).json({ error: e.message }); }
+    res.status(settled.status).json({ ...settled, assimilated });
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
 });
 
 app.post('/v2/abort', (req, res) => {
