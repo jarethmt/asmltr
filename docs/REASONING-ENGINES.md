@@ -304,6 +304,18 @@ stays a fallback for engines without MCP but with a shell.)
 ## Cross-cutting concerns
 - **Sandbox / permissions** — each harness has its own autonomy model (Claude `bypassPermissions`+`IS_SANDBOX`;
   Codex sandbox/approval modes; Gemini's yolo/non-interactive). The adapter maps asmltr's "run autonomously" to each.
+- **System-prompt delivery + per-turn trust re-assertion** — the composed block (identity + channel awareness +
+  the *current sender's* trust scope) is rebuilt per message in `server.js` and passed to `runTurn` every turn.
+  How it lands differs per engine: **claude** puts it on a dedicated channel (`appendSystemPrompt`), so it isn't
+  accumulated into history; **gemini** is stateless per turn (no history replay), so re-composing every turn is
+  required; **codex** resumes by replaying thread history, so the block accumulates once per turn (token cost on
+  long threads). **Decision (#54): keep the full per-turn re-assert on codex resume.** It's not waste — a codex
+  thread can carry messages from different senders/tiers, and re-asserting the *current* sender's scope each turn
+  is a safety property. The tempting "send once on turn 1" optimization is a trust-scope bug: turn-1's scope would
+  govern later turns from a different sender. If the token cost ever bites, the sanctioned path is a compact
+  per-turn trust reminder on resume turns (current sender + tier + allowed/forbidden), **not** dropping the
+  re-assert. Options 2 (short reminder) and 3 (measure byte-count first) stay open as future work; option 1 is the
+  recorded default and is guarded by a code comment at the codex resume path so it isn't silently optimized away.
 - **Skills** — Claude Code skills are Claude-specific. Other engines get none until (later) skills are lifted
   into an asmltr registry (silo-backed) and injected as prompt + tools. The manifest says who has them.
 - **Streaming granularity + the voice fast-path** — CLIs may stream coarser than the SDK; the `streaming`

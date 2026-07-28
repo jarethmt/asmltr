@@ -60,6 +60,13 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   args.push(...baseUrlArgs());
   try { args.push(...require('../../../shared/mcp-registry').codexArgs()); } catch (_) {} // shared MCP registry
   if (cwd) args.push('-C', cwd);
+  // systemPrompt is rebuilt per-message (server.js: identity + channel + the CURRENT sender's trust
+  // scope) and folded in on every turn. On a resumed thread codex replays history, so this block
+  // accumulates once per turn — real token cost on long sessions. Do NOT "optimize" to send it only on
+  // turn 1: a codex thread can carry messages from different senders/tiers, so turn-1's scope would then
+  // wrongly govern a later turn from a different sender. Per-turn re-assertion of the current sender's
+  // scope is the safety property, not waste. If the cost ever bites, send a compact per-turn trust
+  // reminder on resume turns instead of dropping the re-assert (see docs/REASONING-ENGINES.md, #54).
   args.push(composePrompt(systemPrompt, prompt));
 
   // stdin = /dev/null: the prompt is an arg, so give codex immediate EOF instead of blocking on stdin.
