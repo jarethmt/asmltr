@@ -38,12 +38,18 @@ const services = `
             <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
             <meta-data android:name="android.speech" android:resource="@xml/recognition_service" />
         </service>
+`;
+if (!x.includes('AsmltrVoiceInteractionService')) x = x.replace(/<\/application>/, services + '    </application>');
+
+// FileProvider for the auto-update installer — separate guard (independent of the assist services, so
+// it still applies when android/ already has them from a prior build).
+const provider = `
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="\${applicationId}.updateprovider" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 `;
-if (!x.includes('AsmltrVoiceInteractionService')) x = x.replace(/<\/application>/, services + '    </application>');
+if (!x.includes('updateprovider')) x = x.replace(/<\/application>/, provider + '    </application>');
 fs.writeFileSync(mf, x);
 
 // --- versioning (drives auto-update): versionName from package.json, versionCode = M*10000+m*100+p ---
