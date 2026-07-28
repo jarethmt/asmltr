@@ -22,6 +22,10 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+// Speech is proxied through this connector so the phone has ONE token-authed surface (no separate
+// core-auth for /v2/transcribe + /v2/tts). Same shared modules the core /v2 speech endpoints use.
+const stt = require('../../../shared/speech/stt');
+const tts = require('../../../shared/speech/tts');
 
 const meta = {
   type: 'android',
@@ -69,7 +73,16 @@ async function start(ctx) {
   }
 
   const app = express();
-  app.use(express.json({ limit: '8mb' }));
+  app.use(express.json({ limit: '16mb' })); // room for base64 audio on /gw/transcribe
+  // The mobile WebView is a different origin (capacitor://localhost). These endpoints are token-authed,
+  // so a permissive CORS policy is fine and required for fetch()/EventSource from the app.
+  app.use((req, res, next) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
 
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'android', instance: ctx.instanceId, devices: devices.size }));
 
@@ -143,6 +156,28 @@ async function start(ctx) {
     const delivered = pushSSE(device, { type: 'inject', text: String(text || '') });
     if (!delivered) return res.json({ ok: false, error: 'device not connected', conversation_key: convKey(device) });
     return res.json({ ok: true, conversation_key: convKey(device) });
+  });
+
+  // --- edge speech: STT + TTS proxied here so the phone needs only its device token ----------------
+  app.post('/gw/transcribe', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    try {
+      const buf = Buffer.from(String(b.audio_base64 || ''), 'base64');
+      if (!buf.length) return res.status(400).json({ ok: false, error: 'audio_base64 required' });
+      const r = await stt.transcribe(buf, { mime: b.mime || 'audio/webm', filename: b.filename, language: b.language });
+      res.json({ ok: true, text: r.text || '', model: r.model });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+  app.post('/gw/tts', async (req, res) => {
+    const b = req.body || {};
+    if (requireToken && !auth(b.token)) return res.status(401).json({ ok: false, error: 'invalid device token' });
+    try {
+      const text = String(b.text || '').trim();
+      if (!text) return res.status(400).json({ ok: false, error: 'text required' });
+      const r = await tts.synthesize(text, { voice: b.voice, model: b.model });
+      res.json({ ok: true, mime: r.mime, b64: Buffer.from(r.audio).toString('base64') });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
 
   const httpServer = app.listen(PORT, BIND, () => ctx.log(`android device gateway on ${BIND}:${PORT} (${requireToken ? 'token required' : 'OPEN'})`));
