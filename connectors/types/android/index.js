@@ -26,6 +26,7 @@ const path = require('path');
 // core-auth for /v2/transcribe + /v2/tts). Same shared modules the core /v2 speech endpoints use.
 const stt = require('../../../shared/speech/stt');
 const tts = require('../../../shared/speech/tts');
+const identity = require('../../../shared/identity'); // for /gw/theme (signature palette + agent name)
 
 const meta = {
   type: 'android',
@@ -139,7 +140,11 @@ async function start(ctx) {
     // Ack immediately (the reply streams over the SSE, not this POST response).
     res.json({ ok: true, conversation_key: convKey(device), streaming: devices.has(device) });
     try {
-      await ctx.core.handleStream(envelope, (delta) => pushSSE(device, { type: 'delta', text: delta }));
+      await ctx.core.handleStream(envelope, {
+        onDelta: (t) => pushSSE(device, { type: 'delta', text: t }),        // streamed reply text
+        onThinking: (t) => pushSSE(device, { type: 'thinking', text: t }),  // reasoning steps
+        onTool: (n) => pushSSE(device, { type: 'tool', name: n }),          // tool calls
+      });
       pushSSE(device, { type: 'done', conversation_key: convKey(device) });
     } catch (e) {
       ctx.log(`android turn error (${device}): ${e.message}`);
@@ -185,6 +190,13 @@ async function start(ctx) {
   // https://<host>/app/gw/download
   const APK = process.env.ASMLTR_ANDROID_APK || path.join(__dirname, '..', '..', '..', 'mobile', 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
   app.get('/gw/app', (req, res) => res.json({ available: fs.existsSync(APK), download: '/app/gw/download', filename: 'asmltr.apk' }));
+  // Branding: the assistant's signature palette + name, so the app themes itself like the web GUI.
+  app.get('/gw/theme', (req, res) => {
+    let palette = '', name = '';
+    try { palette = identity.getFacet('palette') || ''; } catch (_) {}
+    try { name = identity.name() || ''; } catch (_) {}
+    res.json({ palette, agentName: name });
+  });
   app.get('/gw/download', (req, res) => {
     if (!fs.existsSync(APK)) return res.status(404).json({ ok: false, error: 'APK not built yet' });
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');

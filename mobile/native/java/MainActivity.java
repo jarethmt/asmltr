@@ -1,22 +1,27 @@
 package com.asmltr.assistant;
 import android.Manifest;
-import android.content.Intent;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.webkit.JavascriptInterface;
 import com.getcapacitor.BridgeActivity;
+
+/** The app shell — loads the dashboard (web brain launcher). Exposes AsmltrNative so the in-app
+ *  assistant Settings can persist connector config to SharedPreferences, which the system overlay
+ *  session (a different WebView origin) reads. */
 public class MainActivity extends BridgeActivity {
   @Override public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
       requestPermissions(new String[]{ Manifest.permission.RECORD_AUDIO }, 7);
     }
-    handleAssist(getIntent());
+    getBridge().getWebView().addJavascriptInterface(new NativeBridge(), "AsmltrNative");
   }
-  @Override public void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); handleAssist(intent); }
-  private void handleAssist(Intent intent) {
-    if (intent == null || !intent.getBooleanExtra("asmltr_assist", false)) return;
-    // Set a flag AND call directly — covers both orderings (page loaded before/after this runs).
-    final String js = "window.__ASMLTR_ASSIST=true; if(window.asmltrStartListening){window.asmltrStartListening();}";
-    getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(js, null), 700);
+  class NativeBridge {
+    @JavascriptInterface
+    public void saveConfig(String baseUrl, String token, String name) {
+      getSharedPreferences("asmltr", Context.MODE_PRIVATE).edit()
+        .putString("baseUrl", baseUrl).putString("token", token).putString("name", name).apply();
+    }
   }
 }

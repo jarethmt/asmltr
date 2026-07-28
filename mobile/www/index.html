@@ -2,48 +2,52 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b12" />
-  <title>asmltr assistant</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>asmltr</title>
+  <style>
+    html,body{margin:0;height:100%;background:#0b0b12;color:#e9e9f2;font:16px/1.5 system-ui,sans-serif;display:flex;align-items:center;justify-content:center}
+    .card{max-width:420px;width:90%;text-align:center;padding:24px}
+    h1{background:linear-gradient(90deg,#8b5cf6,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent;font-size:26px;margin:.2em 0}
+    p{color:#9a9ab0;font-size:14px}
+    input{width:100%;margin:8px 0;padding:12px;border-radius:10px;border:1px solid #333;background:#1b1b2a;color:#e9e9f2;font-size:15px}
+    button{width:100%;padding:13px;border:none;border-radius:12px;color:#fff;font-weight:700;font-size:15px;background:linear-gradient(120deg,#8b5cf6,#ec4899);margin-top:6px}
+    a{color:#8b5cf6}
+    .hidden{display:none}
+  </style>
 </head>
 <body>
-  <header class="bar">
-    <div class="brand"><span id="agentName">assistant</span></div>
-    <div class="right">
-      <span id="status" class="pill pill-off">offline</span>
-      <button id="settingsBtn" class="icon" aria-label="Settings">⚙</button>
-    </div>
-  </header>
-
-  <main id="log" class="log" aria-live="polite"></main>
-
-  <footer class="controls">
-    <button id="talk" class="talk" aria-label="Talk">
-      <span class="mic">🎙</span>
-      <span id="talkLabel" class="talkLabel">Tap to talk</span>
-    </button>
-  </footer>
-
-  <!-- Settings sheet -->
-  <div id="sheet" class="sheet hidden">
-    <div class="sheet-card">
-      <h2>Connection</h2>
-      <label>Server URL<input id="cfgUrl" placeholder="https://your-asmltr-host/app" /></label>
-      <label>Device token<input id="cfgToken" placeholder="paste your device token" /></label>
-      <label>Display name<input id="cfgName" placeholder="My Pixel" /></label>
-      <label>Device id<input id="cfgDevice" readonly /></label>
-      <div class="row">
-        <button id="cfgTest" class="secondary">Test</button>
-        <button id="cfgSave" class="primary">Save & connect</button>
-      </div>
-      <p id="cfgMsg" class="msg"></p>
+  <div class="card">
+    <h1 id="agent">asmltr</h1>
+    <div id="loading"><p>Opening your dashboard…</p></div>
+    <div id="setup" class="hidden">
+      <p>Enter your asmltr instance to open its dashboard. The assistant (⚙ set-up) works system-wide via the assist gesture.</p>
+      <input id="url" placeholder="https://your-asmltr-host" inputmode="url" autocapitalize="off" />
+      <button id="go">Open dashboard</button>
+      <p style="margin-top:16px"><a href="assistant.html">Open the voice assistant instead →</a></p>
     </div>
   </div>
-
+  <script>
+    // The app opens the full dashboard GUI. The dashboard base = the configured server URL minus the
+    // /app connector path. Voice/assist lives in the overlay (assistant.html), triggered system-wide.
+    (function () {
+      var CFG = 'asmltr.mobile.cfg';
+      var cfg = {}; try { cfg = JSON.parse(localStorage.getItem(CFG)) || {}; } catch (e) {}
+      var nd = window.ASMLTR_DEFAULTS || {};
+      var base = (cfg.baseUrl || nd.baseUrl || '').replace(/\/+$/, '');
+      var dash = base ? base.replace(/\/app$/, '') : '';
+      if (dash) { location.replace(dash); return; }
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('setup').classList.remove('hidden');
+      document.getElementById('go').onclick = function () {
+        var u = document.getElementById('url').value.trim().replace(/\/+$/, '');
+        if (!u) return;
+        cfg.baseUrl = u + '/app'; try { localStorage.setItem(CFG, JSON.stringify(cfg)); } catch (e) {}
+        location.replace(u);
+      };
+    })();
+  </script>
   <script src="config.js"></script>
-  <!-- optional per-install override (gitignored): server URL + device token + agent name -->
   <script src="config.local.js" onerror="void 0"></script>
-  <script src="app.js"></script>
 </body>
 </html>
