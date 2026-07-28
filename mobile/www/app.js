@@ -69,7 +69,7 @@ function setTalk(state) {
 
 // ---------- SSE ----------
 function connect() {
-  if (!cfg.baseUrl) { openSheet('Set your server URL to connect.'); return; }
+  if (!cfg.baseUrl || !cfg.token) { openSheet('Paste your device token to connect.'); return; }
   if (es) { es.close(); es = null; }
   setStatus('connecting…', 'pill-warn');
   const url = `${cfg.baseUrl}/gw/stream?token=${encodeURIComponent(cfg.token)}&device=${encodeURIComponent(cfg.deviceId)}&name=${encodeURIComponent(cfg.name)}`;

@@ -24,7 +24,7 @@
       <p>Enter your asmltr instance to open its dashboard. The assistant (⚙ set-up) works system-wide via the assist gesture.</p>
       <input id="url" placeholder="https://your-asmltr-host" inputmode="url" autocapitalize="off" />
       <button id="go">Open dashboard</button>
-      <p style="margin-top:16px"><a href="assistant.html">Open the voice assistant instead →</a></p>
+      <p style="margin-top:14px;font-size:12px">The voice assistant is system-wide: set asmltr as your Digital assistant app, then use the assist gesture.</p>
     </div>
   </div>
   <script>
@@ -36,13 +36,15 @@
       var nd = window.ASMLTR_DEFAULTS || {};
       var base = (cfg.baseUrl || nd.baseUrl || '').replace(/\/+$/, '');
       var dash = base ? base.replace(/\/app$/, '') : '';
-      if (dash) { location.replace(dash); return; }
+      function syncNative() { try { if (window.AsmltrNative && window.AsmltrNative.saveConfig && base) window.AsmltrNative.saveConfig(base, '', ''); } catch (e) {} }
+      if (dash) { syncNative(); location.replace(dash); return; }
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('setup').classList.remove('hidden');
       document.getElementById('go').onclick = function () {
         var u = document.getElementById('url').value.trim().replace(/\/+$/, '');
         if (!u) return;
         cfg.baseUrl = u + '/app'; try { localStorage.setItem(CFG, JSON.stringify(cfg)); } catch (e) {}
+        try { if (window.AsmltrNative && window.AsmltrNative.saveConfig) window.AsmltrNative.saveConfig(u + '/app', '', ''); } catch (e) {}
         location.replace(u);
       };
     })();

@@ -39,6 +39,7 @@ public class AsmltrSession extends VoiceInteractionSession {
     s.setJavaScriptEnabled(true);
     s.setDomStorageEnabled(true);
     s.setMediaPlaybackRequiresUserGesture(false); // let TTS/cues autoplay
+    web.addJavascriptInterface(new NativeConfig(getContext()), "AsmltrNative"); // overlay ⚙ can persist config
     web.setWebChromeClient(new WebChromeClient() {
       @Override public void onPermissionRequest(PermissionRequest request) { request.grant(request.getResources()); } // mic in the overlay WebView
     });
