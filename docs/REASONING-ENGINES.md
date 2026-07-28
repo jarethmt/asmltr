@@ -308,7 +308,9 @@ stays a fallback for engines without MCP but with a shell.)
   the *current sender's* trust scope) is rebuilt per message in `server.js` and passed to `runTurn` every turn.
   How it lands differs per engine: **claude** puts it on a dedicated channel (`appendSystemPrompt`), so it isn't
   accumulated into history; **gemini** is stateless per turn (no history replay), so re-composing every turn is
-  required; **codex** resumes by replaying thread history, so the block accumulates once per turn (token cost on
+  required (this holds until gemini session persistence lands — the planned `--session-file` continuity path — at
+  which point gemini gains history replay and inherits codex's accumulation property, so the decision below extends
+  to it); **codex** resumes by replaying thread history, so the block accumulates once per turn (token cost on
   long threads). **Decision (#54): keep the full per-turn re-assert on codex resume.** It's not waste — a codex
   thread can carry messages from different senders/tiers, and re-asserting the *current* sender's scope each turn
   is a safety property. The tempting "send once on turn 1" optimization is a trust-scope bug: turn-1's scope would
