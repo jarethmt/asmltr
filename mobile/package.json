@@ -1,0 +1,20 @@
+{
+  "name": "asmltr-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "asmltr mobile assistant — Capacitor shell over the voice web brain + a native assist trigger",
+  "scripts": {
+    "sync": "cap sync android",
+    "add:android": "cap add android",
+    "patch": "node scripts/patch-android.js",
+    "apk:debug": "cd android && ./gradlew assembleDebug",
+    "build": "bash build.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

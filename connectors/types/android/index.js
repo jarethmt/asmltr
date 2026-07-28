@@ -180,6 +180,18 @@ async function start(ctx) {
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
 
+  // --- APK download: open (the app isn't a secret; the device token gates the API, not the binary) ---
+  // Default: the built debug APK; override with ASMLTR_ANDROID_APK. Install straight from the instance:
+  // https://<host>/app/gw/download
+  const APK = process.env.ASMLTR_ANDROID_APK || path.join(__dirname, '..', '..', '..', 'mobile', 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+  app.get('/gw/app', (req, res) => res.json({ available: fs.existsSync(APK), download: '/app/gw/download', filename: 'asmltr.apk' }));
+  app.get('/gw/download', (req, res) => {
+    if (!fs.existsSync(APK)) return res.status(404).json({ ok: false, error: 'APK not built yet' });
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="asmltr.apk"');
+    fs.createReadStream(APK).pipe(res);
+  });
+
   const httpServer = app.listen(PORT, BIND, () => ctx.log(`android device gateway on ${BIND}:${PORT} (${requireToken ? 'token required' : 'OPEN'})`));
 
   return {

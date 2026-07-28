@@ -1,0 +1,7 @@
+{
+  "appId": "com.asmltr.assistant",
+  "appName": "asmltr",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}
