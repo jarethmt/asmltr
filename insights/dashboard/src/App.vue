@@ -6,6 +6,7 @@ import { api, update as updateApi, identity, authApi, vaultApi } from '@/service
 import { NAV_ROUTES } from '@/router'
 import WindowHost from '@/components/WindowHost.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
+import AndroidInstallBar from '@/components/AndroidInstallBar.vue'
 import AuthScreen from '@/views/AuthScreen.vue'
 import { useTurnNotifications } from '@/composables/useTurnNotifications'
 import { useUpdateProgress } from '@/composables/useUpdateProgress'
@@ -267,4 +268,7 @@ onUnmounted(() => {
     <!-- floating chat windows (session chats + the observer) live here, above everything -->
     <WindowHost />
   </div>
+
+  <!-- Android-only, dismissible: prompt to install the native app (hands-free assist) -->
+  <AndroidInstallBar />
 </template>
