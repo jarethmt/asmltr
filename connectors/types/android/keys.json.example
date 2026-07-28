@@ -1,0 +1,6 @@
+{
+  "_comment": "Device tokens for the android connector. Copy to keys.json (gitignored). Each token maps a paired device to a trust identity so moderation/trust apply per caller. Mint a token per device in the GUI (or generate a random one) and store it in the app during pairing.",
+  "keys": [
+    { "key": "REPLACE_WITH_A_LONG_RANDOM_DEVICE_TOKEN", "identity": "owner", "username": "My Pixel", "note": "primary phone" }
+  ]
+}

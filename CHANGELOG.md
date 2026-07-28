@@ -13,6 +13,13 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 - Always-on **CURRENT SPEAKER** line in every turn's system prompt — authoritatively names the
   current sender (even without a cast profile) so an assistant on a shared, multi-person channel
   doesn't confuse who it's talking to or default to the box owner.
+- **`android` connector — a device gateway** (`connectors/types/android/`). Makes a mobile app a
+  first-class channel: the phone holds an SSE stream (`GET /gw/stream`) and POSTs turns
+  (`POST /gw/turn`) that run through the core like any other channel — so its session
+  (`android:<instance>:device:<id>`) is trust-scoped, seen by the interoception agent, and
+  takeover-able from the web GUI, and `asmltr send android <device>` / announcements / steer push
+  to the phone over its stream (`POST /out`). Voice I/O stays edge-local on the device via the
+  existing `/v2` speech endpoints. Token-authed per device (gitignored `keys.json`).
 
 ### Changed
 
