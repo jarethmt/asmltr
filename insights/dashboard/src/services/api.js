@@ -287,6 +287,8 @@ export const voice = {
   // { tts: { voice, model, provider, format }, stt: { model, language } }. Partial updates merge.
   getConfig: () => getCore('/v2/voice/config'),
   setConfig: (body) => postCore('/v2/voice/config', body),
+  // Selectable voices for a provider (ElevenLabs = live from the account; OpenAI = presets).
+  voices: (provider) => getCore('/v2/voice/voices' + (provider ? `?provider=${encodeURIComponent(provider)}` : '')),
   // Synthesize text → one audio clip (no agent turn). Returns { mime, b64 } for the chat read-aloud.
   tts: (text, opts = {}) => postCore('/v2/tts', { text, ...opts }),
   assetUrl: (name) => `/v2/voice/asset/${name}`,

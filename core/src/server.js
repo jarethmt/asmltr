@@ -1091,6 +1091,25 @@ app.post('/v2/voice/config', (req, res) => {
   const { keyName: _t, ...t } = ttsCfg; const { keyName: _s, ...s } = sttCfg;
   res.json({ tts: t, stt: s });
 });
+// List selectable voices for a provider so the GUI can show REAL choices (ElevenLabs voices are per
+// account, fetched live; OpenAI has fixed presets). Query: ?provider=elevenlabs|openai (default: current).
+app.get('/v2/voice/voices', async (req, res) => {
+  const provider = req.query.provider || tts.config().provider;
+  if (provider === 'elevenlabs') {
+    try {
+      const s = await vault.getSecret('elevenlabs_api_key', 'list voices');
+      if (!s || !s.value || s.value === 'None') return res.json({ provider, voices: [], error: 'ElevenLabs API key not set' });
+      const r = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': s.value } });
+      if (!r.ok) return res.json({ provider, voices: [], error: `ElevenLabs ${r.status}` });
+      const j = await r.json();
+      const voices = (j.voices || []).map((v) => ({ id: v.voice_id, label: v.name + (v.category ? ` · ${v.category}` : '') }));
+      return res.json({ provider, voices });
+    } catch (e) { return res.json({ provider, voices: [], error: e.message }); }
+  }
+  // OpenAI: fixed preset voices.
+  const openai = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map((v) => ({ id: v, label: v }));
+  return res.json({ provider: 'openai', voices: openai });
+});
 
 // Synthesize arbitrary text → one audio clip, WITHOUT running an agent turn (that's what /v2/speak
 // does). This is the "read this reply aloud" primitive for the chat's TTS toggle. Uses the configured

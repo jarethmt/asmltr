@@ -374,13 +374,26 @@ const vcfg = ref(null) // { tts: { provider, voice, model, … }, stt: { model, 
 const customVoice = ref('')
 const customTtsModel = ref('')
 const ttsProviderChoices = computed(() => field('voice', 'tts_provider').choices || [])
-const ttsVoiceChoices = computed(() => field('voice', 'tts_voice').choices || [])
+// Live voices for the selected provider (ElevenLabs = the account's voices; OpenAI = presets). Falls
+// back to the manifest's static list only if the live fetch hasn't populated.
+const dynamicVoices = ref(null)
+const voicesLoading = ref(false)
+const ttsVoiceChoices = computed(() => dynamicVoices.value || field('voice', 'tts_voice').choices || [])
 const ttsModelChoices = computed(() => field('voice', 'tts_model').choices || [])
 const sttModelChoices = computed(() => field('voice', 'stt_model').choices || [])
-async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig() } catch (_) {} }
+async function loadVoices(provider) {
+  voicesLoading.value = true
+  try { const r = await voice.voices(provider); dynamicVoices.value = (r.voices || []).map((v) => ({ id: v.id, label: v.label })) }
+  catch (_) { dynamicVoices.value = null }
+  finally { voicesLoading.value = false }
+}
+async function loadVoiceCfg() { try { vcfg.value = await voice.getConfig(); await loadVoices(vcfg.value?.tts?.provider) } catch (_) {} }
 async function setVoiceCfg(part) {
   busy.value = 'voicecfg'; notice.value = ''
-  try { vcfg.value = await voice.setConfig(part); notice.value = 'Voice settings saved — applies to the next clip.' }
+  try {
+    vcfg.value = await voice.setConfig(part); notice.value = 'Voice settings saved — applies to the next clip.'
+    if (part.tts && part.tts.provider) await loadVoices(part.tts.provider) // provider changed → refresh the voice list
+  }
   catch (e) { notice.value = 'Failed: ' + e.message } finally { busy.value = '' }
 }
 async function setCustomVoice() { const v = customVoice.value.trim(); if (v) { await setVoiceCfg({ tts: { voice: v } }); customVoice.value = '' } }
@@ -713,6 +726,7 @@ onMounted(async () => {
               <div class="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">{{ field('voice','tts_voice').label }}
                 <span class="normal-case text-slate-600">— {{ field('voice','tts_voice').desc }}</span>
               </div>
+              <div v-if="voicesLoading" class="mb-2 flex items-center gap-2 text-[11px] text-slate-500"><Spinner size="xs" />Loading {{ vcfg.tts?.provider }} voices…</div>
               <div class="flex flex-wrap gap-2">
                 <button v-for="c in ttsVoiceChoices" :key="c.id" type="button" :disabled="busy === 'voicecfg'"
                   class="rounded-lg border px-3 py-2 text-left text-xs transition-colors"
