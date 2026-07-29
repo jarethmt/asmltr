@@ -13,7 +13,9 @@ function mockCtx() {
   return {
     instanceId: 'test',
     config: { http_port: PORT, bind_host: '127.0.0.1', require_token: false },
-    core: { handleStream: async (_env, onText) => { onText('Hello '); onText('world'); } },
+    // core.handleStream(env, handlers): handlers is a callbacks object (or a bare fn treated as onDelta),
+    // per connectors/sdk/index.js. The android connector passes { onDelta, ... }, so drive onDelta here.
+    core: { handleStream: async (_env, h) => { h.onDelta('Hello '); h.onDelta('world'); } },
     emit() {}, log() {}, heartbeat() {},
   };
 }
