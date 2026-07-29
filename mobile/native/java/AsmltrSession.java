@@ -35,6 +35,7 @@ public class AsmltrSession extends VoiceInteractionSession {
   @SuppressLint("SetJavaScriptEnabled")
   @Override public View onCreateContentView() {
     web = new WebView(getContext());
+    web.setBackgroundColor(android.graphics.Color.TRANSPARENT); // show the app behind the glass card
     WebSettings s = web.getSettings();
     s.setJavaScriptEnabled(true);
     s.setDomStorageEnabled(true);

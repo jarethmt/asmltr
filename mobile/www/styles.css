@@ -1,37 +1,35 @@
 :root {
   --bg: #0b0b12; --panel: #14141f; --panel2: #1b1b2a; --text: #e9e9f2; --muted: #9a9ab0;
-  /* accent/accent2 are set at runtime from the identity signature palette (fallback: violet/pink) */
-  --accent: 139 92 246; --accent2: 236 72 153;
-  --on: #22c55e; --warn: #f59e0b; --off: #6b7280;
+  --accent: 139 92 246; --accent2: 236 72 153; --on: #22c55e; --warn: #f59e0b; --off: #6b7280;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 body { display: flex; flex-direction: column; height: 100dvh; }
-.grad { background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent2))); }
+.overlay-only { display: none; }
+
+/* ---- the card (full screen in the standalone page) ---- */
+.card { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
 .bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
-  padding-top: max(12px, env(safe-area-inset-top)); background: var(--panel); border-bottom: 1px solid #0006; }
-.brand { font-weight: 800; letter-spacing: .3px;
-  background: linear-gradient(90deg, rgb(var(--accent)), rgb(var(--accent2)));
+  padding-top: max(12px, env(safe-area-inset-top)); background: var(--panel); border-bottom: 1px solid #ffffff0f; }
+.brand { font-weight: 800; letter-spacing: .3px; background: linear-gradient(90deg, rgb(var(--accent)), rgb(var(--accent2)));
   -webkit-background-clip: text; background-clip: text; color: transparent; }
-.right { display: flex; align-items: center; gap: 10px; }
-.icon { background: none; border: none; color: var(--muted); font-size: 20px; padding: 4px 8px; }
+.right { display: flex; align-items: center; gap: 8px; }
+.icon { background: none; border: none; color: var(--muted); font-size: 19px; padding: 4px 8px; cursor: pointer; }
 .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
-.pill-on { background: #14351f; color: var(--on); } .pill-warn { background: #3a2c10; color: var(--warn); }
-.pill-off { background: #22222e; color: var(--off); }
+.pill-on { background: #14351f; color: var(--on); } .pill-warn { background: #3a2c10; color: var(--warn); } .pill-off { background: #22222e; color: var(--off); }
 
 .log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .msg-row { display: flex; } .msg-row.user { justify-content: flex-end; } .msg-row.sys { justify-content: center; }
-.bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; }
+.bubble-msg, .bubble { }
+.msg-row .bubble, .msg-row.user .bubble, .msg-row.assistant .bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; }
 .user .bubble { background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent2))); color: #fff; border-bottom-right-radius: 4px; }
 .assistant .bubble { background: var(--panel2); border-bottom-left-radius: 4px; }
 .sys .bubble { background: transparent; color: var(--muted); font-size: 13px; max-width: 90%; text-align: center; }
 
-/* thinking + tool steps */
-.steps { display: flex; flex-direction: column; gap: 4px; padding: 2px 2px; }
-.step { font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 10px; background: #ffffff08;
-  border-left: 2px solid rgb(var(--accent)); max-width: 90%; white-space: pre-wrap; word-wrap: break-word; }
+.steps { display: flex; flex-direction: column; gap: 4px; }
+.step { font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 10px; background: #ffffff08; border-left: 2px solid rgb(var(--accent)); max-width: 90%; white-space: pre-wrap; word-wrap: break-word; }
 .step-tool { color: #cbd5e1; font-family: ui-monospace, monospace; font-size: 11.5px; }
 
 .controls { padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
@@ -41,27 +39,56 @@ body { display: flex; flex-direction: column; height: 100dvh; }
 .talk.rec { background: linear-gradient(120deg, #ef4444, #f97316); animation: pulse 1.2s infinite; }
 .talk.busy { background: var(--panel2); color: var(--muted); }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 #ef444455; } 50% { box-shadow: 0 0 0 12px #ef444400; } }
-
 .kbdrow { display: flex; gap: 8px; }
-.kbd { flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid #333; background: var(--panel2); color: var(--text); font-size: 15px; }
-.kbdSend { border: none; border-radius: 12px; padding: 0 18px; color: #fff; font-size: 16px;
-  background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent2))); }
+.kbd { flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid #ffffff1a; background: var(--panel2); color: var(--text); font-size: 15px; }
+.kbdSend { border: none; border-radius: 12px; padding: 0 18px; color: #fff; font-size: 16px; background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent2))); }
 
-.sheet { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-end; z-index: 10; }
+.sheet { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-end; z-index: 40; }
 .sheet.hidden { display: none; }
 .sheet-card { width: 100%; background: var(--panel); border-radius: 18px 18px 0 0; padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 .sheet-card h2 { margin: 0 0 14px; font-size: 18px; }
 .sheet-card label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-.sheet-card input { width: 100%; margin-top: 4px; padding: 11px 12px; border-radius: 10px; border: 1px solid #333; background: var(--panel2); color: var(--text); font-size: 15px; }
+.sheet-card input { width: 100%; margin-top: 4px; padding: 11px 12px; border-radius: 10px; border: 1px solid #ffffff1a; background: var(--panel2); color: var(--text); font-size: 15px; }
 .row { display: flex; gap: 10px; margin-top: 6px; }
 .row button { flex: 1; padding: 13px; border-radius: 12px; border: none; font-size: 15px; font-weight: 700; }
 .primary { background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent2))); color: #fff; }
 .secondary { background: var(--panel2); color: var(--text); }
 .msg { color: var(--muted); font-size: 13px; min-height: 18px; margin: 10px 0 0; }
 
-/* OVERLAY mode (loaded by the native VoiceInteractionSession as a compact floating panel) */
-body.overlay { height: auto; max-height: 60dvh; background: #0b0b12ee; border-radius: 18px 18px 0 0; overflow: hidden; }
-body.overlay .bar { background: transparent; border: none; }
-body.overlay .log { max-height: 34dvh; }
-body.overlay .kbdrow { display: none; }        /* overlay is voice-first; full app has the keyboard */
-body.overlay .talk { padding: 14px; font-size: 16px; }
+.bubble { display: none; }
+
+/* ============ OVERLAY MODE — floating glass card over any app ============ */
+body.overlay { background: transparent; display: block; height: 100dvh; overflow: hidden; }
+body.overlay .overlay-only { display: inline-flex; }
+
+body.overlay .card {
+  position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  width: min(94vw, 460px); max-height: 74dvh; margin-left: 0;
+  /* glassmorphism */
+  background: linear-gradient(160deg, rgba(30,30,46,0.72), rgba(16,16,26,0.66));
+  backdrop-filter: blur(22px) saturate(140%); -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 24px;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.14);
+  overflow: hidden; left: 50%;
+}
+/* re-anchor the fixed transform (translateX centering) */
+body.overlay .card { left: 50%; }
+body.overlay .bar { background: rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.08); cursor: grab; touch-action: none; }
+body.overlay .bar:active { cursor: grabbing; }
+body.overlay .log { max-height: 40dvh; }
+body.overlay .kbdrow { }
+body.overlay .talk { box-shadow: 0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.25); }
+body.overlay .assistant .bubble { background: rgba(255,255,255,0.07); }
+body.overlay .kbd { background: rgba(255,255,255,0.06); }
+
+/* minimized → collapse the card, show the floating bubble */
+body.overlay.minimized .card { display: none; }
+body.overlay.minimized .bubble {
+  display: flex; align-items: center; justify-content: center;
+  position: fixed; right: 18px; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 30;
+  width: 62px; height: 62px; border: 1px solid rgba(255,255,255,0.18); border-radius: 50%; font-size: 26px; color: #fff;
+  background: radial-gradient(120% 120% at 30% 25%, rgba(255,255,255,0.28), rgba(0,0,0,0.1)), linear-gradient(140deg, rgb(var(--accent)), rgb(var(--accent2)));
+  backdrop-filter: blur(10px); box-shadow: 0 12px 34px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.4);
+  animation: floaty 3.2s ease-in-out infinite;
+}
+@keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }

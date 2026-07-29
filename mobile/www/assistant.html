@@ -8,29 +8,29 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="bar">
-    <div class="brand"><span id="agentName">assistant</span></div>
-    <div class="right">
-      <span id="status" class="pill pill-off">offline</span>
-      <button id="settingsBtn" class="icon" aria-label="Settings">⚙</button>
-    </div>
-  </header>
+  <button id="bubble" class="bubble" aria-label="Open assistant">🎙</button>
 
-  <main id="log" class="log" aria-live="polite"></main>
+  <div id="card" class="card">
+    <header id="grip" class="bar">
+      <div class="brand"><span id="agentName">assistant</span></div>
+      <div class="right">
+        <span id="status" class="pill pill-off">offline</span>
+        <button id="settingsBtn" class="icon" aria-label="Settings">⚙</button>
+        <button id="min" class="icon overlay-only" aria-label="Minimize">▁</button>
+      </div>
+    </header>
 
-  <footer class="controls">
-    <button id="talk" class="talk" aria-label="Talk">
-      <span class="mic">🎙</span>
-      <span id="talkLabel" class="talkLabel">Tap to talk</span>
-    </button>
-    <div class="kbdrow">
-      <input id="kbd" class="kbd" type="text" enterkeyhint="send" autocomplete="off"
-             autocapitalize="sentences" placeholder="Type a message…" />
-      <button id="kbdSend" class="kbdSend" aria-label="Send">➤</button>
-    </div>
-  </footer>
+    <main id="log" class="log" aria-live="polite"></main>
 
-  <!-- Settings sheet -->
+    <footer class="controls">
+      <button id="talk" class="talk" aria-label="Talk"><span class="mic">🎙</span><span id="talkLabel" class="talkLabel">Tap to talk</span></button>
+      <div class="kbdrow">
+        <input id="kbd" class="kbd" type="text" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" placeholder="Type a message…" />
+        <button id="kbdSend" class="kbdSend" aria-label="Send">&#10148;</button>
+      </div>
+    </footer>
+  </div>
+
   <div id="sheet" class="sheet hidden">
     <div class="sheet-card">
       <h2>Connection</h2>
@@ -38,10 +38,7 @@
       <label>Device token<input id="cfgToken" placeholder="paste your device token" /></label>
       <label>Display name<input id="cfgName" placeholder="My Pixel" /></label>
       <label>Device id<input id="cfgDevice" readonly /></label>
-      <div class="row">
-        <button id="cfgTest" class="secondary">Test</button>
-        <button id="cfgSave" class="primary">Save &amp; connect</button>
-      </div>
+      <div class="row"><button id="cfgTest" class="secondary">Test</button><button id="cfgSave" class="primary">Save &amp; connect</button></div>
       <p id="cfgMsg" class="msg"></p>
     </div>
   </div>
