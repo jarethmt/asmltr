@@ -69,6 +69,7 @@ const meta = {
     required: ['bot_token_bws_key'],
     properties: {
       bot_token_bws_key: { type: 'string', title: 'Bot token (Bitwarden secret key)' },
+      system_prompt: { type: 'string', title: 'Instance persona: prepended to every turn\'s system extra, ABOVE the generic Discord context. For single-purpose bots (e.g. a meeting chair) whose role must override conversational defaults.' },
       http_port: { type: 'integer', title: 'Send-message HTTP port', default: 3016 },
       dm_allowed_user_id: { type: 'string', title: 'Allowed DM user id', default: '' },
       min_response_interval_ms: { type: 'integer', title: 'Min ms between autonomous responses', default: 10000 },
@@ -310,7 +311,8 @@ async function start(ctx) {
     const mentionLine = iAmMentioned
       ? `It **@-mentions YOU (${NAME})**${others.length ? `, along with ${others.join(', ')}` : ''} — so it IS addressed to you; answer it.`
       : (others.length ? `It @-mentions ${others.join(', ')} — NOT you.` : 'It @-mentions no one specifically.');
-    return `DISCORD CONTEXT
+    const persona = cfg.system_prompt ? `INSTANCE ROLE — THIS OVERRIDES EVERYTHING BELOW IT:\n${cfg.system_prompt}\n\n` : '';
+    return `${persona}DISCORD CONTEXT
 - You are **${NAME}** — your Discord handle here is \`${client.user.username}\`. "@${NAME}", the id <@${client.user.id}>, and any message attributed to \`${client.user.username}\` are YOU. Anyone else — including other AI agents writing in the first person ("I"/"my") — is NOT you; never mistake their words, or your own earlier messages, for something newly said to you.
 - Server: ${context.location.serverName} · Channel: #${context.location.channelName} (id ${message.channel.id}) · Participants: ${context.location.participants.join(', ')}
 - ${mode}
