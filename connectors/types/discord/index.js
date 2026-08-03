@@ -41,6 +41,7 @@ function isSilence(text) {
 }
 // Control commands that change the bot's behavior — restricted to the bot's owner.
 const OWNER_ONLY_CMDS = new Set([
+  'attend', 'attend here', 'unattend', 'unattend here', 'dismiss',
   'silence', 'be quiet', 'quiet', 'shush', 'speak', 'unsilence', 'wake up', 'resume',
   'mute', 'mute here', 'mute this channel', 'ignore this channel', 'disable', 'disable here',
   'unmute', 'unmute here', 'listen here', 'unmute this channel', 'enable', 'enable here',
@@ -142,6 +143,10 @@ async function start(ctx) {
   // fully ignored — no relay to core, no usage (mention-commands still work so you can re-enable).
   const settingsFile = path.join(dataDir, `discord-${ctx.instanceId}-settings.json`);
   const channelStates = new Map(); // channel_id -> boolean (explicit override)
+  // attendChannels: channels treated like DMs — respond to EVERY message, no mention or
+  // heuristics needed (meeting/ballot/ticket channels). Toggled by `@bot attend` /
+  // `@bot unattend` (owner-only), persisted alongside channel states.
+  const attendChannels = new Set();
   let channelsDefault = cfg.channels_default !== false; // unlisted channels: enabled unless config says otherwise
   let engageAllBots = false;
   try {
@@ -150,10 +155,11 @@ async function start(ctx) {
     if (s.channels && typeof s.channels === 'object') for (const [c, on] of Object.entries(s.channels)) channelStates.set(String(c), !!on);
     if (typeof s.channelsDefault === 'boolean') channelsDefault = s.channelsDefault;
     engageAllBots = !!s.engageAllBots;
+    (s.attend || []).forEach((c) => attendChannels.add(String(c)));
   } catch (_) {}
   function channelEnabled(cid) { return channelStates.has(String(cid)) ? channelStates.get(String(cid)) : channelsDefault; }
   function saveSettings() {
-    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ channels: Object.fromEntries(channelStates), channelsDefault, engageAllBots })); }
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify({ channels: Object.fromEntries(channelStates), channelsDefault, engageAllBots, attend: [...attendChannels] })); }
     catch (e) { ctx.log('settings persist failed: ' + e.message); }
   }
 
@@ -211,6 +217,7 @@ async function start(ctx) {
   // --- autonomous participation (verbatim heuristics) ---
   function shouldRespondTo(message) {
     if (message.channel.type === 1) return message.author.id === dmUser; // DM: only the owner
+    if (attendChannels.has(String(message.channel.id))) return true; // attended channel: like a DM
     if (message.mentions.has(client.user)) return true;
     if (message.attachments.size > 0) return true;
     const now = Date.now();
@@ -265,6 +272,10 @@ async function start(ctx) {
         silenced = true; await message.channel.send(`🤐 Mention-only mode — I'll stay quiet unless @-mentioned. \`@${me} speak\` to restore.`); return true;
       case 'speak': case 'unsilence': case 'wake up': case 'resume':
         silenced = false; await message.channel.send('👋 Autonomous participation restored.'); return true;
+      case 'attend': case 'attend here':
+        attendChannels.add(String(cid)); saveSettings(); await message.channel.send(`📌 Attending this channel — I'll respond to every message here, like a DM. \`@${me} unattend\` to revert.`); return true;
+      case 'unattend': case 'unattend here': case 'dismiss':
+        attendChannels.delete(String(cid)); saveSettings(); await message.channel.send('👋 No longer attending — back to mentions and my usual judgment here.'); return true;
       case 'mute': case 'mute here': case 'mute this channel': case 'ignore this channel': case 'disable': case 'disable here':
         channelStates.set(cid, false); saveSettings(); await message.channel.send(`🔇 Disabled in this channel — I'll ignore everything here until \`@${me} unmute\`.`); return true;
       case 'unmute': case 'unmute here': case 'listen here': case 'unmute this channel': case 'enable': case 'enable here':
