@@ -21,6 +21,25 @@ const id = 'claude';
 const cheapModel = process.env.ASMLTR_TITLE_MODEL || 'haiku';
 let _lastModel = null; // the concrete model id the alias resolved to (surfaced to the GUI)
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// Resolve the NATIVE `claude` binary so the SDK spawns it DIRECTLY by absolute path.
+// The SDK's default is `node <bundled cli.js>`, but under PM2 the child env can drop PATH →
+// "Failed to spawn Claude Code process: spawn node ENOENT". Pointing at the self-contained
+// native binary sidesteps `node` resolution entirely (isNativeBinary → spawn(binary)).
+// Resolved PER TURN, not at module load: the CLI auto-updater repoints the ~/.local/bin/claude
+// symlink and eventually prunes old versions/<n> binaries — a realpath frozen at startup
+// dangles after enough updates and every turn then fails until the core is restarted.
+// ASMLTR_CLAUDE_BIN (the engine's binEnv, see shared/engines.js) overrides the search;
+// set it to a nonexistent path to force the SDK's bundled runtime.
+function resolveClaudeBin() {
+  const cands = [process.env.ASMLTR_CLAUDE_BIN, path.join(os.homedir(), '.local', 'bin', 'claude'), '/usr/local/bin/claude'].filter(Boolean);
+  for (const c of cands) { try { return fs.realpathSync(c); } catch (_) { /* try next */ } }
+  return null;
+}
+
 async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortController, onEvent, onDelta, onSegment, onTool, onThinking, images = [] }) {
   const query = q();
   const options = {
@@ -30,6 +49,8 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
   };
   const _model = require('../../../shared/runtime').getModel();
   if (_model) options.model = _model;
+  const claudeBin = resolveClaudeBin();
+  if (claudeBin) options.pathToClaudeCodeExecutable = claudeBin; // PM2-safe: spawn the native binary, not `node cli.js`
   const thinkTokens = Number(process.env.ASMLTR_MAX_THINKING_TOKENS ?? 4000);
   if (thinkTokens > 0) options.maxThinkingTokens = thinkTokens;
   if (cwd) options.cwd = cwd;
@@ -118,6 +139,8 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, abortControll
 async function complete({ prompt, model, appendSystemPrompt = null, maxTurns = 1 }) {
   const query = q();
   const options = { stream: true, permissionMode: 'bypassPermissions', model, maxTurns };
+  const claudeBin = resolveClaudeBin();
+  if (claudeBin) options.pathToClaudeCodeExecutable = claudeBin;
   if (appendSystemPrompt) options.systemPrompt = { type: 'preset', preset: 'claude_code', append: appendSystemPrompt };
   let out = '';
   const response = await query({ prompt, options });
