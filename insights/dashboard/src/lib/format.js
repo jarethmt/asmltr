@@ -61,9 +61,11 @@ export function activityMs(unix) {
 }
 
 /**
- * Live badge word. Collector web rows stay status=active (no pid for reconcile).
- * After last_activity + idle, show the existing `idle` word instead of Active.
- * Do not hide the card. A live pid (tracker / grok child) stays Active.
+ * Derived status word (History SessionDetail, Live exclusion).
+ * Collector web rows stay status=active (no pid for reconcile). After
+ * last_activity + idle, return `idle` so Live can drop the card and
+ * History can still show the existing idle word. Do not badge Live as Idle —
+ * past-idle cards must not appear there. A live pid stays Active.
  */
 export function displayStatus(session, now = Date.now(), idleMs = DEFAULT_IDLE_MS) {
   const stored = session && session.status

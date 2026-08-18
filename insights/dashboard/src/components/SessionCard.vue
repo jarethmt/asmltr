@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import SurfaceBadge from './SurfaceBadge.vue'
-import { statusMeta, displayStatus, fmtAge, fmtNum, truncate } from '@/lib/format'
+import { statusMeta, fmtAge, fmtNum, truncate } from '@/lib/format'
 
 // One-click copy of the session id (the conversation_key) — the id you hand to `asmltr context <id>`.
 const copied = ref(false)
@@ -23,7 +23,7 @@ const props = defineProps({
 })
 defineEmits(['open', 'toggle-channel'])
 
-const st = computed(() => statusMeta(displayStatus(props.session, props.now)))
+const st = computed(() => statusMeta(props.session.status))
 const monitored = computed(() => props.channelState !== false) // default enabled
 // Tooltip spelling out exactly what the toggle does (capability-driven; only shows when mutable).
 const monitorTip = computed(() => {

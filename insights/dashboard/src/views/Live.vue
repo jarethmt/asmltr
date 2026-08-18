@@ -135,8 +135,12 @@ function matchFilter(s) {
   return true
 }
 
+const liveSessions = computed(() =>
+  store.sessions.filter((s) => displayStatus(s, now.value) === 'active')
+)
+
 const ephemeral = computed(() =>
-  store.sessions.filter((s) => s.kind === 'ephemeral' && matchFilter(s)).sort(byActivity)
+  liveSessions.value.filter((s) => s.kind === 'ephemeral' && matchFilter(s)).sort(byActivity)
 )
 
 function byActivity(a, b) {
@@ -144,16 +148,14 @@ function byActivity(a, b) {
 }
 
 const totalTokens = computed(() =>
-  store.sessions.reduce((sum, s) => sum + (s.tokens_total || 0), 0)
+  liveSessions.value.reduce((sum, s) => sum + (s.tokens_total || 0), 0)
 )
 
-const liveActiveCount = computed(() =>
-  store.sessions.filter((s) => displayStatus(s, now.value) === 'active').length
-)
+const liveActiveCount = computed(() => liveSessions.value.length)
 
 const surfacesActive = computed(() => {
   const map = {}
-  for (const s of store.sessions) map[s.surface] = (map[s.surface] || 0) + 1
+  for (const s of liveSessions.value) map[s.surface] = (map[s.surface] || 0) + 1
   return Object.entries(map).sort((a, b) => b[1] - a[1])
 })
 
