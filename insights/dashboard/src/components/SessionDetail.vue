@@ -7,7 +7,7 @@
 //    reply routes back to the origin channel.
 //  • interactive `asmltr claude` (tmux) — compose = type into the pane (send-keys).
 // The header title is inline-editable — a manual title locks against AI regeneration.
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import { api, control, webChat, parsePayload } from '@/services/api'
 import { manager } from '@/services/manager'
@@ -172,9 +172,13 @@ function cancelEditTitle() { editingTitle.value = false }
 const seeded = ref([])
 const loading = ref(true)
 const scrollBox = ref(null)
-const STICK_PX = 64
+const bottomSentinel = ref(null)
+const STICK_PX = 80
 const stickToBottom = ref(true)
 const streamTick = ref(0)
+let pinning = false
+let pinClear = 0
+const scrollerUnbind = []
 
 const maxSeededTs = computed(() => (seeded.value.length ? seeded.value[seeded.value.length - 1].ts : 0))
 const cutoffTs = ref(null)
@@ -193,28 +197,76 @@ async function load() {
   finally { loading.value = false; stickToBottom.value = true; scrollToBottom(true) }
 }
 function nearBottom(el) {
+  if (!el) return true
   return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_PX
 }
-function onTranscriptScroll() {
-  const el = scrollBox.value
+function isScroller(el) {
+  if (!el || el.nodeType !== 1) return false
+  if (el === document.documentElement || el === document.body) return false
+  const oy = getComputedStyle(el).overflowY
+  return oy === 'auto' || oy === 'scroll' || oy === 'overlay'
+}
+function realScrollers(from) {
+  const out = []
+  let n = from
+  while (n && n !== document.body) {
+    if (isScroller(n)) out.push(n)
+    n = n.parentElement
+  }
+  return out
+}
+function bindScrollerListeners() {
+  while (scrollerUnbind.length) scrollerUnbind.pop()()
+  const box = scrollBox.value
+  if (!box) return
+  // Pin + stick against the REAL overflow ancestors (window host / flex parent),
+  // not only scrollBox — 29a0331 set scrollTop on an inner div that never overflowed.
+  for (const el of realScrollers(box.parentElement)) {
+    const h = () => { if (!pinning) stickToBottom.value = nearBottom(el) }
+    el.addEventListener('scroll', h, { passive: true })
+    scrollerUnbind.push(() => el.removeEventListener('scroll', h))
+  }
+}
+function onTranscriptScroll(e) {
+  if (pinning) return
+  const el = (e && e.currentTarget) || scrollBox.value
   if (el) stickToBottom.value = nearBottom(el)
+}
+function pinNow() {
+  const box = scrollBox.value
+  const sent = bottomSentinel.value
+  pinning = true
+  clearTimeout(pinClear)
+  const targets = new Set()
+  if (box) {
+    targets.add(box)
+    for (const s of realScrollers(box)) targets.add(s)
+  }
+  if (sent) {
+    for (const s of realScrollers(sent)) targets.add(s)
+    try { sent.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' }) } catch (_) {}
+  }
+  for (const el of targets) {
+    try { el.scrollTop = el.scrollHeight } catch (_) {}
+  }
+  stickToBottom.value = true
+  pinClear = setTimeout(() => { pinning = false }, 80)
 }
 function scrollToBottom(force = false) {
   nextTick(() => {
-    const el = scrollBox.value
-    if (!el) return
-    if (force || stickToBottom.value) {
-      el.scrollTop = el.scrollHeight
-      stickToBottom.value = true
-    }
+    if (!force && !stickToBottom.value) return
+    pinNow()
+    requestAnimationFrame(() => {
+      if (force || stickToBottom.value) pinNow()
+    })
   })
 }
 function bumpStream() {
   streamTick.value++
   scrollToBottom()
 }
-onMounted(load)
-watch(key, load)
+onMounted(() => { load(); nextTick(bindScrollerListeners) })
+watch(key, () => { load(); nextTick(bindScrollerListeners) })
 
 // ---- chat rows (events → transcript) ----------------------------------------
 // eventRow (event → chat row) lives in @/lib/transcript so this chat and the Schedules last-run
@@ -282,7 +334,7 @@ function webSend() {
   const files = attached.value.slice()
   let body = text
   if (files.length) body += '\n\n' + files.map((f) => `[Attached file: ${f.name} → ${f.path}]`).join('\n')
-  const turn = { user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now() }
+  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now() })
   localTurns.value = [...localTurns.value, turn]
   stickToBottom.value = true
   scrollToBottom(true)
@@ -377,7 +429,7 @@ async function onStop() {
   finally { busy.value = false }
 }
 
-onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} stopSpeaking(); cancelRecording(); stopLive() })
+onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} while (scrollerUnbind.length) scrollerUnbind.pop()(); clearTimeout(pinClear); stopSpeaking(); cancelRecording(); stopLive() })
 
 const placeholder = computed(() => {
   if (isWeb.value) return 'Message this session… (Enter to send, Shift+Enter for a newline)'
@@ -417,6 +469,8 @@ const placeholder = computed(() => {
       </div>
     </template>
 
+    <!-- flex transcript pane: one bounded column so the window host cannot grow/clip (Titanic). -->
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <!-- meta strip -->
     <div class="mb-2 flex shrink-0 flex-wrap items-center gap-2 text-[11px]">
       <SurfaceBadge :surface="sess.surface" />
@@ -495,6 +549,8 @@ const placeholder = computed(() => {
           >{{ expanded[i] ? truncate(r.text, 6000) : truncate(r.text, 140) }}</span>
         </div>
       </template>
+      <div ref="bottomSentinel" aria-hidden="true" class="h-px w-full shrink-0"></div>
+    </div>
     </div>
 
     <template #footer>
