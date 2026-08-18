@@ -33,6 +33,9 @@ const DEFAULTS = {
     'gpt-4.1': { in: 2, out: 8 }, 'gpt-4.1-mini': { in: 0.4, out: 1.6 },
     'gpt-4o': { in: 2.5, out: 10 }, 'gpt-4o-mini': { in: 0.15, out: 0.6 },
     'o3': { in: 2, out: 8 }, 'o4-mini': { in: 1.1, out: 4.4 },
+    // xAI Grok (subscription via the CLI → billed:false; equivalent value at public API rates)
+    'grok-4': { in: 2, out: 6 }, 'grok-4.6': { in: 2, out: 6 }, 'grok-4.5': { in: 2, out: 6 },
+    'grok-3': { in: 3, out: 15 }, 'grok-code': { in: 1, out: 2 }, 'grok-build': { in: 1, out: 2 }, 'grok': { in: 2, out: 6 },
   },
   // $ per 1,000 characters
   tts: {

@@ -1,0 +1,15 @@
+{
+  "_comment": "Ivy on osiris. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner` / James Watt. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No Discord snowflakes.",
+  "roles": [],
+  "principals": [
+    {
+      "id": "owner",
+      "display_name": "James Watt",
+      "notes": "Owner of ivy. Full trust / bypass_moderation.",
+      "identifiers": [
+        { "surface": "assistant-web", "value": "owner" }
+      ],
+      "grants": [ { "bypass_moderation": true, "allow": ["*"] } ]
+    }
+  ]
+}

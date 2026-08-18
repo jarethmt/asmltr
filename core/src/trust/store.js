@@ -23,7 +23,7 @@ const Database = require('better-sqlite3');
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL'); // exec, not pragma(): Node 24 GC of throwaway Statement ABRTs
 db.exec(`
   CREATE TABLE IF NOT EXISTS principals (
     id TEXT PRIMARY KEY, display_name TEXT NOT NULL, default_tier INTEGER NOT NULL DEFAULT 0,
@@ -89,8 +89,11 @@ db.exec(`
 
 // verification_strength on identifiers (0 claimed · 1 channel-owned[default] · 2 vouched · 3 cryptographic).
 // Idempotent ALTER — the ledger tiers (2/3) are no-ops today; the column is the seam for later phases.
+// Hoist the Statement out of the try so Node 24 GC cannot destroy it mid-load
+// (ObjectWrap dtor -> RemoveEnvironmentCleanupHook ABRT when env is nullptr).
+const _identColsStmt = db.prepare('PRAGMA table_info(identifiers)');
 try {
-  const cols = db.prepare('PRAGMA table_info(identifiers)').all().map((c) => c.name);
+  const cols = _identColsStmt.all().map((c) => c.name);
   if (!cols.includes('verification_strength')) db.exec('ALTER TABLE identifiers ADD COLUMN verification_strength INTEGER NOT NULL DEFAULT 1');
 } catch (_) {}
 

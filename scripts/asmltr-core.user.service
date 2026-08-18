@@ -1,0 +1,17 @@
+[Unit]
+Description=asmltr-core (ivy on 127.0.0.1)
+After=network-online.target
+# User-level. adjutant has Linger=yes. Do not touch corona.service or rolodex.service.
+
+[Service]
+Type=simple
+WorkingDirectory=/home/adjutant/src/asmltr/core
+EnvironmentFile=-/home/adjutant/src/asmltr/.env
+Environment=HOME=/home/adjutant
+Environment=PATH=/home/adjutant/.local/bin:/home/adjutant/.grok/bin:/usr/bin:/bin
+ExecStart=/home/adjutant/.local/bin/node src/server.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

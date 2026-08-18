@@ -572,14 +572,15 @@ onMounted(async () => {
               <span v-if="engCheck[e.id] && engCheck[e.id].updateAvailable" class="pill border border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-300">update → {{ engCheck[e.id].latest }}</span>
               <span class="font-mono text-[10px] text-slate-500">{{ e.version || '—' }} · asmltr {{ e.id }}</span>
               <div class="ml-auto flex items-center gap-2">
-                <button v-if="!e.installed" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
-                <button v-else-if="engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
+                <button v-if="!e.installed && e.pkg" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />{{ engBusy===e.id ? 'installing…' : 'Install' }}</button>
+                <button v-else-if="e.pkg && engCheck[e.id] && engCheck[e.id].updateAvailable" type="button" class="act" :disabled="engBusy===e.id" @click="installEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />{{ engBusy===e.id ? 'updating…' : 'Update' }}</button>
                 <button v-if="e.installed && !e.isDefault" type="button" class="act" :disabled="!!engBusy" @click="setDefaultEngine(e.id)"><Spinner v-if="engBusy===e.id" size="xs" class="mr-1" />Set default</button>
               </div>
             </div>
 
             <!-- auto-update (keep the harness current on a cadence) -->
-            <label v-if="e.installed" class="flex cursor-pointer items-center justify-between gap-3">
+            <p v-if="!e.installed && !e.pkg && e.installHint" class="w-full text-[12px] text-slate-500">Not an npm package. Install with <span class="font-mono text-slate-400">{{ e.installHint }}</span>, then refresh.</p>
+            <label v-if="e.installed && e.pkg" class="flex cursor-pointer items-center justify-between gap-3">
               <span>
                 <span class="text-sm text-slate-200">Auto-update this engine</span>
                 <span class="block text-[12px] text-slate-500">Check npm every 6h and upgrade the <span class="font-mono">{{ e.id }}</span> harness in place, so it never goes stale.</span>

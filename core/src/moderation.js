@@ -14,7 +14,8 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const OpenAI = require('openai');
+let OpenAI = null;
+function loadOpenAI() { if (!OpenAI) OpenAI = require('openai'); return OpenAI; }
 
 const MOD_LOG_DIR = process.env.ASMLTR_MOD_LOG_DIR || path.join(__dirname, '..', 'data', 'moderation-logs');
 
@@ -34,7 +35,7 @@ const getModKey = () => require('../../shared/secrets').get(MOD_KEY_NAME);
 
 let _openai = null;
 async function getOpenAIClient() {
-  if (!_openai) _openai = new OpenAI({ apiKey: await getModKey() });
+  if (!_openai) _openai = new (loadOpenAI())({ apiKey: await getModKey() });
   return _openai;
 }
 

@@ -187,7 +187,7 @@ export const oidcApi = {
   removeClient: (id) => reqCore('DELETE', `/v2/oidc/clients/${encodeURIComponent(id)}`)
 }
 
-// Reasoning engines — pluggable agentic backends (claude/gemini/codex): registry + default + config.
+// Reasoning engines — pluggable agentic backends (claude/gemini/codex/grok): registry + default + config.
 export const enginesApi = {
   list: () => getCore('/v2/engines'),
   setDefault: (id) => postCore('/v2/engines/default', { id }),

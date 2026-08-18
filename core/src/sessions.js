@@ -2,11 +2,26 @@
 /**
  * asmltr-core — session store (plan §A2).
  *
- * Maps a channel-computed `conversation_key` → the SDK-assigned
- * `engine_session_id`. The SDK assigns the id (unlike the CLI's --session-id);
- * we capture it from the first `system`/`result` event and persist it, then
- * resume via options.resume. This subsumes Discord per-server, Telegram
- * per-user, MCP per-user, etc. — they are all just different key formulas.
+ * Maps a channel-computed `conversation_key` → `engine_session_id`, then the
+ * next core turn passes that id as runTurn({ resume }). This subsumes Discord
+ * per-server, Telegram per-user, MCP per-user, CLI, web chat — they are all
+ * just different key formulas.
+ *
+ * RESUME UUID (Grok first-class):
+ *   For the grok engine, engine_session_id IS the Grok CLI session UUID
+ *   (UUIDv7 from `grok -s` / the streaming-json sessionId). The next turn
+ *   passes resume=that UUID → grok.js emits `-r <uuid>`. That is the real
+ *   continuity mechanism. Do not fake it by re-injecting the full system
+ *   prompt every turn: grok's `-r` already replays the first-turn system
+ *   block (historyReplaysSystemPrompt=true). When idle expires we CLEAR the
+ *   UUID (and last_stable_*) so the next turn is a fresh grok session and
+ *   the full identity prompt is sent again.
+ *
+ * IDLE POLICY:
+ *   Stored as 'infinite' | 'idle:<minutes>' (integer minutes — see
+ *   parseIdlePolicy / idlePolicyFromEnv). Core used to hardcode infinite
+ *   for every turn (token-burn). Ivy/grok default is idle:15, overridable
+ *   by ASMLTR_IDLE_MS (milliseconds) or ASMLTR_IDLE_POLICY.
  */
 
 const path = require('path');
@@ -18,7 +33,7 @@ const DB_PATH = require('./db-path').coreDbPath();
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL'); // exec, not pragma(): Node 24 GC of throwaway Statement ABRTs
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
@@ -40,7 +55,8 @@ db.exec(`
 `);
 
 // Migrations: add columns to a pre-existing table (created before they existed).
-const _cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
+const _colsStmt = db.prepare('PRAGMA table_info(sessions)');
+const _cols = _colsStmt.all().map((c) => c.name);
 for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target', 'last_stable_hash', 'last_stable_engine']) {
   if (!_cols.includes(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
 }
@@ -92,6 +108,43 @@ const _setCursor = db.prepare('UPDATE sessions SET last_announce_id = ? WHERE co
 
 function nowMs() { return Date.now(); }
 
+// --- idle policy -------------------------------------------------------------
+// Canonical on-disk values: 'infinite' | 'idle:<minutes>'. Accept a few human
+// aliases at the env boundary ('15m', '15', 'off') and always persist the
+// canonical form so resolveForTurn's /^idle:(\d+)$/ keeps working.
+const DEFAULT_IDLE_MINUTES = 15;
+
+function parseIdlePolicy(raw) {
+  if (raw == null) return null;
+  const v = String(raw).trim().toLowerCase();
+  if (!v) return null;
+  if (v === 'infinite' || v === 'off' || v === 'none') return 'infinite';
+  let m = /^idle:(\d+)$/.exec(v);
+  if (m) return Number(m[1]) > 0 ? `idle:${Number(m[1])}` : 'infinite';
+  m = /^(\d+)\s*m$/.exec(v);
+  if (m) return Number(m[1]) > 0 ? `idle:${Number(m[1])}` : 'infinite';
+  if (/^\d+$/.test(v)) {
+    const n = Number(v);
+    return n > 0 ? `idle:${n}` : 'infinite';
+  }
+  return null;
+}
+
+/** Default idle for ivy/grok: 15 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:15. */
+function idlePolicyFromEnv() {
+  const named = parseIdlePolicy(process.env.ASMLTR_IDLE_POLICY);
+  if (named) return named;
+  const ms = Number(process.env.ASMLTR_IDLE_MS);
+  if (Number.isFinite(ms)) {
+    if (ms <= 0) return 'infinite';
+    return `idle:${Math.max(1, Math.round(ms / 60000))}`;
+  }
+  return `idle:${DEFAULT_IDLE_MINUTES}`;
+}
+
+const _setIdle = db.prepare('UPDATE sessions SET idle_policy = ? WHERE conversation_key = ?');
+const _clearEngine = db.prepare('UPDATE sessions SET engine_session_id = NULL, last_stable_hash = NULL, last_stable_engine = NULL WHERE conversation_key = ?');
+
 /** Get the row for a key, creating it if absent. */
 function ensure(conversation_key, channel, idle_policy = 'infinite', working_dir = DEFAULT_CWD) {
   let row = _get.get(conversation_key);
@@ -104,22 +157,35 @@ function ensure(conversation_key, channel, idle_policy = 'infinite', working_dir
 
 /**
  * Decide how to run the next turn for a conversation.
- * @returns {{ resume: string|null, key: string }} resume id (or null for a fresh session)
+ * @returns {{ resume: string|null, key: string, expired: boolean }}
+ *   resume = Grok/engine UUID to pass as runTurn({ resume }), or null for a fresh session.
+ *   expired = true when idle:<minutes> elapsed and we CLEARED the stored UUID.
  */
 function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', working_dir = DEFAULT_CWD) {
   const row = ensure(conversation_key, channel, idle_policy, working_dir);
-  if (!row.engine_session_id) return { resume: null, key: conversation_key };
+  // Keep the stored policy in sync with what this turn asked for (env can change
+  // without dropping the conversation_key).
+  if (idle_policy && row.idle_policy !== idle_policy) {
+    _setIdle.run(idle_policy, conversation_key);
+    row.idle_policy = idle_policy;
+  }
+  if (!row.engine_session_id) return { resume: null, key: conversation_key, expired: false };
 
-  // idle:<minutes> policy → start fresh if past the window; 'infinite' always resumes.
+  // idle:<minutes> → drop the engine UUID and start fresh; 'infinite' always resumes.
   const m = /^idle:(\d+)$/.exec(row.idle_policy || 'infinite');
   if (m) {
     const windowMs = Number(m[1]) * 60 * 1000;
-    if (nowMs() - row.last_activity_at > windowMs) return { resume: null, key: conversation_key };
+    if (nowMs() - row.last_activity_at > windowMs) {
+      // Fresh grok session: do not pass -r of a stale UUID, and drop last_stable_*
+      // so inject-once re-sends the full system prompt on the new session.
+      _clearEngine.run(conversation_key);
+      return { resume: null, key: conversation_key, expired: true };
+    }
   }
-  return { resume: row.engine_session_id, key: conversation_key };
+  return { resume: row.engine_session_id, key: conversation_key, expired: false };
 }
 
-/** Persist the SDK-assigned engine session id captured from the event stream. */
+/** Persist the engine session id (for grok: the CLI resume UUID) captured from the turn. */
 function recordEngineId(conversation_key, engine_session_id) {
   if (!engine_session_id) return;
   _setEngineId.run(engine_session_id, nowMs(), conversation_key);
@@ -204,4 +270,4 @@ function recordStable(conversation_key, stable_hash, engine) {
   _setStable.run(stable_hash || null, engine || null, conversation_key);
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, DB_PATH };
+module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH };

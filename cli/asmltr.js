@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+try { require('../shared/loadenv'); } catch (_) {}
 /**
  * asmltr — terminal client + TUI (plan §B9).
  *
@@ -41,7 +42,7 @@ const A = {
   mag: (s) => `\x1b[35m${s}\x1b[0m`,
 };
 const SURFACE_COLOR = {
-  discord: A.mag, telegram: A.cyn, github: A.grn, mcp: A.yel,
+  discord: A.mag, telegram: A.cyn, github: A.grn, mcp: A.yel, cli: A.cyn,
   'assistant-web': A.cyn, 'assistant-native': A.cyn, 'eve-assistant-web': A.cyn, 'eve-assistant-native': A.cyn, 'claude-code': A.bold, core: A.bold, system: A.dim,
 };
 const paint = (surface, s) => (SURFACE_COLOR[surface] || ((x) => x))(s);
@@ -548,10 +549,68 @@ async function cmdDiff(id) {
   console.log(A.dim(`# ${r.worktree}`)); console.log(r.diff || A.dim('(no changes)'));
 }
 
+function webOwnerId() {
+  return process.env.ASMLTR_WEB_OWNER_ID || 'owner';
+}
+
+/**
+ * Local one-shot turn against asmltr-core. CLI is NOT a trust channel — this
+ * posts the same assistant-web envelope the dashboard does. Core stamps
+ * sender.raw_id from ASMLTR_WEB_OWNER_ID (ivy: owner). conversation_key is
+ * stable so grok `-r` resume works. No Discord. Needs asmltr-core on 127.0.0.1.
+ */
+async function cmdAsk(rest) {
+  const text = rest.join(' ').trim();
+  if (!text) throw new Error('usage: asmltr ask "<text>"\n       asmltr chat            local ivy REPL (no Discord, no TUI grok)');
+  const owner = webOwnerId();
+  const conversation_key = process.env.ASMLTR_CLI_SESSION || `assistant-web:local:${owner}`;
+  const envelope = {
+    channel: 'assistant-web',
+    conversation_key,
+    message_id: String(Date.now()),
+    sender: { raw_id: owner, raw_username: 'dashboard' },
+    content: { text },
+    delivery: 'sync',
+    public: false,
+  };
+  const r = await fetch(CORE_BASE + '/v2/handle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(envelope),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `${r.status} — /v2/handle (is asmltr-core up on ${CORE_BASE}?)`);
+  const reply = (j.actions || []).find((a) => a && a.type === 'reply');
+  const out = reply && reply.text != null ? reply.text
+    : (j.actions && j.actions.length ? JSON.stringify(j.actions, null, 2) : '(no reply)');
+  console.log(out);
+}
+
+/** Tiny readline loop over cmdAsk. Not the grok TUI — each line is one core turn. */
+async function cmdChat() {
+  const readline = require('readline');
+  const owner = webOwnerId();
+  const key = process.env.ASMLTR_CLI_SESSION || `assistant-web:local:${owner}`;
+  console.log(A.dim(`ivy local chat · ${key} as ${owner} · empty line / quit to exit`));
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const prompt = () => new Promise((res) => rl.question(A.cyn('you> '), res));
+  try {
+    for (;;) {
+      const line = await prompt();
+      if (line == null) break;
+      const t = line.trim();
+      if (!t || /^(quit|exit)$/i.test(t)) break;
+      try { await cmdAsk([t]); } catch (e) { console.error(A.red(e.message)); }
+    }
+  } finally { rl.close(); }
+}
+
 function cmdHelp() {
   console.log(`${A.bold('asmltr')} — asmltr insights terminal client
 
   asmltr                 live TUI dashboard
+  asmltr ask "<text>"    one local turn with ivy (core / grok, no Discord)
+  asmltr chat            local ivy REPL over the same session (resume UUID)
   asmltr ls              list active sessions
   asmltr map             active sessions grouped by working dir (collision radar)
   asmltr who <path>      which sessions recently touched a file/dir
@@ -587,6 +646,7 @@ function cmdHelp() {
   asmltr diff <id>       git diff of a session's worktree
   ${A.bold('sessions:')}
   asmltr claude [args]   launch a monitored, identity-anchored claude session (screen; takeover-able)
+  asmltr gemini|codex|grok [args]  same, for those engine CLIs
   asmltr provision-alias create a \`<agent-name>\` → \`asmltr claude\` command (from ASSISTANT_NAME;
        [name] [--force]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
   ${A.bold('version & updates:')}
@@ -804,7 +864,7 @@ async function cmdVault(rest, f) {
     switch (cmd) {
       case undefined:
       case 'top': return require('./tui').run(BASE, CORE_BASE, TOKEN, A, { base: MANAGER_BASE, token: MANAGER_TOKEN });
-      case 'claude': case 'gemini': case 'codex': { // launch an interactive reasoning-engine session (monitored + takeover-able)
+      case 'claude': case 'gemini': case 'codex': case 'grok': { // launch an interactive reasoning-engine session (monitored + takeover-able)
         const r = spawnSync(process.execPath, [require('path').join(__dirname, 'asmltr-engine.js'), cmd, ...rest], { stdio: 'inherit' });
         return process.exit(r.status || 0);
       }
@@ -824,6 +884,8 @@ async function cmdVault(rest, f) {
         console.log(r.ok ? A.grn('✓ removed ' + r.removed) : A.yel('· ' + r.error));
         return;
       }
+      case 'ask': return await cmdAsk(rest);
+      case 'chat': return await cmdChat();
       case 'ls': return await cmdLs();
       case 'map': return await cmdMap();
       case 'who': return await cmdWho(rest);
