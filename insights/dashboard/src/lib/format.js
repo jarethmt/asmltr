@@ -51,6 +51,30 @@ export function statusMeta(s) {
   return STATUS_META[s] || { color: '#64748B', label: s || 'unknown', pulse: false }
 }
 
+// Ivy/grok default matches core DEFAULT_IDLE_MINUTES / ASMLTR_IDLE_MS=1800000.
+export const DEFAULT_IDLE_MS = 1_800_000
+
+/** Collector timestamps are unix ms; tolerate accidental seconds. */
+export function activityMs(unix) {
+  if (!unix) return 0
+  return unix < 1e12 ? unix * 1000 : unix
+}
+
+/**
+ * Live badge word. Collector web rows stay status=active (no pid for reconcile).
+ * After last_activity + idle, show the existing `idle` word instead of Active.
+ * Do not hide the card. A live pid (tracker / grok child) stays Active.
+ */
+export function displayStatus(session, now = Date.now(), idleMs = DEFAULT_IDLE_MS) {
+  const stored = session && session.status
+  if (stored && stored !== 'active') return stored
+  if (session && session.pid) return stored || 'active'
+  const last = activityMs(session && session.last_activity_unix)
+  if (!last) return stored || 'active'
+  if (idleMs > 0 && now - last > idleMs) return 'idle'
+  return stored || 'active'
+}
+
 // Connector-instance runtime status -> pill styling (manager control plane).
 export const RUNTIME_STATUS_META = {
   running: { color: '#34D399', label: 'running', pulse: true },

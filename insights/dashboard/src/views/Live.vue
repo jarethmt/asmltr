@@ -5,7 +5,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import SessionCard from '@/components/SessionCard.vue'
 import ModalShell from '@/components/ModalShell.vue'
 import StatTile from '@/components/StatTile.vue'
-import { fmtNum, surfaceMeta } from '@/lib/format'
+import { fmtNum, surfaceMeta, displayStatus } from '@/lib/format'
 import { manager } from '@/services/manager'
 import { api } from '@/services/api'
 import { useWindows } from '@/stores/windows'
@@ -147,6 +147,10 @@ const totalTokens = computed(() =>
   store.sessions.reduce((sum, s) => sum + (s.tokens_total || 0), 0)
 )
 
+const liveActiveCount = computed(() =>
+  store.sessions.filter((s) => displayStatus(s, now.value) === 'active').length
+)
+
 const surfacesActive = computed(() => {
   const map = {}
   for (const s of store.sessions) map[s.surface] = (map[s.surface] || 0) + 1
@@ -234,7 +238,7 @@ onUnmounted(() => { clearInterval(ticker); clearInterval(chanTimer) })
 
     <!-- summary tiles -->
     <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <StatTile label="Active sessions" :value="store.activeSessions.length" accent="#34D399" />
+      <StatTile label="Active sessions" :value="liveActiveCount" accent="#34D399" />
       <StatTile label="Tokens (live)" :value="fmtNum(totalTokens)" accent="#8B5CF6" />
       <StatTile
         label="Tokens · 24h"

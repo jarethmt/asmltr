@@ -12,7 +12,7 @@ import { useCollectorStore } from '@/stores/collector'
 import { api, control, webChat, parsePayload } from '@/services/api'
 import { manager } from '@/services/manager'
 import { useSpeech } from '@/composables/useSpeech'
-import { statusMeta, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
+import { statusMeta, displayStatus, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
 import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
@@ -55,7 +55,7 @@ const sess = computed(() => {
   const real = store.sessions.find((s) => s.session_id === key.value)
   return real ? { ...props.session, ...real } : props.session
 })
-const st = computed(() => statusMeta(sess.value.status))
+const st = computed(() => statusMeta(displayStatus(sess.value, props.now)))
 
 const isWeb = computed(() => String(key.value || '').startsWith('web:'))
 const isCli = computed(() => sess.value.multiplexer === 'tmux' || sess.value.multiplexer === 'screen')
