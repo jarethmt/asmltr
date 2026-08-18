@@ -95,3 +95,29 @@ test('applySegment: time. + The is still period-space, not a narration replace',
   assert.equal(isCompleteBlock('The'), false);
   assert.equal(applySegment('time.', 'The'), 'time. The');
 });
+
+test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', async () => {
+  const { applySegment, preferLastBlock, isCompleteBlock } = await import(helperUrl);
+  const draft = 'TEST-DRAFT: the kettle is on.';
+  const mid = 'Yes. I can do it on purpose, and I just did.';
+  const fin = 'TEST-FINAL: the tea is poured.';
+  const answer = mid + '\n\n' + fin;
+  assert.equal(isCompleteBlock(draft), true);
+  assert.equal(isCompleteBlock(mid), true);
+  assert.equal(isCompleteBlock(fin), true);
+  assert.equal(applySegment(draft, answer), answer);
+  assert.ok(!applySegment(draft, answer).includes('on.Yes'));
+  assert.ok(!applySegment(draft, answer).startsWith('TEST-DRAFT'));
+  let reply = applySegment('', draft);
+  reply = applySegment(reply, mid);
+  reply = applySegment(reply, fin);
+  assert.equal(reply, fin);
+  assert.ok(!reply.includes('kettle'));
+  assert.ok(!reply.includes('on.Yes'));
+  const liveMash = draft + mid; // raw onDelta += after a missed tool close
+  assert.equal(liveMash, 'TEST-DRAFT: the kettle is on.Yes. I can do it on purpose, and I just did.');
+  assert.equal(preferLastBlock(answer, liveMash + '\n\n' + fin), answer);
+  assert.equal(preferLastBlock(liveMash + '\n\n' + fin, answer), answer);
+  assert.equal(applySegment('time.', 'The'), 'time. The');
+});
+

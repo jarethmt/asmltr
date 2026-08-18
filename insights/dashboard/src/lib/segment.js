@@ -31,3 +31,25 @@ export function applySegment(reply, t) {
   if (isCompleteBlock(reply) && isCompleteBlock(t)) return t
   return joinText(reply, t)
 }
+
+/**
+ * onDone used to keep whichever string was longer. That undoes a live
+ * replace when persist still has a glued draft+answer, and it also keeps
+ * a longer live mash when persist already stored the last block only.
+ * Last finished block wins. Token glue ("time. The") is unchanged.
+ */
+export function preferLastBlock(stored, live) {
+  const s = stored == null ? '' : String(stored)
+  const l = live == null ? '' : String(live)
+  if (!s) return l
+  if (!l) return s
+  if (s === l) return s
+  if (l.endsWith(s) && isCompleteBlock(s) && l.length > s.length) return s
+  if (s.endsWith(l) && isCompleteBlock(l) && s.length > l.length) return l
+  if (isCompleteBlock(s) && isCompleteBlock(l)) {
+    if (s.includes(l) && s.length > l.length) return l
+    if (l.includes(s) && l.length > s.length) return s
+    return applySegment(l, s)
+  }
+  return s
+}

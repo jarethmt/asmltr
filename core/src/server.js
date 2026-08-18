@@ -554,7 +554,16 @@ async function handle(envelope, opts = {}) {
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
       onSegment: opts.onSegment ? _pushSegment : undefined,
-      onTool: opts.onTool ? ((t) => { try { opts.onTool(t); } catch (_) {} }) : undefined,
+      // Grok tools arrive on onTool. Web /v2/stream only subscribed to
+      // onToolCall (Claude SDK tool_use). Without this bridge the live
+      // bubble never blockCloses and onDelta glues draft+answer (`on.Yes`).
+      // Reset the token buffer so leftover flush cannot replay the draft.
+      onTool: (opts.onTool || opts.onToolCall) ? ((t) => {
+        _streamRaw = '';
+        _emitted = 0;
+        try { if (opts.onTool) opts.onTool(t); } catch (_) {}
+        try { if (opts.onToolCall) opts.onToolCall(t); } catch (_) {}
+      }) : undefined,
       onThinking: opts.onThinking ? _pushThinking : undefined,
       // Sub-agent (Task) lifecycle → record for history replay + forward live to a step consumer.
       onSubagent: (s) => {

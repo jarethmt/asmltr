@@ -227,3 +227,45 @@ test('applyEvent: time. + The as complete-shaped events still get period-space, 
   assert.equal(r.text, ' The');
   assert.deepEqual(state.segments, []);
 });
+
+test('applyEvent: James kettle incremental draft + tool + answer stores FINAL only', () => {
+  const draft = 'TEST-DRAFT: the kettle is on.';
+  const mid = 'Yes. I can do it on purpose, and I just did.';
+  const fin = 'TEST-FINAL: the tea is poured.';
+  const answer = mid + '\n\n' + fin;
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  for (const piece of ['TEST-DRAFT: ', 'the kettle ', 'is on.']) {
+    grok.applyEvent({ type: 'text', data: piece }, state);
+  }
+  assert.equal(state.text, draft);
+  grok.applyEvent({ type: 'tool_call', name: 'read', input: {} }, state);
+  assert.deepEqual(state.segments, [draft]);
+  assert.equal(state.text, '');
+  grok.applyEvent({ type: 'text', data: 'Yes' }, state);
+  assert.equal(state.text, 'Yes');
+  assert.ok(!state.text.includes('on.Yes'));
+  grok.applyEvent({ type: 'text', data: '. I can do it on purpose, and I just did.' }, state);
+  grok.applyEvent({ type: 'text', data: '\n\n' + fin }, state);
+  assert.equal(state.text, answer);
+  const segs = state.segments.concat(state.text.trim() ? [state.text.trim()] : []);
+  assert.equal(segs[segs.length - 1], answer);
+  assert.ok(!state.text.startsWith('TEST-DRAFT'));
+  assert.ok(!state.text.includes('on.Yes'));
+});
+
+test('applyEvent: James kettle snapshots last complete block wins', () => {
+  const draft = 'TEST-DRAFT: the kettle is on.';
+  const mid = 'Yes. I can do it on purpose, and I just did.';
+  const fin = 'TEST-FINAL: the tea is poured.';
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  grok.applyEvent({ type: 'text', text: draft }, state);
+  grok.applyEvent({ type: 'text', text: mid }, state);
+  grok.applyEvent({ type: 'text', text: fin }, state);
+  assert.equal(state.text, fin);
+  assert.deepEqual(state.segments, [draft, mid]);
+  const segs = state.segments.concat(state.text.trim() ? [state.text.trim()] : []);
+  assert.equal(segs[segs.length - 1], fin);
+  assert.ok(!state.text.includes('on.Yes'));
+  assert.ok(!state.text.includes('kettle'));
+});
+

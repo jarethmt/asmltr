@@ -17,7 +17,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
-import { applySegment } from '@/lib/segment'
+import { applySegment, preferLastBlock } from '@/lib/segment'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -359,25 +359,32 @@ function webSend() {
         turn.blockClosed = false
         bumpStream()
       },
-      onDone: async () => {
+      onDone: async (actions) => {
         turn.streaming = false; busy.value = false; streamCtrl = null; store.fetchSessions()
         bumpStream()
         if (ttsOn.value && turn.reply) speak(turn.reply).catch(() => {}) // read the reply aloud when TTS is on
         if (pendingTitle.value != null) { control.setTitle(key.value, pendingTitle.value).then((r) => { if (r.ok) pendingTitle.value = null }).catch(() => {}) }
         try {
-          const data = await api.events({ session: key.value, limit: 300 })
           let lastText = ''
-          let lastTs = -Infinity
-          for (const e of data.events || []) {
-            if (e.event_type !== 'outbound') continue
-            const ts = e.ts ?? 0
-            if (ts >= lastTs) {
-              lastTs = ts
-              const payload = parsePayload(e.payload) || {}
-              lastText = payload.text || ''
+          const replyAct = (actions || []).find((a) => a && a.type === 'reply' && a.text)
+          if (replyAct) lastText = replyAct.text
+          if (!lastText) {
+            const data = await api.events({ session: key.value, limit: 300 })
+            let lastTs = -Infinity
+            for (const e of data.events || []) {
+              if (e.event_type !== 'outbound') continue
+              const ts = e.ts ?? 0
+              if (ts >= lastTs) {
+                lastTs = ts
+                const payload = parsePayload(e.payload) || {}
+                lastText = payload.text || ''
+              }
             }
           }
-          if (lastText.length > (turn.reply || '').length) { turn.reply = lastText; bumpStream() }
+          // Last finished block wins. Do not keep a longer glued draft+answer
+          // (live mash or stored mash) just because it has more characters.
+          const next = preferLastBlock(lastText, turn.reply)
+          if (next !== (turn.reply || '')) { turn.reply = next; bumpStream() }
         } catch (_) {}
       },
       onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null; bumpStream() }
