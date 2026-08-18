@@ -178,3 +178,52 @@ test('applyEvent: next sentence without leading space still stores ". "', () => 
   assert.equal(state.text, 'time. The');
   assert.equal(live, 'time. The');
 });
+
+test('applyEvent: narration draft then restated answer stores one sentence, not both', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const draft = 'Coconut aminos is already on your card as the soy-sauce stand-in.';
+  const answer = 'Coconut aminos is already on your card as the soy-sauce replacement.';
+  const a = grok.applyEvent({ type: 'text', text: draft }, state);
+  assert.equal(a.kind, 'text');
+  assert.equal(state.text, draft);
+  const b = grok.applyEvent({ type: 'text', text: answer }, state);
+  assert.equal(b.kind, 'text');
+  assert.equal(state.text, answer);
+  assert.deepEqual(state.segments, [draft]);
+  assert.ok(!state.text.includes('stand-in'));
+  assert.notEqual(state.text, draft + ' ' + answer);
+});
+
+test('applyEvent: status block then restated answer persist is the answer only', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const status = "Vim is in Preferences, not Story — and it was a bad translation of your house rule, not something I believe about myself. I'll take it out. Coconut aminos is already on your card as the soy-sauce stand-in.";
+  const answer = 'Coconut aminos is already on your card as the soy-sauce replacement. That stays.';
+  grok.applyEvent({ type: 'text', text: status }, state);
+  grok.applyEvent({ type: 'text', text: answer }, state);
+  assert.equal(state.text, answer);
+  assert.deepEqual(state.segments, [status]);
+  const segs = state.segments.concat(state.text.trim() ? [state.text.trim()] : []);
+  assert.equal(segs[segs.length - 1], answer);
+});
+
+test('applyEvent: tool call closes narration so later text is not glued', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const status = 'Coconut aminos is already on your card as the soy-sauce stand-in.';
+  const answer = 'Coconut aminos is already on your card as the soy-sauce replacement.';
+  grok.applyEvent({ type: 'text', text: status }, state);
+  grok.applyEvent({ type: 'tool_call', name: 'edit', input: { path: 'Preferences' } }, state);
+  assert.deepEqual(state.segments, [status]);
+  assert.equal(state.text, '');
+  grok.applyEvent({ type: 'text', text: answer }, state);
+  assert.equal(state.text, answer);
+  assert.ok(!state.text.includes('stand-in'));
+});
+
+test('applyEvent: time. + The as complete-shaped events still get period-space, not replace', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  grok.applyEvent({ type: 'text', text: 'time.' }, state);
+  const r = grok.applyEvent({ type: 'text', text: 'The' }, state);
+  assert.equal(state.text, 'time. The');
+  assert.equal(r.text, ' The');
+  assert.deepEqual(state.segments, []);
+});

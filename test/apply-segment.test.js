@@ -67,3 +67,31 @@ test('applySegment: next sentence without leading space still gets ". "', async 
   assert.equal(applySegment('work.', "I'll"), "work. I'll");
   assert.equal(applySegment('grow.', "I'll"), "grow. I'll");
 });
+
+test('applySegment: narration draft then restated answer is one sentence, not both', async () => {
+  const { applySegment } = await import(helperUrl);
+  const draft = 'Coconut aminos is already on your card as the soy-sauce stand-in.';
+  const answer = 'Coconut aminos is already on your card as the soy-sauce replacement.';
+  const reply = applySegment(draft, answer);
+  assert.equal(reply, answer);
+  assert.ok(!reply.includes('stand-in'));
+  assert.ok(!reply.includes(draft + ' ' + answer));
+  assert.notEqual(reply, draft + ' ' + answer);
+});
+
+test('applySegment: status block then restated answer keeps the answer only', async () => {
+  const { applySegment } = await import(helperUrl);
+  const status = "Vim is in Preferences, not Story — and it was a bad translation of your house rule, not something I believe about myself. I'll take it out. Coconut aminos is already on your card as the soy-sauce stand-in.";
+  const answer = 'Coconut aminos is already on your card as the soy-sauce replacement. That stays.';
+  const reply = applySegment(status, answer);
+  assert.equal(reply, answer);
+  assert.ok(!reply.includes('stand-in'));
+  assert.ok(!reply.includes('Vim is in Preferences'));
+});
+
+test('applySegment: time. + The is still period-space, not a narration replace', async () => {
+  const { applySegment, isCompleteBlock } = await import(helperUrl);
+  assert.equal(isCompleteBlock('time.'), false);
+  assert.equal(isCompleteBlock('The'), false);
+  assert.equal(applySegment('time.', 'The'), 'time. The');
+});

@@ -334,7 +334,7 @@ function webSend() {
   const files = attached.value.slice()
   let body = text
   if (files.length) body += '\n\n' + files.map((f) => `[Attached file: ${f.name} → ${f.path}]`).join('\n')
-  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now() })
+  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now(), blockClosed: false })
   localTurns.value = [...localTurns.value, turn]
   stickToBottom.value = true
   scrollToBottom(true)
@@ -342,9 +342,23 @@ function webSend() {
   streamCtrl = webChat.send(
     { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null, system_prompt_extra: props.contextProvider ? props.contextProvider() : null },
     {
-      onDelta: (t) => { turn.reply += t; bumpStream() },
-      onTool: (name) => { if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name]; bumpStream() } },
-      onSegment: (t) => { turn.reply = applySegment(turn.reply, t); bumpStream() },
+      onDelta: (t) => {
+        // Discord: a tool (or a completed narration block) closes the pending
+        // draft. Later tokens are a new block — do not glue status + answer.
+        if (turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
+        else turn.reply += t
+        bumpStream()
+      },
+      onTool: (name) => {
+        if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name] }
+        turn.blockClosed = true
+        bumpStream()
+      },
+      onSegment: (t) => {
+        turn.reply = applySegment(turn.blockClosed ? '' : turn.reply, t)
+        turn.blockClosed = false
+        bumpStream()
+      },
       onDone: async () => {
         turn.streaming = false; busy.value = false; streamCtrl = null; store.fetchSessions()
         bumpStream()

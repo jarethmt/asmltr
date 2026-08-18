@@ -115,6 +115,21 @@ function joinText(prev, next) {
   return prev + next;
 }
 
+/** Finished narration/answer block, not a token piece like "The" or " I'll". */
+function isCompleteBlock(s) {
+  const t = String(s || '').trim();
+  if (t.length < 20) return false;
+  return t.split(/\s+/).filter(Boolean).length >= 4;
+}
+
+function closeTextBlock(state) {
+  const cur = String((state && state.text) || '').trim();
+  if (!cur) return;
+  if (!Array.isArray(state.segments)) state.segments = [];
+  state.segments.push(cur);
+  state.text = '';
+}
+
 function extractText(obj) {
   if (!obj || typeof obj !== 'object') return '';
   const t = obj.type;
@@ -160,7 +175,12 @@ function applyEvent(ev, state) {
     const name = ev.name || (ev.tool && ev.tool.name) || ev.toolName || t;
     const input = ev.input || ev.args || ev.arguments || ev.tool || ev;
     const tool = { name, input };
-    if (t !== 'tool_call_update') state.tools.push(tool);
+    // Discord: a tool closes the pending narration block. Later text is a new
+    // block — persistAskTurn must store the last block (the answer), not glue.
+    if (t !== 'tool_call_update') {
+      closeTextBlock(state);
+      state.tools.push(tool);
+    }
     return { kind: 'tool', tool };
   }
   if (t === 'error' || ev.error) {
@@ -176,12 +196,26 @@ function applyEvent(ev, state) {
   // starts the next sentence without a leading space, joinText inserts one so
   // stored outbound matches live ("time. The", not "time.The").
   if (text != null && text !== '') {
-    const joined = joinText(state.text, text);
-    const emitted = joined.slice(state.text.length);
-    state.text = joined;
     // grok 1.0.5 streaming-json tokens are {type:"text", data:"..."}. Those are
     // incremental — treat as delta so /v2/stream keeps writing until real done.
     const incremental = typeof ev.delta === 'string' || (t === 'text' && typeof ev.data === 'string');
+    const prev = state.text || '';
+    let joined;
+    if (incremental) {
+      joined = joinText(prev, text);
+    } else if (text.startsWith(prev) && prev) {
+      joined = text;
+    } else if (isCompleteBlock(prev) && isCompleteBlock(text)) {
+      // Status/narration then the real answer: last block wins (Discord split).
+      // Not the same as period-space glue ("time."+"The").
+      closeTextBlock(state);
+      joined = text;
+    } else {
+      joined = joinText(prev, text);
+    }
+    const replaced = !incremental && joined !== prev && !joined.startsWith(prev);
+    const emitted = replaced ? joined : joined.slice(prev.length);
+    state.text = joined;
     return { kind: incremental ? 'delta' : 'text', text: emitted };
   }
   return { kind: 'ignore' };
@@ -190,6 +224,7 @@ function applyEvent(ev, state) {
 function newState(sessionId) {
   return {
     text: '',
+    segments: [],
     tools: [],
     usage: { tokens_in: 0, tokens_out: 0, cost_usd: 0 },
     isError: false,
@@ -237,9 +272,11 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     state.text = (stderr.trim().split('\n').slice(-1)[0] || `grok exited ${code}`);
   }
 
-  const segs = state.text.trim() ? [state.text.trim()] : [];
+  const segs = (state.segments || []).slice();
+  if (state.text && state.text.trim()) segs.push(state.text.trim());
+  const answer = segs.length ? segs[segs.length - 1] : '';
   return {
-    text: state.text.trim(),
+    text: answer,
     segments: segs,
     engineSessionId: state.engineSessionId || sessionId,
     tools: state.tools,
@@ -268,6 +305,6 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, joinText, newState, timeoutMs, maxTurns,
+  extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
 };
