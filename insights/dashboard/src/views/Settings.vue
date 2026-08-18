@@ -626,10 +626,10 @@ onMounted(async () => {
                   @click="setEngineAuthMode(e.id, m)">{{ m==='subscription' ? 'Subscription (OAuth)' : 'API key' }}</button>
                 <span v-if="e.auth.modes.length===1" class="self-center text-[11px] text-slate-500">subscription only</span>
               </div>
-              <p v-if="e.auth.mode==='subscription'" class="mt-2 text-[12px] text-slate-500">
-                Signed in through the harness's own login. If a session reports it isn't authenticated, run
-                <span class="font-mono text-slate-400">{{ e.auth.loginCmd }}</span> once in a terminal.
-              </p>
+              <div v-if="e.auth.mode==='subscription'" class="mt-2 space-y-1 text-[12px] text-slate-500">
+                <p>Signed in through the harness's own login. If a session reports it isn't authenticated, run this once in a terminal:</p>
+                <code class="block font-mono text-slate-400">{{ e.auth.loginCmd }}</code>
+              </div>
               <div v-else-if="e.auth.mode==='api_key'" class="mt-2 space-y-2">
                 <div v-if="e.auth.hasApiKey" class="flex items-center gap-2">
                   <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-[10px] text-emerald-300">🔒 key stored in vault</span>
