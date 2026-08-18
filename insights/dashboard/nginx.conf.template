@@ -114,6 +114,7 @@ server {
         proxy_set_header Connection "";
         proxy_buffering off;
         proxy_cache off;
+        gzip off;
         proxy_read_timeout 15m;
         proxy_send_timeout 15m;
     }
