@@ -172,6 +172,10 @@ function cancelEditTitle() { editingTitle.value = false }
 const seeded = ref([])
 const loading = ref(true)
 const scrollBox = ref(null)
+const STICK_PX = 64
+const stickToBottom = ref(true)
+const streamTick = ref(0)
+
 const maxSeededTs = computed(() => (seeded.value.length ? seeded.value[seeded.value.length - 1].ts : 0))
 const cutoffTs = ref(null)
 const history = computed(() => {
@@ -186,9 +190,29 @@ async function load() {
     const data = await api.events({ session: key.value, limit: 300 })
     seeded.value = (data.events || []).map((e) => ({ ...e, _payload: parsePayload(e.payload) })).reverse()
   } catch (e) { seeded.value = [] }
-  finally { loading.value = false; scrollToBottom() }
+  finally { loading.value = false; stickToBottom.value = true; scrollToBottom(true) }
 }
-function scrollToBottom() { nextTick(() => { const el = scrollBox.value; if (el) el.scrollTop = el.scrollHeight }) }
+function nearBottom(el) {
+  return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_PX
+}
+function onTranscriptScroll() {
+  const el = scrollBox.value
+  if (el) stickToBottom.value = nearBottom(el)
+}
+function scrollToBottom(force = false) {
+  nextTick(() => {
+    const el = scrollBox.value
+    if (!el) return
+    if (force || stickToBottom.value) {
+      el.scrollTop = el.scrollHeight
+      stickToBottom.value = true
+    }
+  })
+}
+function bumpStream() {
+  streamTick.value++
+  scrollToBottom()
+}
 onMounted(load)
 watch(key, load)
 
@@ -205,8 +229,8 @@ const rows = computed(() => {
   }
   return out
 })
-watch(() => rows.value.length, scrollToBottom)
-watch(() => localTurns.value.map((t) => t.reply.length + (t.streaming ? 1 : 0)).join(','), scrollToBottom)
+watch(() => rows.value.length, () => scrollToBottom())
+watch(streamTick, () => scrollToBottom())
 
 const expanded = ref({})
 function toggleExpand(i) { expanded.value = { ...expanded.value, [i]: !expanded.value[i] } }
@@ -260,15 +284,18 @@ function webSend() {
   if (files.length) body += '\n\n' + files.map((f) => `[Attached file: ${f.name} → ${f.path}]`).join('\n')
   const turn = { user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now() }
   localTurns.value = [...localTurns.value, turn]
+  stickToBottom.value = true
+  scrollToBottom(true)
   draft.value = ''; attached.value = []; notice.value = null; busy.value = true
   streamCtrl = webChat.send(
     { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null, system_prompt_extra: props.contextProvider ? props.contextProvider() : null },
     {
-      onDelta: (t) => { turn.reply += t },
-      onTool: (name) => { if (name && !turn.tools.includes(name)) turn.tools = [...turn.tools, name] },
-      onSegment: (t) => { turn.reply = applySegment(turn.reply, t) },
+      onDelta: (t) => { turn.reply += t; bumpStream() },
+      onTool: (name) => { if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name]; bumpStream() } },
+      onSegment: (t) => { turn.reply = applySegment(turn.reply, t); bumpStream() },
       onDone: async () => {
         turn.streaming = false; busy.value = false; streamCtrl = null; store.fetchSessions()
+        bumpStream()
         if (ttsOn.value && turn.reply) speak(turn.reply).catch(() => {}) // read the reply aloud when TTS is on
         if (pendingTitle.value != null) { control.setTitle(key.value, pendingTitle.value).then((r) => { if (r.ok) pendingTitle.value = null }).catch(() => {}) }
         try {
@@ -284,10 +311,10 @@ function webSend() {
               lastText = payload.text || ''
             }
           }
-          if (lastText.length > (turn.reply || '').length) turn.reply = lastText
+          if (lastText.length > (turn.reply || '').length) { turn.reply = lastText; bumpStream() }
         } catch (_) {}
       },
-      onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null }
+      onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null; bumpStream() }
     }
   )
 }
@@ -429,7 +456,7 @@ const placeholder = computed(() => {
     </div>
 
     <!-- transcript (fills the window) -->
-    <div ref="scrollBox" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-3">
+    <div ref="scrollBox" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-3" @scroll.passive="onTranscriptScroll">
       <p v-if="loading" class="py-6 text-center text-sm text-slate-500">loading history…</p>
       <p v-else-if="!rows.length" class="py-8 text-center text-sm text-slate-500">
         {{ isWeb ? 'New session — send a message below to begin.' : 'No events recorded for this session yet.' }}
