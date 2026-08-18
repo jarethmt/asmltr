@@ -1,3 +1,5 @@
+import { readSseStream } from './sse.js'
+
 // Thin REST client for the asmltr collector. All calls go through the Vite
 // proxy (/api -> http://127.0.0.1:3017) so this works in dev and behind a
 // reverse proxy later without code changes.
@@ -299,29 +301,17 @@ export const webChat = {
         })
       } catch (e) { handlers.onError?.(e.message || 'network error'); return }
       if (!res.ok || !res.body) { handlers.onError?.(`stream ${res.status}`); return }
-      const reader = res.body.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
       try {
-        for (;;) {
-          const { value, done } = await reader.read()
-          if (done) break
-          buf += dec.decode(value, { stream: true })
-          // SSE frames are separated by a blank line; each frame's payload is a `data: {...}` line.
-          let idx
-          while ((idx = buf.indexOf('\n\n')) !== -1) {
-            const raw = buf.slice(0, idx); buf = buf.slice(idx + 2)
-            const line = raw.split('\n').find((l) => l.startsWith('data:'))
-            if (!line) continue
-            let f; try { f = JSON.parse(line.slice(5).trim()) } catch { continue }
-            if (f.type === 'delta') handlers.onDelta?.(f.text)
-            else if (f.type === 'segment') handlers.onSegment?.(f.text)
-            else if (f.type === 'tool') handlers.onTool?.(f.name)
-            else if (f.type === 'thinking') handlers.onThinking?.(f.text)
-            else if (f.type === 'done') handlers.onDone?.(f.actions || [])
-            else if (f.type === 'error') handlers.onError?.(f.error || 'stream error')
-          }
-        }
+        // SSE frames are `\n\n`-separated `data:` lines; leftover flush covers a final
+        // `data: {"type":"done"}` that arrives without a trailing blank line.
+        await readSseStream(res.body.getReader(), (f) => {
+          if (f.type === 'delta') handlers.onDelta?.(f.text)
+          else if (f.type === 'segment') handlers.onSegment?.(f.text)
+          else if (f.type === 'tool') handlers.onTool?.(f.name)
+          else if (f.type === 'thinking') handlers.onThinking?.(f.text)
+          else if (f.type === 'done') handlers.onDone?.(f.actions || [])
+          else if (f.type === 'error') handlers.onError?.(f.error || 'stream error')
+        })
       } catch (e) {
         if (ac.signal.aborted) handlers.onError?.('aborted')
         else handlers.onError?.(e.message || 'stream read error')
@@ -471,22 +461,14 @@ export const voice = {
       try { res = await fetch('/v2/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(envelope), signal: ac.signal }) }
       catch (e) { handlers.onError?.(e.message || 'network error'); return }
       if (!res.ok || !res.body) { handlers.onError?.(`speak ${res.status}`); return }
-      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''
       try {
-        for (;;) {
-          const { value, done } = await reader.read(); if (done) break
-          buf += dec.decode(value, { stream: true }); let i
-          while ((i = buf.indexOf('\n\n')) !== -1) {
-            const raw = buf.slice(0, i); buf = buf.slice(i + 2)
-            const line = raw.split('\n').find((l) => l.startsWith('data:')); if (!line) continue
-            let f; try { f = JSON.parse(line.slice(5).trim()) } catch { continue }
-            if (f.type === 'cue') handlers.onCue?.(f.cue)
-            else if (f.type === 'text') handlers.onText?.(f)
-            else if (f.type === 'audio') handlers.onAudio?.(f)
-            else if (f.type === 'done') handlers.onDone?.(f.actions || [])
-            else if (f.type === 'error') handlers.onError?.(f.error || 'speak error')
-          }
-        }
+        await readSseStream(res.body.getReader(), (f) => {
+          if (f.type === 'cue') handlers.onCue?.(f.cue)
+          else if (f.type === 'text') handlers.onText?.(f)
+          else if (f.type === 'audio') handlers.onAudio?.(f)
+          else if (f.type === 'done') handlers.onDone?.(f.actions || [])
+          else if (f.type === 'error') handlers.onError?.(f.error || 'speak error')
+        })
       } catch (e) { if (!ac.signal.aborted) handlers.onError?.(e.message || 'stream error') }
     })()
     return ac

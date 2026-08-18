@@ -108,8 +108,14 @@ server {
         auth_request /_asmltr_authz;
         auth_request_set $asmltr_user $upstream_http_remote_user;
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
+        proxy_http_version 1.1;
         proxy_set_header X-Remote-User $asmltr_user;
         proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 15m;
+        proxy_send_timeout 15m;
     }
 
     # Remote-desktop signaling broker (a connector, host :3028). Fully TOKEN-gated on EVERY route
