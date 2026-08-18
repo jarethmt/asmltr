@@ -118,6 +118,19 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   assert.equal(grok.applyEvent({ type: 'error', message: 'nope' }, state).kind, 'error');
   assert.equal(state.isError, true);
   assert.equal(grok.parseLine('not json'), null);
+
+  // grok 1.0.5 tokens are incremental data pieces (often leading space). Live
+  // assembly must match untrimmed state.text concat — trim() would mash.
+  const liveState = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  let live = '';
+  for (const piece of ["Here", " is", " a", " summary"]) {
+    const r = grok.applyEvent({ type: 'text', data: piece }, liveState);
+    assert.equal(r.kind, 'delta');
+    assert.equal(r.text, piece);
+    live += r.text;
+  }
+  assert.equal(liveState.text, "Here is a summary");
+  assert.equal(live, liveState.text);
   assert.equal(grok.sessionIdFrom({ sessionId: sid }), sid);
 });
 
@@ -130,6 +143,8 @@ test('runTurn signature destructures systemPrompt (identity contract)', () => {
   const params = m[1].split(',').map((s) => s.trim().split(/[=:\s]/)[0]);
   assert.ok(params.includes('systemPrompt'));
   assert.ok(params.includes('resume'));
+  assert.ok(!src.includes('onSegment(r.text.trim())'), 'onSegment must not trim leading spaces');
+  assert.ok(src.includes('onSegment(r.text)'));
 });
 
 test('engines.get("grok") lazy-loads the grok adapter', () => {

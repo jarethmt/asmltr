@@ -14,13 +14,30 @@ test('applySegment: first chunk sets reply', async () => {
   assert.equal(applySegment(null, "I'll"), "I'll");
 });
 
-test('applySegment: growing prefix replaces, tail fragment appends', async () => {
+test('applySegment: growing snapshot replaces when new starts with old', async () => {
   const { applySegment } = await import(helperUrl);
   let reply = applySegment('', "I'll");
   reply = applySegment(reply, "I'll check");
   assert.equal(reply, "I'll check");
-  reply = applySegment(reply, ' what');
-  assert.equal(reply, "I'll check what");
+  reply = applySegment(reply, "I'll check the lane");
+  assert.equal(reply, "I'll check the lane");
+});
+
+test('applySegment: token pieces with leading space append as-is (no invented spaces)', async () => {
+  const { applySegment } = await import(helperUrl);
+  let reply = applySegment('', 'Here');
+  reply = applySegment(reply, ' is');
+  reply = applySegment(reply, ' a');
+  reply = applySegment(reply, ' summary');
+  assert.equal(reply, 'Here is a summary');
+  const mashed = ['Here', 'is', 'a', 'summary'].reduce((acc, t) => acc + t, '');
+  assert.equal(mashed, 'Hereisasummary');
+  assert.notEqual(reply, mashed);
+});
+
+test('applySegment: does not invent a space when the piece has none', async () => {
+  const { applySegment } = await import(helperUrl);
+  assert.equal(applySegment('People', 'bowl'), 'Peoplebowl');
 });
 
 test('applySegment: empty chunk is a no-op', async () => {

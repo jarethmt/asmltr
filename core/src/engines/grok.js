@@ -210,7 +210,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
     else if (r.kind === 'tool' && r.tool && onTool) { try { onTool(r.tool); } catch (_) {} }
     else if (r.kind === 'error' && r.error && onSegment) { try { onSegment(`⚠️ grok: ${r.error}`); } catch (_) {} }
     else if (r.kind === 'delta' && r.text && onDelta) { try { onDelta(r.text); } catch (_) {} }
-    else if (r.kind === 'text' && r.text && onSegment) { try { onSegment(r.text.trim()); } catch (_) {} }
+    else if (r.kind === 'text' && r.text && onSegment) { try { onSegment(r.text); } catch (_) {} }
   };
   child.stdout.on('data', (d) => { buf += d.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i)); buf = buf.slice(i + 1); } });
   let stderr = '';
