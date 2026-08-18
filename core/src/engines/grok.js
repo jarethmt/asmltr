@@ -107,6 +107,14 @@ function sessionIdFrom(obj) {
   return null;
 }
 
+function joinText(prev, next) {
+  if (next == null || next === '') return prev || '';
+  if (prev == null || prev === '') return next;
+  if (/^\s/.test(next) || /\s$/.test(prev)) return prev + next;
+  if (/[.!?]["')\]]*$/.test(prev) && /^[A-Za-z0-9“"'(]/.test(next)) return prev + ' ' + next;
+  return prev + next;
+}
+
 function extractText(obj) {
   if (!obj || typeof obj !== 'object') return '';
   const t = obj.type;
@@ -164,12 +172,17 @@ function applyEvent(ev, state) {
     return { kind: t || 'meta' };
   }
   const text = extractText(ev);
-  if (text) {
-    state.text += text;
+  // Keep space-only pieces (" ") — do not treat whitespace as empty. When Grok
+  // starts the next sentence without a leading space, joinText inserts one so
+  // stored outbound matches live ("time. The", not "time.The").
+  if (text != null && text !== '') {
+    const joined = joinText(state.text, text);
+    const emitted = joined.slice(state.text.length);
+    state.text = joined;
     // grok 1.0.5 streaming-json tokens are {type:"text", data:"..."}. Those are
     // incremental — treat as delta so /v2/stream keeps writing until real done.
     const incremental = typeof ev.delta === 'string' || (t === 'text' && typeof ev.data === 'string');
-    return { kind: incremental ? 'delta' : 'text', text };
+    return { kind: incremental ? 'delta' : 'text', text: emitted };
   }
   return { kind: 'ignore' };
 }
@@ -255,6 +268,6 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, newState, timeoutMs, maxTurns,
+  extractText, extractUsage, joinText, newState, timeoutMs, maxTurns,
   DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
 };

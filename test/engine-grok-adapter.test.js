@@ -154,3 +154,27 @@ test('engines.get("grok") lazy-loads the grok adapter', () => {
   assert.equal(typeof impl.runTurn, 'function');
   assert.equal(typeof impl.complete, 'function');
 });
+
+test('applyEvent: space-only delta after period produces "time. The" not "time.The"', () => {
+  const liveState = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  let live = '';
+  for (const piece of ['time.', ' ', 'The']) {
+    const r = grok.applyEvent({ type: 'text', data: piece }, liveState);
+    assert.equal(r.kind, 'delta');
+    live += r.text;
+  }
+  assert.equal(liveState.text, 'time. The');
+  assert.equal(live, liveState.text);
+  assert.notEqual(live, 'time.The');
+});
+
+test('applyEvent: next sentence without leading space still stores ". "', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  let live = '';
+  for (const piece of ['time.', 'The']) {
+    const r = grok.applyEvent({ type: 'text', data: piece }, state);
+    live += r.text;
+  }
+  assert.equal(state.text, 'time. The');
+  assert.equal(live, 'time. The');
+});
