@@ -1,5 +1,5 @@
 <script setup>
-// Unified "manage session" pane, in a draggable + resizable floating window. One chat
+// Unified "manage session" pane (ModalShell split: transcript scrolls, footer stays). One chat
 // interface over every session type:
 //  • web sessions (session_id `web:…`) — the BROWSER is the connector: the composer
 //    streams a turn through the core (/v2/stream) and renders the reply live.
@@ -13,7 +13,7 @@ import { api, control, webChat, parsePayload } from '@/services/api'
 import { manager } from '@/services/manager'
 import { useSpeech } from '@/composables/useSpeech'
 import { statusMeta, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
-import FloatingWindow from './FloatingWindow.vue'
+import ModalShell from './ModalShell.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
@@ -34,7 +34,7 @@ const props = defineProps({
   mutable: { type: Object, default: null }, // { instanceId, channelId, label } if this session's channel can be muted
   channelState: { type: Boolean, default: undefined },
   channelBusy: { type: Boolean, default: false },
-  // floating-window manager props (forwarded to FloatingWindow)
+  // window-manager props (minimized hides the modal; z/focus unused on ModalShell)
   z: { type: Number, default: 70 },
   focused: { type: Boolean, default: true },
   minimized: { type: Boolean, default: false },
@@ -173,12 +173,9 @@ const seeded = ref([])
 const loading = ref(true)
 const scrollBox = ref(null)
 const bottomSentinel = ref(null)
-const STICK_PX = 80
+const STICK_PX = 64
 const stickToBottom = ref(true)
 const streamTick = ref(0)
-let pinning = false
-let pinClear = 0
-const scrollerUnbind = []
 
 const maxSeededTs = computed(() => (seeded.value.length ? seeded.value[seeded.value.length - 1].ts : 0))
 const cutoffTs = ref(null)
@@ -200,64 +197,26 @@ function nearBottom(el) {
   if (!el) return true
   return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_PX
 }
-function isScroller(el) {
-  if (!el || el.nodeType !== 1) return false
-  if (el === document.documentElement || el === document.body) return false
-  const oy = getComputedStyle(el).overflowY
-  return oy === 'auto' || oy === 'scroll' || oy === 'overlay'
-}
-function realScrollers(from) {
-  const out = []
-  let n = from
-  while (n && n !== document.body) {
-    if (isScroller(n)) out.push(n)
-    n = n.parentElement
-  }
-  return out
-}
-function bindScrollerListeners() {
-  while (scrollerUnbind.length) scrollerUnbind.pop()()
-  const box = scrollBox.value
-  if (!box) return
-  // Pin + stick against the REAL overflow ancestors (window host / flex parent),
-  // not only scrollBox — 29a0331 set scrollTop on an inner div that never overflowed.
-  for (const el of realScrollers(box.parentElement)) {
-    const h = () => { if (!pinning) stickToBottom.value = nearBottom(el) }
-    el.addEventListener('scroll', h, { passive: true })
-    scrollerUnbind.push(() => el.removeEventListener('scroll', h))
-  }
-}
-function onTranscriptScroll(e) {
-  if (pinning) return
-  const el = (e && e.currentTarget) || scrollBox.value
+function onTranscriptScroll() {
+  const el = scrollBox.value
   if (el) stickToBottom.value = nearBottom(el)
 }
-function pinNow() {
-  const box = scrollBox.value
+function pinTranscript() {
+  const el = scrollBox.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
   const sent = bottomSentinel.value
-  pinning = true
-  clearTimeout(pinClear)
-  const targets = new Set()
-  if (box) {
-    targets.add(box)
-    for (const s of realScrollers(box)) targets.add(s)
-  }
   if (sent) {
-    for (const s of realScrollers(sent)) targets.add(s)
-    try { sent.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' }) } catch (_) {}
-  }
-  for (const el of targets) {
-    try { el.scrollTop = el.scrollHeight } catch (_) {}
+    try { sent.scrollIntoView({ block: 'end', behavior: 'instant' }) } catch (_) {}
   }
   stickToBottom.value = true
-  pinClear = setTimeout(() => { pinning = false }, 80)
 }
 function scrollToBottom(force = false) {
   nextTick(() => {
     if (!force && !stickToBottom.value) return
-    pinNow()
+    pinTranscript()
     requestAnimationFrame(() => {
-      if (force || stickToBottom.value) pinNow()
+      if (force || stickToBottom.value) pinTranscript()
     })
   })
 }
@@ -265,8 +224,8 @@ function bumpStream() {
   streamTick.value++
   scrollToBottom()
 }
-onMounted(() => { load(); nextTick(bindScrollerListeners) })
-watch(key, () => { load(); nextTick(bindScrollerListeners) })
+onMounted(load)
+watch(key, load)
 
 // ---- chat rows (events → transcript) ----------------------------------------
 // eventRow (event → chat row) lives in @/lib/transcript so this chat and the Schedules last-run
@@ -410,7 +369,11 @@ async function toggleMic() {
 // Manually (re)read a specific message aloud — the speaker button on assistant bubbles.
 function readAloud(text) { speak(text).catch((e) => { notice.value = { ok: false, text: 'read-aloud failed: ' + e.message } }) }
 
-function onSend() { return isWeb.value ? webSend() : doInject() }
+function onSend() {
+  stickToBottom.value = true
+  scrollToBottom(true)
+  return isWeb.value ? webSend() : doInject()
+}
 
 async function onStop() {
   if (isWeb.value) {
@@ -429,7 +392,7 @@ async function onStop() {
   finally { busy.value = false }
 }
 
-onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} while (scrollerUnbind.length) scrollerUnbind.pop()(); clearTimeout(pinClear); stopSpeaking(); cancelRecording(); stopLive() })
+onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} stopSpeaking(); cancelRecording(); stopLive() })
 
 const placeholder = computed(() => {
   if (isWeb.value) return 'Message this session… (Enter to send, Shift+Enter for a newline)'
@@ -439,8 +402,8 @@ const placeholder = computed(() => {
 </script>
 
 <template>
-  <FloatingWindow :storage-key="'asmltr:win:' + key" :subtitle="key" :z="z" :focused="focused" :minimized="minimized" :accent="accent"
-                  @close="$emit('close')" @minimize="$emit('minimize')" @focus="$emit('focus')">
+  <ModalShell :title="displayTitle" :subtitle="key" wide split :show="!minimized"
+              @close="$emit('close')">
     <!-- editable title -->
     <template #title>
       <div v-if="!editingTitle" class="flex min-w-0 items-center gap-1.5">
@@ -469,8 +432,8 @@ const placeholder = computed(() => {
       </div>
     </template>
 
-    <!-- flex transcript pane: one bounded column so the window host cannot grow/clip (Titanic). -->
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <!-- meta + transcript: bounded flex column so only scrollBox scrolls -->
+    <div class="flex min-h-0 flex-1 flex-col">
     <!-- meta strip -->
     <div class="mb-2 flex shrink-0 flex-wrap items-center gap-2 text-[11px]">
       <SurfaceBadge :surface="sess.surface" />
@@ -624,5 +587,5 @@ const placeholder = computed(() => {
         </div>
       </div>
     </template>
-  </FloatingWindow>
+  </ModalShell>
 </template>
