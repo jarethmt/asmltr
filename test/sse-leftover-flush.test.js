@@ -72,3 +72,42 @@ test('delimited frames still dispatch without needing flush', async () => {
   assert.equal(leftover, '');
   assert.deepEqual(frames, ['delta', 'done']);
 });
+
+test('PARTIAL leftover is NOT parsed as a frame', async () => {
+  const { consumeSseBuffer } = await import(sseUrl);
+  const frames = [];
+  const leftover = consumeSseBuffer(
+    'data: {"type":"delta","text":"I\'ll',
+    (f) => frames.push(f),
+    { flush: true }
+  );
+  assert.equal(leftover, '');
+  assert.deepEqual(frames, []);
+});
+
+test('flush:false does not treat a complete first delta as end', async () => {
+  const { consumeSseBuffer } = await import(sseUrl);
+  const frames = [];
+  const rest = consumeSseBuffer(
+    'data: {"type":"delta","text":"I\'ll"}',
+    (f) => frames.push(f),
+    { flush: false }
+  );
+  assert.deepEqual(frames, []);
+  assert.match(rest, /I'll/);
+});
+
+test('stream does not stop after first delta', async () => {
+  const { readSseStream } = await import(sseUrl);
+  const seen = [];
+  await readSseStream(
+    fakeReader([
+      'data: {"type":"delta","text":"I\'ll"}\n\n',
+      'data: {"type":"delta","text":" check"}\n\n',
+      'data: {"type":"delta","text":" what"}\n\n',
+      'data: {"type":"done","actions":[]}'
+    ]),
+    (f) => seen.push(f.type === 'delta' ? f.text : f.type)
+  );
+  assert.deepEqual(seen, ["I'll", ' check', ' what', 'done']);
+});

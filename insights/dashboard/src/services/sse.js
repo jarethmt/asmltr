@@ -1,9 +1,15 @@
 // Shared SSE frame parser for webChat.send and voice.speak.
-// Frames are `\n\n`-separated `data: {...}` lines. A final frame with no
-// trailing blank line (common when the core closes the stream on `done`) is
-// flushed after the reader reports done.
+// Frames are `\n\n`-separated `data: {...}` lines. Leftover flush runs ONLY
+// after the reader is actually finished, and ONLY parses a leftover that is a
+// complete `data: {...}` JSON line. Partial leftovers are ignored. We never
+// invent a `done` frame or stop reading early.
+
+function normalizeSse(buf) {
+  return String(buf).replace(/\r\n/g, '\n')
+}
 
 export function parseSseFrames(buf) {
+  buf = normalizeSse(buf)
   const frames = []
   let idx
   while ((idx = buf.indexOf('\n\n')) !== -1) {
@@ -18,18 +24,27 @@ export function parseSseFrames(buf) {
 function parseSseDataLine(raw) {
   const line = String(raw).split('\n').find((l) => l.startsWith('data:'))
   if (!line) return null
-  try { return JSON.parse(line.slice(5).trim()) } catch { return null }
+  const payload = line.slice(5).trim()
+  // Require a complete JSON object — a partial first delta like
+  // `data: {"type":"delta","text":"I'll` must NOT become a frame.
+  if (!payload.startsWith('{') || !payload.endsWith('}')) return null
+  try { return JSON.parse(payload) } catch { return null }
 }
 
 export function consumeSseBuffer(buf, dispatch, { flush = false } = {}) {
   const { frames, rest } = parseSseFrames(buf)
   for (const f of frames) dispatch(f)
-  if (flush && rest.includes('data:')) {
-    const f = parseSseDataLine(rest)
-    if (f) dispatch(f)
-    return ''
+  if (!flush) return rest
+  // Reader finished. Parse leftover only if it is complete `data: {...}` line(s).
+  const leftover = rest.trim()
+  if (leftover) {
+    for (const line of leftover.split('\n')) {
+      if (!line.startsWith('data:')) continue
+      const f = parseSseDataLine(line)
+      if (f) dispatch(f)
+    }
   }
-  return rest
+  return ''
 }
 
 export async function readSseStream(reader, dispatch) {
@@ -37,9 +52,12 @@ export async function readSseStream(reader, dispatch) {
   let buf = ''
   for (;;) {
     const { value, done } = await reader.read()
+    if (value) {
+      buf += dec.decode(value, { stream: !done })
+      // Never leftover-flush mid-stream — even if this chunk has no `\n\n`.
+      buf = consumeSseBuffer(buf, dispatch)
+    }
     if (done) break
-    buf += dec.decode(value, { stream: true })
-    buf = consumeSseBuffer(buf, dispatch)
   }
   buf += dec.decode()
   consumeSseBuffer(buf, dispatch, { flush: true })

@@ -166,7 +166,10 @@ function applyEvent(ev, state) {
   const text = extractText(ev);
   if (text) {
     state.text += text;
-    return { kind: ev.delta ? 'delta' : 'text', text };
+    // grok 1.0.5 streaming-json tokens are {type:"text", data:"..."}. Those are
+    // incremental — treat as delta so /v2/stream keeps writing until real done.
+    const incremental = typeof ev.delta === 'string' || (t === 'text' && typeof ev.data === 'string');
+    return { kind: incremental ? 'delta' : 'text', text };
   }
   return { kind: 'ignore' };
 }

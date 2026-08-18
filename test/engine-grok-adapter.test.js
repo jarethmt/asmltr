@@ -106,7 +106,7 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   const sid = '11111111-2222-3333-4444-555555555555';
   assert.equal(grok.applyEvent(grok.parseLine(`{"type":"text","delta":"Hi"}`), state).kind, 'delta');
   assert.equal(state.text, 'Hi');
-  assert.equal(grok.applyEvent(grok.parseLine(`{"type":"text","data":"pong"}`), state).kind, 'text');
+  assert.equal(grok.applyEvent(grok.parseLine(`{"type":"text","data":"pong"}`), state).kind, 'delta');
   assert.equal(state.text, 'Hipong');
   assert.equal(grok.applyEvent({ type: 'thought', text: 'hmm' }, state).kind, 'thinking');
   assert.equal(grok.applyEvent({ type: 'tool_call', name: 'shell', input: { cmd: 'ls' } }, state).kind, 'tool');
