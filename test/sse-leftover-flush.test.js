@@ -38,6 +38,16 @@ test('leftover data: done without trailing blank line still fires onDone', async
   assert.deepEqual(doneActions, []);
 });
 
+test('parseSseFrames leaves an undelimited last frame in rest', async () => {
+  const { parseSseFrames } = await import(sseUrl);
+  const { frames, rest } = parseSseFrames(
+    'data: {"type":"delta","text":"a"}\n\ndata: {"type":"done","actions":[]}'
+  );
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].type, 'delta');
+  assert.equal(rest, 'data: {"type":"done","actions":[]}');
+});
+
 test('consumeSseBuffer flush parses a lone leftover data: line', async () => {
   const { consumeSseBuffer } = await import(sseUrl);
   const frames = [];
