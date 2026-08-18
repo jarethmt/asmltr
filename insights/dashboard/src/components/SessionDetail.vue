@@ -17,6 +17,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
+import { applySegment } from '@/lib/segment'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -189,6 +190,7 @@ async function load() {
 }
 function scrollToBottom() { nextTick(() => { const el = scrollBox.value; if (el) el.scrollTop = el.scrollHeight }) }
 onMounted(load)
+watch(key, load)
 
 // ---- chat rows (events → transcript) ----------------------------------------
 // eventRow (event → chat row) lives in @/lib/transcript so this chat and the Schedules last-run
@@ -264,11 +266,26 @@ function webSend() {
     {
       onDelta: (t) => { turn.reply += t },
       onTool: (name) => { if (name && !turn.tools.includes(name)) turn.tools = [...turn.tools, name] },
-      onSegment: (t) => { if (!turn.reply && t) turn.reply = t },
-      onDone: () => {
+      onSegment: (t) => { turn.reply = applySegment(turn.reply, t) },
+      onDone: async () => {
         turn.streaming = false; busy.value = false; streamCtrl = null; store.fetchSessions()
         if (ttsOn.value && turn.reply) speak(turn.reply).catch(() => {}) // read the reply aloud when TTS is on
         if (pendingTitle.value != null) { control.setTitle(key.value, pendingTitle.value).then((r) => { if (r.ok) pendingTitle.value = null }).catch(() => {}) }
+        try {
+          const data = await api.events({ session: key.value, limit: 300 })
+          let lastText = ''
+          let lastTs = -Infinity
+          for (const e of data.events || []) {
+            if (e.event_type !== 'outbound') continue
+            const ts = e.ts ?? 0
+            if (ts >= lastTs) {
+              lastTs = ts
+              const payload = parsePayload(e.payload) || {}
+              lastText = payload.text || ''
+            }
+          }
+          if (lastText.length > (turn.reply || '').length) turn.reply = lastText
+        } catch (_) {}
       },
       onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null }
     }
