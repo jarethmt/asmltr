@@ -18,6 +18,10 @@ const fs = require('fs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
+// This file imports a better-sqlite3-backed store, whose native Statement destructors abort on worker
+// teardown ("(env) != nullptr"). Exit cleanly before that teardown; see native-clean-exit.js.
+require('./native-clean-exit').armCleanNativeExit();
+
 // Point the session store at a throwaway DB before it is required (it opens on import).
 const TMP_DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-sessions-')), 'core.db');
 process.env.ASMLTR_CORE_DB = TMP_DB;
