@@ -95,8 +95,9 @@ local Claude subscription (never an API key). The *classifier* can use either pr
 | `ASMLTR_MODERATION_PROVIDER` | `openai` | `openai` \| `anthropic` |
 | `ASMLTR_MODERATION_MODEL` | `gpt-5-nano` (openai) / `claude-haiku-4-5-20251001` (anthropic) | any chat/messages model of that provider |
 | `ASMLTR_MODERATION_KEY` | `openai_api_key` (openai) / `anthropic_api_key` (anthropic) | the **secret key name** resolved via the secret provider (`shared/secrets.js`) |
+| `ASMLTR_MODERATION_REASONING_EFFORT` | `minimal` | OpenAI only. Caps `gpt-5-nano` (a reasoning model) so the classifier does not spend 2–3.5s thinking on every inbound. Set empty / `off` / `none` to omit the field (needed for non-reasoning models). |
 
-- **OpenAI** uses the `openai` SDK (`chat.completions`).
+- **OpenAI** uses the `openai` SDK (`chat.completions`). Default model `gpt-5-nano` is a *reasoning* model; on gpt-5-family models only, the call sets `reasoning_effort: 'minimal'` so the screen stays a cheap classifier instead of a 2–3.5s think. Non-gpt-5 models never get the field. A model that still rejects it is retried without it. Every decision JSONL line includes `duration_ms`.
 - **Anthropic** uses the Messages API over plain HTTPS (no extra dependency).
 
 ### ⚠️ The Anthropic-key safety rule (important)
@@ -177,6 +178,7 @@ connector** that declares `outbound` in its `meta` and implements `POST /out`. O
 | `ASMLTR_MODERATION_PROVIDER` | `openai` (default) \| `anthropic` |
 | `ASMLTR_MODERATION_MODEL` | classifier model |
 | `ASMLTR_MODERATION_KEY` | secret key name for the classifier |
+| `ASMLTR_MODERATION_REASONING_EFFORT` | OpenAI reasoning cap (`minimal` default; empty/`off`/`none` omits) |
 | `ASMLTR_MOD_LOG_DIR` | where decision JSONL is written |
 | `ASMLTR_ADMIN_ALERT_SEND` | connector alert route (via manager `/send`) |
 | `ASMLTR_ADMIN_ALERT_CMD` | shell-command alert sink |

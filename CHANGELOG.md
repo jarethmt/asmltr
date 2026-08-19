@@ -13,6 +13,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+- **Moderation no longer spends 2–3.5s reasoning on every inbound.** Default classifier `gpt-5-nano` is a reasoning model; the OpenAI call now sets `reasoning_effort: 'minimal'` on gpt-5-family models only (override `ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Decision logs include `duration_ms`. A model that rejects the field is retried without it.
 
 ## [0.13.1] - 2026-08-18
 

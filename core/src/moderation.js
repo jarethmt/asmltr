@@ -9,6 +9,8 @@
  *
  * Decision: bypass for bypass_moderation; otherwise gpt-5-nano risk score,
  * 0-6 allow / 7-10 block. Fail-secure (block + alert) on error.
+ * OpenAI calls set reasoning_effort: minimal by default — gpt-5-nano is a
+ * reasoning model and the uncapped call added ~2–3.5s of synchronous dead time.
  */
 
 const fs = require('fs');
@@ -29,6 +31,17 @@ const MOD_MODEL = process.env.ASMLTR_MODERATION_MODEL
   || (MOD_PROVIDER === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-5-nano');
 const MOD_KEY_NAME = process.env.ASMLTR_MODERATION_KEY
   || (MOD_PROVIDER === 'anthropic' ? 'anthropic_api_key' : 'openai_api_key');
+// gpt-5-nano is a reasoning model. Uncapped, chat.completions spends ~2–3.5s thinking
+// on every inbound before the agent even starts (synchronous dead time). Cap at
+// minimal. Empty / off / none omits the field (non-reasoning models).
+function parseReasoningEffort(raw) {
+  if (raw === undefined || raw === null) return 'minimal';
+  const s = String(raw).trim().toLowerCase();
+  if (!s || s === 'off' || s === 'none' || s === '0') return '';
+  return s;
+}
+const MOD_REASONING_EFFORT = parseReasoningEffort(process.env.ASMLTR_MODERATION_REASONING_EFFORT);
+function isGpt5Family(model) { return /^gpt-5/i.test(String(model || '')); }
 
 const getModKey = () => require('../../shared/secrets').get(MOD_KEY_NAME);
 
@@ -59,6 +72,23 @@ function extractJson(t) {
   return JSON.parse(body);
 }
 
+// Build the OpenAI chat.completions payload. Exported so tests can assert the
+// reasoning_effort cap without hitting the network.
+function buildOpenAIParams(systemPrompt, userPrompt, { jsonMode = false, reasoningEffort = MOD_REASONING_EFFORT, model = MOD_MODEL } = {}) {
+  const params = {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+  };
+  if (jsonMode) params.response_format = { type: 'json_object' };
+  // Only gpt-5-* on the OpenAI path accept reasoning_effort. Never send it on
+  // 4o / other chat models (or the Anthropic branch, which never calls this).
+  if (reasoningEffort && isGpt5Family(model)) params.reasoning_effort = reasoningEffort;
+  return params;
+}
+
 // Raw provider call → the model's reply text (unparsed). jsonMode asks OpenAI for a guaranteed
 // JSON object (its models require the word "json" somewhere in the messages — the prompts have it).
 async function providerRaw(systemPrompt, userPrompt, jsonMode) {
@@ -81,9 +111,19 @@ async function providerRaw(systemPrompt, userPrompt, jsonMode) {
     return { text, usage: { tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0 } };
   }
   const client = await getOpenAIClient();
-  const params = { model: MOD_MODEL, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] };
-  if (jsonMode) params.response_format = { type: 'json_object' };
-  const completion = await client.chat.completions.create(params);
+  const params = buildOpenAIParams(systemPrompt, userPrompt, { jsonMode });
+  let completion;
+  try {
+    completion = await client.chat.completions.create(params);
+  } catch (err) {
+    // A non-reasoning model rejects reasoning_effort — drop it and retry once.
+    if (params.reasoning_effort && /reasoning_effort/i.test(err.message)) {
+      delete params.reasoning_effort;
+      completion = await client.chat.completions.create(params);
+    } else {
+      throw err;
+    }
+  }
   const u = completion.usage || {};
   return { text: (completion.choices[0].message.content || '').trim(),
     usage: { tokens_in: u.prompt_tokens || 0, tokens_out: u.completion_tokens || 0 } };
@@ -180,7 +220,9 @@ async function moderate(userMessage, resolved, meta = {}) {
     : `USER: ${resolved.display_name}\nALLOWED: ${JSON.stringify(resolved.permissions)}\nREQUIRES APPROVAL: ${JSON.stringify(resolved.requires_approval)}\nFORBIDDEN: ${JSON.stringify(resolved.forbidden)}\n\nUSER'S ACTUAL MESSAGE:\n"${userMessage}"\n\nEvaluate ONLY this user message. Questions about past discussions = SAFE. Their own project = SAFE. Only block actual violations.`;
 
   try {
+    const t0 = Date.now();
     const { assessment, usage } = await runModeration(systemPrompt, userPrompt);
+    const duration_ms = Date.now() - t0;
     const allowed = assessment.riskLevel <= 6;
     const monitored = assessment.riskLevel >= 4 && assessment.riskLevel <= 6;
 
@@ -196,6 +238,7 @@ async function moderate(userMessage, resolved, meta = {}) {
       reasoning: assessment.reasoning,
       decision: allowed ? 'ALLOW' : 'BLOCK',
       monitored,
+      duration_ms,
     });
 
     return {
@@ -261,4 +304,4 @@ async function notifyBlock(resolved, userMessage, moderation, platform) {
   adminAlert(body);
 }
 
-module.exports = { moderate, notifyBlock, logModerationEvent };
+module.exports = { moderate, notifyBlock, logModerationEvent, buildOpenAIParams, parseReasoningEffort };
