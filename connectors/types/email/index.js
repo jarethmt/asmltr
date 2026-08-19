@@ -112,10 +112,10 @@ async function start(ctx) {
   async function processMessage(parsed) {
     const fromAddr = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
     const fromName2 = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].name) || fromAddr;
-    if (!fromAddr) return;
+    if (!fromAddr) return { handled: false };
     // Loop / automation guards — never answer ourselves or noreply/daemon senders.
-    if (fromAddr.toLowerCase() === selfAddr) return;
-    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return; }
+    if (fromAddr.toLowerCase() === selfAddr) return { handled: false };
+    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return { handled: false }; }
 
     const subject = parsed.subject || '(no subject)';
     const body = (parsed.text || parsed.html || '').toString().trim();
@@ -176,6 +176,7 @@ async function start(ctx) {
         ctx.log(`replied to ${fromAddr} (${replySubject})`);
       } // 'drafted' → held for approval (dashboard); 'status'/others → nothing to mail
     }
+    return { handled: true };
   }
 
   // --- IMAP watch (IDLE) -----------------------------------------------------
@@ -190,8 +191,15 @@ async function start(ctx) {
     try {
       for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
         if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
-        try { await processMessage(await simpleParser(msg.source)); }
-        catch (e) { ctx.log(`process failed uid ${msg.uid}: ${e.message}`); }
+        try {
+          const result = await processMessage(await simpleParser(msg.source));
+          // Gmail/IMAP unread is \Seen, not our UID cursor. Mark mail we actually handled
+          // so the inbox matches what the assistant has already seen. Skip noreply/self.
+          if (result && result.handled) {
+            try { await imap.messageFlagsAdd({ uid: msg.uid }, ['\\Seen'], { uid: true }); }
+            catch (e) { ctx.log(`mark seen uid ${msg.uid}: ${e.message}`); }
+          }
+        } catch (e) { ctx.log(`process failed uid ${msg.uid}: ${e.message}`); }
         lastUid = Math.max(lastUid, msg.uid);
       }
     } finally { lock.release(); busy = false; }
@@ -286,7 +294,7 @@ async function start(ctx) {
           attachments.push({ name: rec.filename, path: rec.path, mime: rec.mime, size: rec.size });
         } catch (_) {}
       }
-      if (markSeen) { try { await c.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }); } catch (_) {} }
+      if (markSeen !== false) { try { await c.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }); } catch (_) {} }
       return {
         uid, from: parsed.from && parsed.from.text, to: parsed.to && parsed.to.text,
         subject: parsed.subject || '(no subject)', date: parsed.date || null, messageId: parsed.messageId || null,

@@ -447,12 +447,13 @@ async function cmdMail(rest) {
   // asmltr mail [list] [-n N] [--unseen] | read <uid> [--seen] | search "<query>" [-n N]
   const sub = rest[0] === 'read' || rest[0] === 'search' || rest[0] === 'list' ? rest[0] : 'list';
   const args = ['read', 'search', 'list'].includes(rest[0]) ? rest.slice(1) : rest;
-  let n = 20, unseen = false, markSeen = false; const words = [];
+  let n = 20, unseen = false, markSeen = true; const words = [];
   for (let i = 0; i < args.length; i++) {
     const t = args[i];
     if (t === '-n' || t === '--limit') n = Number(args[++i]) || 20;
     else if (t === '--unseen') unseen = true;
     else if (t === '--seen') markSeen = true;
+    else if (t === '--keep-unread') markSeen = false;
     else words.push(t);
   }
   const post = (body) => {
@@ -463,7 +464,7 @@ async function cmdMail(rest) {
   };
 
   if (sub === 'read') {
-    if (!words[0]) throw new Error('usage: asmltr mail read <uid> [--seen]');
+    if (!words[0]) throw new Error('usage: asmltr mail read <uid> [--keep-unread]');
     const r = await post({ op: 'read', uid: Number(words[0]), markSeen });
     if (!r.ok) return console.log(A.red(r.error || 'read failed'));
     const m = r.message;
