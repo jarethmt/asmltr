@@ -478,6 +478,8 @@ async function handle(envelope, opts = {}) {
     const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
     const turnOpts = {
       prompt: catchUp + e.content.text,
+      effortPrompt: e.content.text,
+      channel: e.channel,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
       resume,
@@ -1849,7 +1851,7 @@ app.post('/v2/inject', (req, res) => {
       : text;
     const ac = new AbortController(); inFlight.set(key, ac);
     let result;
-    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
+    const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume, cwd: row.working_dir || undefined, abortController: ac,
         onEvent: (sdkEvt) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
