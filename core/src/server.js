@@ -59,7 +59,27 @@ const identity = require('../../shared/identity'); // Self identity anchor (Like
 const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
+const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
+
+/** Write a completed turn into the Self silo (memory/transcripts + last-topics)
+ *  so a fresh session after idle can rehydrate without grepping events-*.jsonl.
+ *  Best-effort: never fail the turn. */
+function persistAskTurn(e, result, assistantText) {
+  if (!e || !result || result.isError) return;
+  const userText = String((e.content && e.content.text) || '');
+  const text = assistantText != null ? String(assistantText) : String(result.text || '');
+  if (!userText && !text) return;
+  try {
+    transcripts.appendTurn({
+      conversationKey: e.conversation_key,
+      channel: e.channel,
+      userText,
+      assistantText: text,
+    });
+  } catch (_) {}
+}
+
 let SELF_SILO_DIR = null;
 try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
 // Cheap cached "is the vault locked?" flag, refreshed in the background, so every turn can warn the agent
@@ -334,7 +354,8 @@ async function handle(envelope, opts = {}) {
         'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
         '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
         '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
+        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).\n' +
+        'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`). Do NOT grep events-*.jsonl for prior conversation.';
     }
     if (VAULT_LOCKED) {
       pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
@@ -421,10 +442,17 @@ async function handle(envelope, opts = {}) {
   let canInjectOnce = process.env.ASMLTR_INJECT_ONCE !== 'off';
   try { canInjectOnce = canInjectOnce && !!require('./engines').resolve(engineId).historyReplaysSystemPrompt; } catch (_) { canInjectOnce = false; }
   const reuseStable = promptParts.shouldReuseStable({ canInjectOnce, isNew, row: sessionRow, engineId, stableHash });
-  const effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
+  let effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
+    // Fresh engine session (first turn or idle expiry): inject durable silo memory. Write-only is a fail.
+    const recalled = transcripts.recallForInject({ conversationKey: e.conversation_key });
+    if (recalled) {
+      effectiveSystemPrompt += '\n\nPRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl.\n\n' + recalled;
+    } else {
+      effectiveSystemPrompt += '\n\nPRIOR CONTEXT — this is a FRESH engine session and the Self silo has no prior turns yet. Do NOT grep events-*.jsonl.';
+    }
   }
 
   // Remember where an out-of-band operator inject should reply (via the manager's /send):
@@ -623,6 +651,10 @@ async function handle(envelope, opts = {}) {
     if (masked) record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'redacted', count: masked, public: !!e.public } });
   }
+
+  // Self silo: persist the (possibly redacted) user+assistant turn for rehydrate.
+  const replyText = (actions.find((a) => a && a.type === 'reply') || {}).text;
+  persistAskTurn(e, result, replyText);
 
   // --- DRAFT / APPROVAL GATE ---------------------------------------------------
   // If the connector attached an approval policy and it says HOLD for this recipient, divert the
