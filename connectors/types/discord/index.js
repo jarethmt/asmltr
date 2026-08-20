@@ -488,9 +488,8 @@ RESPONSE RULES:
         // or a new narration block begins. The block still open at `done` is the final answer.
         let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
         let beatTimer = null;
-        const isPublic = message.channel.type !== 1;
         const hints = speakerHintsFrom(message.author, message.member);
-        let maxThoughts = isPublic ? 2 : Infinity;
+        let maxThoughts = thoughtBudget('medium');
         let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
         const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
@@ -520,12 +519,13 @@ RESPONSE RULES:
         };
         const actions = await ctx.core.handleStream(envelope, {
           onEffort: (effort) => {
-            maxThoughts = thoughtBudget(effort, { publicChannel: isPublic });
+            maxThoughts = thoughtBudget(effort);
           },
           onSegment: (t) => { holdAnswer(t); },
           onTool: (tool) => {
             pending = '';
             if (sawNoReply) return;
+            if (maxThoughts <= 0) return;
             const line = discordToolLine(streamTools, tool);
             if (!line) return;
             if (maxThoughts !== Infinity && !streamTools && humanToolChip(tool) === 'Working') return;
@@ -534,6 +534,7 @@ RESPONSE RULES:
           // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
           onThinking: (t) => {
             if (sawNoReply) return;
+            if (maxThoughts <= 0) return;
             const line = discordThoughtLine(t, hints);
             if (line && thoughtsPosted < maxThoughts) {
               thoughtsPosted += 1;
