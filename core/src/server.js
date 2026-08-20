@@ -1076,16 +1076,38 @@ function normalizeWebSender(req) {
   if (owner) b.sender = { ...(b.sender || {}), raw_id: String(owner), raw_username: (b.sender && b.sender.raw_username) || 'dashboard' };
 }
 
-// Attach a browser-uploaded file to the shared upload surface (Phase B of the web chat). Body is
-// JSON { channel, filename, mime, conversation_key?, data_base64 } — base64 keeps it within the
-// existing express.json body (no multipart dep). Returns the manifest record incl. absolute path,
-// which the chat composer then references in the next message so the agent can Read it.
-app.post('/v2/upload', (req, res) => {
+// Attach a browser-uploaded file to the shared upload surface (Phase B of the web chat).
+// Live composer POSTs raw bytes (same as /v2/recordings) so a 25MB original file fits.
+// JSON { filename, mime, conversation_key?, data_base64 } still works for older clients
+// (capped by express.json). Returns the manifest record incl. absolute path, which the
+// chat composer then references in the next message so the agent can Read it.
+const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+app.post('/v2/upload', (req, res, next) => {
+  const ct = req.headers['content-type'] || '';
+  if (ct.includes('application/json')) return next();
+  express.raw({ type: () => true, limit: UPLOAD_MAX_BYTES })(req, res, (err) => {
+    if (err) return res.status(413).json({ error: 'file too large (max 25MB)' });
+    next();
+  });
+}, (req, res) => {
   try {
-    const { filename, mime, conversation_key, data_base64 } = req.body || {};
-    if (!data_base64 || typeof data_base64 !== 'string') return res.status(400).json({ error: 'data_base64 required' });
-    const buffer = Buffer.from(data_base64, 'base64');
+    let buffer, filename, mime, conversation_key;
+    if (Buffer.isBuffer(req.body)) {
+      buffer = req.body;
+      filename = req.query.filename || req.get('X-Upload-Filename') || 'upload.bin';
+      try { filename = decodeURIComponent(String(filename)); } catch (_) {}
+      mime = req.query.mime || req.get('X-Upload-Mime') || req.get('Content-Type') || 'application/octet-stream';
+      conversation_key = req.query.conversation_key || req.get('X-Conversation-Key') || null;
+    } else {
+      const b = req.body || {};
+      if (!b.data_base64 || typeof b.data_base64 !== 'string') return res.status(400).json({ error: 'data_base64 required' });
+      buffer = Buffer.from(b.data_base64, 'base64');
+      filename = b.filename;
+      mime = b.mime;
+      conversation_key = b.conversation_key || null;
+    }
     if (!buffer.length) return res.status(400).json({ error: 'empty file' });
+    if (buffer.length > UPLOAD_MAX_BYTES) return res.status(413).json({ error: 'file too large (max 25MB)' });
     const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User') || 'dashboard';
     const rec = require('../../shared/uploads').save({
       channel: 'assistant-web', buffer, filename, mime,

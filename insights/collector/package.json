@@ -7,7 +7,7 @@
   "engines": { "node": ">=24.0.0" },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check db.js && node --check reconcile.js && node --check sampler.js && node --check tailer.js"
+    "check": "node --check server.js && node --check db.js && node --check liveActive.js && node --check reconcile.js && node --check sampler.js && node --check tailer.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
