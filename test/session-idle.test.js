@@ -27,22 +27,22 @@ test('parseIdlePolicy matches existing idle:<minutes> | infinite', () => {
   assert.equal(sessions.parseIdlePolicy('nope'), null);
 });
 
-test('idlePolicyFromEnv defaults to idle:30 and honors ASMLTR_IDLE_MS / POLICY', () => {
+test('idlePolicyFromEnv defaults to infinite; POLICY wins; IDLE_MS is Live-only', () => {
   const prevP = process.env.ASMLTR_IDLE_POLICY;
   const prevM = process.env.ASMLTR_IDLE_MS;
   delete process.env.ASMLTR_IDLE_POLICY;
   delete process.env.ASMLTR_IDLE_MS;
-  assert.equal(sessions.idlePolicyFromEnv(), 'idle:30');
+  assert.equal(sessions.idlePolicyFromEnv(), 'infinite');
   process.env.ASMLTR_IDLE_MS = '900000';
-  assert.equal(sessions.idlePolicyFromEnv(), 'idle:15');
+  assert.equal(sessions.idlePolicyFromEnv(), 'infinite');
   process.env.ASMLTR_IDLE_MS = '1800000';
-  assert.equal(sessions.idlePolicyFromEnv(), 'idle:30');
+  assert.equal(sessions.idlePolicyFromEnv(), 'infinite');
   process.env.ASMLTR_IDLE_MS = '0';
   assert.equal(sessions.idlePolicyFromEnv(), 'infinite');
-  delete process.env.ASMLTR_IDLE_MS;
   process.env.ASMLTR_IDLE_POLICY = 'idle:45';
   assert.equal(sessions.idlePolicyFromEnv(), 'idle:45');
   process.env.ASMLTR_IDLE_POLICY = 'infinite';
+  process.env.ASMLTR_IDLE_MS = '1800000';
   assert.equal(sessions.idlePolicyFromEnv(), 'infinite');
   if (prevP === undefined) delete process.env.ASMLTR_IDLE_POLICY; else process.env.ASMLTR_IDLE_POLICY = prevP;
   if (prevM === undefined) delete process.env.ASMLTR_IDLE_MS; else process.env.ASMLTR_IDLE_MS = prevM;
