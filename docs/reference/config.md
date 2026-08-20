@@ -93,7 +93,7 @@ The classifier resolves its key **by name** through the secret provider (never
 | `ASMLTR_MODERATION_PROVIDER` | `openai` | `openai` or `anthropic` |
 | `ASMLTR_MODERATION_MODEL` | `gpt-5-nano` (openai) / `claude-haiku-4-5-20251001` (anthropic) | Classifier model |
 | `ASMLTR_MODERATION_KEY` | `openai_api_key` / `anthropic_api_key` | Secret **key name** for the classifier |
-| `ASMLTR_MODERATION_REASONING_EFFORT` | `minimal` | OpenAI only. Caps reasoning on `gpt-5-nano` (uncapped is ~2–3.5s per inbound). Empty / `off` / `none` omits the field |
+| `ASMLTR_MODERATION_REASONING_EFFORT` | omit (unset) | OpenAI only. Default omits the field (API default). Set `minimal` to cap `gpt-5-nano` latency (~2–3.5s uncapped). `low` / `medium` / `high` also send the field; empty / `off` / `none` omit |
 | `ASMLTR_MOD_LOG_DIR` | `core/data/moderation-logs` | Where moderation decisions are logged |
 
 ## Admin / security alerts

@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 
 const { buildOpenAIParams, parseReasoningEffort } = require('../core/src/moderation');
 
-test('parseReasoningEffort defaults to minimal when unset', () => {
-  assert.equal(parseReasoningEffort(undefined), 'minimal');
-  assert.equal(parseReasoningEffort(null), 'minimal');
+test('parseReasoningEffort defaults to omit when unset', () => {
+  assert.equal(parseReasoningEffort(undefined), '');
+  assert.equal(parseReasoningEffort(null), '');
 });
 
 test('parseReasoningEffort treats empty / off / none as omit', () => {
@@ -17,13 +17,14 @@ test('parseReasoningEffort treats empty / off / none as omit', () => {
 });
 
 test('parseReasoningEffort passes through an explicit level', () => {
+  assert.equal(parseReasoningEffort('minimal'), 'minimal');
   assert.equal(parseReasoningEffort('low'), 'low');
   assert.equal(parseReasoningEffort('HIGH'), 'high');
 });
 
-test('openai moderation params cap reasoning at minimal by default', () => {
+test('openai moderation params omit reasoning_effort by default', () => {
   const p = buildOpenAIParams('sys', 'user', { jsonMode: true, model: 'gpt-5-nano' });
-  assert.equal(p.reasoning_effort, 'minimal');
+  assert.equal('reasoning_effort' in p, false);
   assert.deepEqual(p.response_format, { type: 'json_object' });
   assert.equal(p.messages.length, 2);
   assert.equal(p.messages[0].role, 'system');
@@ -34,6 +35,12 @@ test('empty reasoning effort omits the field (non-reasoning models)', () => {
   const p = buildOpenAIParams('sys', 'user', { jsonMode: false, reasoningEffort: '' });
   assert.equal('reasoning_effort' in p, false);
   assert.equal('response_format' in p, false);
+});
+
+test('env=minimal still sends reasoning_effort', () => {
+  const p = buildOpenAIParams('sys', 'user', { reasoningEffort: 'minimal', model: 'gpt-5-nano' });
+  assert.equal(p.reasoning_effort, 'minimal');
+  assert.equal(p.model, 'gpt-5-nano');
 });
 
 test('explicit effort and model are passed through', () => {

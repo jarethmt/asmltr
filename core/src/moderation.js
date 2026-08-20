@@ -9,8 +9,8 @@
  *
  * Decision: bypass for bypass_moderation; otherwise gpt-5-nano risk score,
  * 0-6 allow / 7-10 block. Fail-secure (block + alert) on error.
- * OpenAI calls set reasoning_effort: minimal by default — gpt-5-nano is a
- * reasoning model and the uncapped call added ~2–3.5s of synchronous dead time.
+ * OpenAI calls omit reasoning_effort by default (API default, pre-PR 122).
+ * Set ASMLTR_MODERATION_REASONING_EFFORT=minimal later to cap gpt-5-nano latency.
  */
 
 const fs = require('fs');
@@ -32,10 +32,11 @@ const MOD_MODEL = process.env.ASMLTR_MODERATION_MODEL
 const MOD_KEY_NAME = process.env.ASMLTR_MODERATION_KEY
   || (MOD_PROVIDER === 'anthropic' ? 'anthropic_api_key' : 'openai_api_key');
 // gpt-5-nano is a reasoning model. Uncapped, chat.completions spends ~2–3.5s thinking
-// on every inbound before the agent even starts (synchronous dead time). Cap at
-// minimal. Empty / off / none omits the field (non-reasoning models).
+// on every inbound before the agent even starts (synchronous dead time). Default
+// omits the field (unset/empty/off/none — same as API default). Set minimal/low/
+// medium/high to send reasoning_effort. Knob is kept; live default is omit.
 function parseReasoningEffort(raw) {
-  if (raw === undefined || raw === null) return 'minimal';
+  if (raw === undefined || raw === null) return '';
   const s = String(raw).trim().toLowerCase();
   if (!s || s === 'off' || s === 'none' || s === '0') return '';
   return s;
