@@ -8,9 +8,15 @@
  *
  * Layout (silo-relative):
  *   memory/transcripts/<conversation-key>.md   append-only user+assistant turns
- *   memory/last-topics.md                      short newest-first index (easy first read)
+ *   memory/last-topics.md                      operator-wide newest-first index (NOT injected)
+ *
+ * Isolation: recallForInject reads only the per-key transcript (safeKey). The global
+ * last-topics index is an operator convenience — injecting it would leak other
+ * principals/channels into a fresh session prompt.
+ *
+ * Writes go through Silo.put / Silo.get (the storage driver), not raw fs, so encrypted
+ * and remote silos seal/sync conversation content.
  */
-const fs = require('fs');
 const path = require('path');
 const silo = require('./silo');
 
@@ -22,6 +28,7 @@ const ASSISTANT_CLIP = 32000;
 const TOPIC_CLIP = 160;
 const INJECT_TURNS = 6;
 const INJECT_CHARS = 8000;
+const RECALL_TAIL_CHARS = INJECT_CHARS * 4;
 
 function clip(s, n) {
   s = String(s == null ? '' : s);
@@ -37,78 +44,120 @@ function safeKey(key) {
   return String(key || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'unknown';
 }
 
-function formatTurn({ ts, conversationKey, channel, userText, assistantText }) {
+function formatTurn({ ts, conversationKey, channel, userText, assistantText, drafted }) {
   const iso = new Date(Number.isFinite(ts) ? ts : Date.now()).toISOString();
   const key = String(conversationKey || 'unknown');
   const ch = channel ? `  channel=${channel}` : '';
+  const asst = drafted ? '**assistant (unsent draft):**' : '**assistant:**';
   return `## ${iso}  ${key}${ch}\n\n` +
     `**user:** ${clip(userText, USER_CLIP)}\n\n` +
-    `**assistant:** ${clip(assistantText, ASSISTANT_CLIP)}\n\n`;
+    `${asst} ${clip(assistantText, ASSISTANT_CLIP)}\n\n`;
 }
 
+/** Absolute path on the local driver. Encrypted/remote silos: use Silo.get, not this. */
 function lastTopicsPath() {
-  return path.join(silo.selfSub('memory'), 'last-topics.md');
+  return path.join(silo.ensureSelf().dir, LAST_TOPICS_REL);
 }
 
 function transcriptAbs(conversationKey) {
-  return path.join(silo.selfSub(TRANSCRIPTS_REL), safeKey(conversationKey) + '.md');
+  return path.join(silo.ensureSelf().dir, TRANSCRIPTS_REL, safeKey(conversationKey) + '.md');
 }
 
-function updateLastTopics({ ts, conversationKey, userText }) {
+function transcriptRel(conversationKey) {
+  return `${TRANSCRIPTS_REL}/${safeKey(conversationKey)}.md`;
+}
+
+function textOf(buf) {
+  if (buf == null) return '';
+  return Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf);
+}
+
+async function siloGetText(rel) {
+  try {
+    return textOf(await silo.ensureSelf().get(rel));
+  } catch (_) {
+    return '';
+  }
+}
+
+async function siloPutText(rel, text) {
+  return silo.ensureSelf().put(rel, text);
+}
+
+// Serialize last-topics read-modify-write. Same-key transcript appends are serialized by
+// core's per-conversation withKeyLock; this index is shared across keys. Required now that
+// appendTurn is async (Silo.put) — a naive RMW would drop concurrent updates.
+let lastTopicsLock = Promise.resolve();
+function withLastTopicsLock(fn) {
+  const run = lastTopicsLock.then(fn, fn);
+  lastTopicsLock = run.then(() => {}, () => {});
+  return run;
+}
+
+async function updateLastTopics({ ts, conversationKey, userText }) {
   const iso = new Date(Number.isFinite(ts) ? ts : Date.now()).toISOString();
   const key = String(conversationKey || 'unknown');
   const line = `- ${iso.slice(0, 16)}Z [${key}] ${oneLine(userText).slice(0, TOPIC_CLIP)}`;
-  const p = lastTopicsPath();
-  let existing = [];
-  try {
-    existing = fs.readFileSync(p, 'utf8').split('\n').filter((l) => l.startsWith('- '));
-  } catch (_) {}
-  existing.unshift(line);
-  const body = '# Last topics\n\n' +
-    'Newest first. Full turns live under `memory/transcripts/`.\n\n' +
-    existing.slice(0, LAST_TOPICS_KEEP).join('\n') + '\n';
-  fs.writeFileSync(p, body);
-  return LAST_TOPICS_REL;
+  return withLastTopicsLock(async () => {
+    let existing = [];
+    const prev = await siloGetText(LAST_TOPICS_REL);
+    if (prev) existing = prev.split('\n').filter((l) => l.startsWith('- '));
+    existing.unshift(line);
+    const body = '# Last topics\n\n' +
+      'Newest first. Full turns live under `memory/transcripts/`.\n\n' +
+      existing.slice(0, LAST_TOPICS_KEEP).join('\n') + '\n';
+    await siloPutText(LAST_TOPICS_REL, body);
+    return LAST_TOPICS_REL;
+  });
 }
 
 /**
  * Append one user+assistant turn to the Self silo. Returns silo-relative paths
  * (no secrets). `ts` is caller-supplied so tests stay free of wall-clock coupling.
+ * `drafted` tags an unsent hold-for-approval reply so memory does not claim it was delivered.
  */
-function appendTurn({ conversationKey, channel, userText, assistantText, ts } = {}) {
+async function appendTurn({ conversationKey, channel, userText, assistantText, ts, drafted } = {}) {
   const t = Number.isFinite(ts) ? ts : Date.now();
   const key = conversationKey || 'unknown';
-  const abs = transcriptAbs(key);
-  fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.appendFileSync(abs, formatTurn({ ts: t, conversationKey: key, channel, userText, assistantText }));
-  updateLastTopics({ ts: t, conversationKey: key, userText });
+  const rel = transcriptRel(key);
+  const prev = await siloGetText(rel);
+  await siloPutText(rel, prev + formatTurn({ ts: t, conversationKey: key, channel, userText, assistantText, drafted }));
+  await updateLastTopics({ ts: t, conversationKey: key, userText });
   return {
-    transcript: `${TRANSCRIPTS_REL}/${safeKey(key)}.md`,
+    transcript: rel,
     lastTopics: LAST_TOPICS_REL,
   };
+}
+
+/** Cheap tail so recall does not split a multi-MB transcript in full. Driver has no range get. */
+function tailTranscript(transcript, maxChars = RECALL_TAIL_CHARS) {
+  if (!transcript) return '';
+  if (transcript.length <= maxChars) return transcript;
+  let slice = transcript.slice(transcript.length - maxChars);
+  const cut = slice.indexOf('\n## ');
+  if (cut >= 0) slice = slice.slice(cut + 1);
+  return slice;
 }
 
 /**
  * Read durable memory for a fresh engine session and return a block to inject
  * into the system prompt. Empty string if nothing has been written yet.
  * This is the retrieve path: write-only is a fail.
+ *
+ * Injects ONLY this conversation_key's transcript — never the global last-topics
+ * index, which is cross-principal by design.
  */
-function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS } = {}) {
-  let topics = '';
-  try { topics = fs.readFileSync(lastTopicsPath(), 'utf8'); } catch (_) {}
-  let transcript = '';
-  try { transcript = fs.readFileSync(transcriptAbs(conversationKey || 'unknown'), 'utf8'); } catch (_) {}
+async function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS } = {}) {
+  const transcript = tailTranscript(await siloGetText(transcriptRel(conversationKey || 'unknown')));
   const chunks = transcript.split(/^## /m).filter(Boolean);
   const recent = chunks.slice(-maxTurns).map((c) => '## ' + c).join('');
-  let body = '';
-  if (topics.trim()) body += 'LAST TOPICS (newest first):\n' + topics.trim() + '\n\n';
-  if (recent.trim()) body += 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent.trim() + '\n';
-  body = body.trim();
+  if (!recent.trim()) return '';
+  let body = 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent.trim();
   if (body.length > maxChars) body = '…\n' + body.slice(body.length - maxChars);
   return body;
 }
 
 module.exports = {
-  appendTurn, formatTurn, safeKey, lastTopicsPath, transcriptAbs, recallForInject,
+  appendTurn, formatTurn, safeKey, lastTopicsPath, transcriptAbs, transcriptRel, recallForInject,
   LAST_TOPICS_REL, TRANSCRIPTS_REL, LAST_TOPICS_KEEP, INJECT_TURNS, INJECT_CHARS,
 };

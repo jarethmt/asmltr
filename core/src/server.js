@@ -64,18 +64,19 @@ const transcripts = require('../../shared/transcripts'); // Self-silo memory/tra
 
 /** Write a completed turn into the Self silo (memory/transcripts + last-topics)
  *  so a fresh session after idle can rehydrate without grepping events-*.jsonl.
- *  Best-effort: never fail the turn. */
-function persistAskTurn(e, result, assistantText) {
+ *  Best-effort: never fail the turn. `drafted` tags an unsent hold-for-approval reply. */
+async function persistAskTurn(e, result, assistantText, { drafted = false } = {}) {
   if (!e || !result || result.isError) return;
   const userText = String((e.content && e.content.text) || '');
   const text = assistantText != null ? String(assistantText) : String(result.text || '');
   if (!userText && !text) return;
   try {
-    transcripts.appendTurn({
+    await transcripts.appendTurn({
       conversationKey: e.conversation_key,
       channel: e.channel,
       userText,
       assistantText: text,
+      drafted: !!drafted,
     });
   } catch (_) {}
 }
@@ -354,8 +355,14 @@ async function handle(envelope, opts = {}) {
         'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
         '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
         '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).\n' +
-        'Turns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`). Do NOT grep events-*.jsonl for prior conversation.';
+        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
+      // last-topics.md is a cross-conversation operator index. Only full-trust sessions are
+      // pointed at it; injecting or advertising it to other principals is a privacy leak.
+      if (resolved.bypass_moderation) {
+        pToolbelt += '\nTurns are auto-written to `memory/transcripts/` and indexed in `memory/last-topics.md`. After idle drops the engine session, recover prior chat from those files (`asmltr silo get memory/last-topics.md`, then `asmltr silo find <hint> --content --in memory/transcripts`). Do NOT grep events-*.jsonl for prior conversation.';
+      } else {
+        pToolbelt += '\nTurns for this conversation are auto-written under `memory/transcripts/`. After idle, a short recall of THIS conversation is injected automatically. Do NOT grep events-*.jsonl for prior conversation.';
+      }
     }
     if (VAULT_LOCKED) {
       pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
@@ -446,8 +453,9 @@ async function handle(envelope, opts = {}) {
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
-    // Fresh engine session (first turn or idle expiry): inject durable silo memory. Write-only is a fail.
-    const recalled = transcripts.recallForInject({ conversationKey: e.conversation_key });
+    // Fresh engine session (first turn or idle expiry): inject THIS conversation's silo
+    // transcript only. Write-only is a fail. Not injected on resume (isNew-gated).
+    const recalled = await transcripts.recallForInject({ conversationKey: e.conversation_key });
     if (recalled) {
       effectiveSystemPrompt += '\n\nPRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl.\n\n' + recalled;
     } else {
@@ -652,15 +660,14 @@ async function handle(envelope, opts = {}) {
       identity: resolved.user_key, source: 'core', payload: { action: 'redacted', count: masked, public: !!e.public } });
   }
 
-  // Self silo: persist the (possibly redacted) user+assistant turn for rehydrate.
   const replyText = (actions.find((a) => a && a.type === 'reply') || {}).text;
-  persistAskTurn(e, result, replyText);
 
   // --- DRAFT / APPROVAL GATE ---------------------------------------------------
   // If the connector attached an approval policy and it says HOLD for this recipient, divert the
   // (already-redacted) reply into the shared draft store instead of returning it. The connector
   // then sends nothing; the draft surfaces on the dashboard + `asmltr drafts` for approve/discard.
   // Generic — any connector opts in by setting e.approval = { policy, recipient, subject, attachments }.
+  // Persist AFTER this gate so an unsent draft is tagged, not recorded as a delivered turn.
   if (e.approval && drafts.shouldHold(e.approval.policy, resolved)) {
     const replyAction = actions.find((a) => a.type === 'reply');
     const bodyText = replyAction ? replyAction.text : '';
@@ -674,9 +681,13 @@ async function handle(envelope, opts = {}) {
       record({ surface: e.channel, session_id: e.conversation_key, event_type: 'notification',
         identity: resolved.user_key, source: 'core',
         payload: { kind: 'draft', draft_id: d.id, recipient: d.recipient, subject: d.subject, preview: truncate(bodyText, 280) } });
+      await persistAskTurn(e, result, bodyText, { drafted: true });
       return [{ type: 'drafted', draft_id: d.id }]; // connector delivers nothing to the recipient
     }
   }
+
+  // Self silo: persist the (possibly redacted) delivered user+assistant turn for rehydrate.
+  await persistAskTurn(e, result, replyText);
   return actions;
 }
 
