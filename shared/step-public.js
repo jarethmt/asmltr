@@ -11,7 +11,13 @@
  *
  * Sanitize/drop is Discord DISPLAY only. Core, collector, and Live keep
  * full-fidelity thoughts. Email does not get thought chips.
- * Leaky bubbles are dropped whole. Generic patterns only — no name denylist.
+ * Leaky bubbles are dropped whole. Generic patterns only — no name denylist
+ * in git. Speaker tokens (username / display name) are passed at runtime
+ * from the Discord message and never hardcoded.
+ *
+ * Thought volume: medium/low → 2 chips. Public rooms stay at 2 unless xhigh.
+ * DMs: high and xhigh are uncapped. Unknown tools named "Working" are
+ * skipped in the quiet budget so the channel is not a wall of Working.
  */
 
 const { redactSecrets } = require('./redact');
@@ -30,7 +36,57 @@ function looksLikePromptLeak(text) {
   if (/\bCLAUDE\.md\b/i.test(s)) return true;
   if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(s)) return true;
   if (/\/home\/[A-Za-z0-9._-]+/.test(s)) return true;
+  if (/\bThe user is\b/i.test(s)) return true;
+  if (/This is a Discord message/i.test(s)) return true;
+  if (/I was @-mentioned/i.test(s)) return true;
+  if (/\basking me \(/i.test(s)) return true;
   return false;
+}
+
+function escapeRe(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Username / display-name tokens from the live message. Skip tiny tokens. */
+function speakerHintsFrom(author, member) {
+  const out = [];
+  const add = (raw) => {
+    const s = String(raw || '').trim();
+    if (s.length >= 4 && !/^\d+$/.test(s)) out.push(s);
+    for (const p of s.split(/[\s._-]+/)) {
+      if (p.length >= 4 && !/^\d+$/.test(p)) out.push(p);
+    }
+  };
+  if (author && typeof author === 'object') {
+    add(author.username);
+    add(author.globalName);
+    add(author.displayName);
+    add(author.raw_username);
+  } else if (typeof author === 'string') {
+    add(author);
+  }
+  if (member && typeof member === 'object') {
+    add(member.displayName);
+    add(member.nickname);
+  }
+  return [...new Set(out)];
+}
+
+function mentionsSpeaker(text, hints) {
+  const s = String(text || '');
+  for (const h of hints || []) {
+    if (!h || String(h).length < 4) continue;
+    if (new RegExp('\\b' + escapeRe(h) + '\\b', 'i').test(s)) return true;
+  }
+  return false;
+}
+
+/** How many 💭 chips to post. Infinity = no cap. */
+function thoughtBudget(effort, { publicChannel } = {}) {
+  const e = String(effort || '').toLowerCase();
+  if (e === 'xhigh') return Infinity;
+  if (e === 'high' && !publicChannel) return Infinity;
+  return 2;
 }
 
 function toolTitle(tool) {
@@ -62,12 +118,12 @@ function discordToolLine(streamTools, tool) {
 }
 
 /** Sanitized Discord thought chip, or '' to drop. Never raw text. */
-function discordThoughtLine(text) {
+function discordThoughtLine(text, hints) {
   const raw = String(text || '').trim();
   if (!raw) return '';
-  if (looksLikePromptLeak(raw)) return '';
+  if (looksLikePromptLeak(raw) || mentionsSpeaker(raw, hints)) return '';
   const cleaned = String(redactSecrets(raw).text || '').trim();
-  if (!cleaned || looksLikePromptLeak(cleaned)) return '';
+  if (!cleaned || looksLikePromptLeak(cleaned) || mentionsSpeaker(cleaned, hints)) return '';
   let body = cleaned.replace(/\s+/g, ' ');
   if (body.length > THOUGHT_CLAMP) body = body.slice(0, THOUGHT_CLAMP - 1) + '…';
   return `-# 💭 ${body}`;
@@ -75,5 +131,6 @@ function discordThoughtLine(text) {
 
 module.exports = {
   looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
+  speakerHintsFrom, mentionsSpeaker, thoughtBudget,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, THOUGHT_CLAMP,
 };
