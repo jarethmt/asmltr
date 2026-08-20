@@ -15,6 +15,8 @@
  *
  * Credentials come from the secret store (never a file): user_bws_key + pass_bws_key.
  */
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -34,6 +36,125 @@ async function imapNoopProbe(imap, timeoutMs = 15000) {
   const np = imap.noop();
   if (np && typeof np.catch === 'function') np.catch(() => {}); // never let a late rejection go unhandled
   await Promise.race([np, new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), timeoutMs))]);
+}
+
+function ownerFromEmail() {
+  return String(process.env.ASMLTR_OWNER_FROM_EMAIL || '').trim().toLowerCase();
+}
+
+/** Flatten a mailparser header value to text. */
+function headerLine(parsed, name) {
+  if (!parsed) return '';
+  const key = String(name || '').toLowerCase();
+  let v;
+  if (parsed.headers && typeof parsed.headers.get === 'function') v = parsed.headers.get(key);
+  if (v == null && parsed.headers && typeof parsed.headers.get === 'function') v = parsed.headers.get(name);
+  if (v == null && parsed.headerLines && Array.isArray(parsed.headerLines)) {
+    const lines = parsed.headerLines
+      .filter((h) => h && String(h.key || '').toLowerCase() === key)
+      .map((h) => h.line || h.value)
+      .filter(Boolean);
+    if (lines.length) return lines.join('\n');
+  }
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.map((x) => (x && x.value != null ? x.value : x)).filter(Boolean).join('\n');
+  if (typeof v === 'object' && v.value != null) return String(v.value);
+  return String(v);
+}
+
+function parseAuthResults(headerText) {
+  const out = { dkim: null, spf: null, dmarc: null };
+  const s = String(headerText || '');
+  if (!s.trim()) return out;
+  const re = /\b(dkim|spf|dmarc)\s*=\s*(pass|fail|softfail|neutral|none|temperror|permerror|bestguesspass|policy)/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    const k = m[1].toLowerCase();
+    if (!out[k]) out[k] = m[2].toLowerCase();
+  }
+  return out;
+}
+
+function authHeaderText(parsed) {
+  return headerLine(parsed, 'authentication-results') || headerLine(parsed, 'arc-authentication-results');
+}
+
+function authDisposition(parsed) {
+  const raw = authHeaderText(parsed);
+  const results = parseAuthResults(raw);
+  const present = !!String(raw || '').trim();
+  if (!present) {
+    return { present: false, results, passed: false, failed: true, raw: '', reason: 'no Authentication-Results header' };
+  }
+  const parts = [
+    ['DKIM', results.dkim],
+    ['SPF', results.spf],
+    ['DMARC', results.dmarc],
+  ];
+  const failedParts = parts.filter(([, v]) => v !== 'pass').map(([k, v]) => k + '=' + (v || 'missing'));
+  const passed = failedParts.length === 0;
+  const reason = passed
+    ? 'DKIM=pass SPF=pass DMARC=pass'
+    : failedParts.join(' ');
+  return { present, results, passed, failed: !passed, raw, reason };
+}
+
+function formatAuthSummary(auth) {
+  if (!auth || !auth.present) {
+    return 'Inbound Authentication-Results: none (treated as fail).';
+  }
+  const r = auth.results || {};
+  const verdict = auth.failed ? 'FAIL' : 'PASS';
+  return `Inbound Authentication-Results: DKIM=${r.dkim || 'missing'} SPF=${r.spf || 'missing'} DMARC=${r.dmarc || 'missing'} — ${verdict}.`;
+}
+
+function authRejected(auth) {
+  return !auth || !!auth.failed;
+}
+
+function authRejectLogPath() {
+  return process.env.ASMLTR_EMAIL_AUTH_REJECT_LOG
+    || path.join(os.homedir(), '.asmltr', 'email-auth-reject.jsonl');
+}
+
+function persistAuthReject(entry) {
+  try {
+    const f = authRejectLogPath();
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.appendFileSync(f, JSON.stringify(entry) + '\n');
+  } catch (_) {}
+}
+
+function loadAuthRejectLog(filePath) {
+  const f = filePath || authRejectLogPath();
+  let raw = '';
+  try { raw = fs.readFileSync(f, 'utf8'); } catch (_) { return []; }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch (_) {}
+  }
+  return out;
+}
+
+function filterAuthRejectsSince(entries, sinceMs) {
+  const since = Number(sinceMs);
+  return (entries || []).filter((e) => {
+    const t = Date.parse(e && e.ts);
+    return Number.isFinite(t) && Number.isFinite(since) && t >= since;
+  });
+}
+
+function formatAuthJournal(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) return '';
+  const lines = ['Blocked inbound mail in the last 24 hours. Sender and subject only.', ''];
+  for (const e of list) {
+    const from = String((e && e.from) || '(unknown)');
+    const subject = String((e && e.subject) || '(no subject)');
+    lines.push(from + ' — ' + subject);
+  }
+  return lines.join('\n');
 }
 
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -148,6 +269,33 @@ async function start(ctx) {
 
     ctx.emit({ event_type: 'inbound', session_id: convKey, identity: fromAddr, payload: { text: `${subject} — ${body.slice(0, 160)}` } });
 
+    const fromLc = String(fromAddr).trim().toLowerCase();
+    const auth = authDisposition(parsed);
+    if (authRejected(auth)) {
+      const summary = formatAuthSummary(auth);
+      const reason = (auth && auth.reason) || 'auth failed';
+      ctx.log(`auth reject from=${fromLc} subject=${subject} ${summary} reason=${reason}`);
+      ctx.emit({
+        event_type: 'auth_reject',
+        session_id: convKey,
+        identity: fromLc,
+        payload: {
+          from: fromLc, subject, reason,
+          dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc,
+          present: auth.present,
+        },
+      });
+      persistAuthReject({
+        ts: new Date().toISOString(), from: fromLc, subject, reason,
+        dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc,
+        present: auth.present,
+      });
+      if (ownerFromEmail() && fromLc === ownerFromEmail()) {
+        ctx.log(`auth reject OWNER mail — ${reason} — not treated as a trusted turn`);
+      }
+      return;
+    }
+
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
@@ -157,12 +305,16 @@ async function start(ctx) {
       delivery: 'sync',
       capabilities: meta.capabilities,
       public: false, // 1:1 mail; redaction still applies unless the sender is full-trust
-      channel_context: { from: fromAddr, subject },
+      channel_context: {
+        from: fromAddr, subject,
+        auth: { present: auth.present, passed: auth.passed, failed: auth.failed, dkim: auth.results.dkim, spf: auth.results.spf, dmarc: auth.results.dmarc },
+      },
       approval: { policy, recipient: fromAddr, subject: replySubject }, // → draft gate in the core
       system_prompt_extra:
         `You are answering an EMAIL as ${fromName}. Write a clean email reply body only (no "Subject:" line, no headers). ` +
         `Sign off as ${fromName} — NEVER sign as the operator/owner or impersonate a human. A signature is appended automatically. ` +
-        `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]].`,
+        `Keep it appropriate for email. If this message is not something you should answer, reply with exactly [[NO_REPLY]]. ` +
+        formatAuthSummary(auth),
     });
 
     for (const a of actions || []) {
@@ -328,4 +480,8 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe };
+module.exports = {
+  meta, start, imapNoopProbe,
+  parseAuthResults, authDisposition, formatAuthSummary, authRejected, persistAuthReject,
+  authRejectLogPath, loadAuthRejectLog, filterAuthRejectsSince, formatAuthJournal, headerLine,
+};

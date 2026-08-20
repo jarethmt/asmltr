@@ -42,6 +42,7 @@ const trust = require('./trust/store'); // unified auth/trust/capability framewo
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
+const channelAwareness = require('./channel-awareness'); // medium/runtime block (engine-aware; Claude Code stays Claude Code)
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
@@ -135,30 +136,6 @@ function toolResultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((x) => (x && x.text) || (typeof x === 'string' ? x : '')).join(' ');
   return '';
-}
-
-// Channel/medium self-awareness — prepended to every system prompt so the model
-// knows the USER's channel (vs its own Claude Code runtime).
-const NAME = process.env.ASSISTANT_NAME || 'the assistant';
-const CHANNEL_LABELS = {
-  discord: 'Discord', telegram: 'Telegram', github: 'GitHub (issue thread)',
-  mcp: 'an MCP client', core: 'a direct API call',
-  'assistant-web': 'a web assistant app', 'assistant-native': 'a mobile assistant app',
-  'eve-assistant-web': 'a web assistant app', 'eve-assistant-native': 'a mobile assistant app', // legacy ids
-};
-function buildChannelAwareness(e, resolved) {
-  const NAME = identity.name(); // live (GUI-editable) — not the module-load env const
-  const who = (resolved && resolved.display_name) || (e.sender && e.sender.raw_username) || 'a user';
-  const scope = e.context && e.context.scope_name ? ` in "${e.context.scope_name}"` : '';
-  const label = CHANNEL_LABELS[e.channel] || e.channel;
-  // The android assistant is voice-first — replies are read aloud (TTS). Nudge toward speakable prose so
-  // markdown/symbols don't get vocalized. (Markdown is also stripped at the TTS layer as a safety net.)
-  const spoken = e.channel === 'android'
-    ? `\n\nSPOKEN OUTPUT: your replies here are READ ALOUD. Write the way you'd say it — natural, conversational sentences. Do NOT use markdown or decorative characters: no asterisks/bold/italics, headers, backticks or code fences, bullet or numbered lists, tables, or emoji. Say symbols as words ("and" not "&", "percent" not "%"). Prefer a short spoken list ("first… second…") over bullets. Keep it concise; the person is listening, not reading.`
-    : '';
-  return `MEDIUM AWARENESS — READ FIRST:
-This message reached you through the asmltr "${e.channel}" connector. You are talking with ${who} over ${label}${scope}; from their side they are messaging ${NAME} on ${label}, NOT sitting in a terminal with you.
-Your underlying runtime is Claude Code, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "Claude Code", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.${spoken}`;
 }
 
 // --- observe-only awareness buffer ------------------------------------------
@@ -277,8 +254,9 @@ async function handle(envelope, opts = {}) {
 
   // 2) system prompt + moderation
   // Medium awareness FIRST (applies to every channel) — the model's runtime is
-  // Claude Code, but the USER is on this connector's channel. Without this, "what
-  // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
+  // the configured engine (Claude Code, Grok, …), but the USER is on this
+  // connector's channel. Without this, "what are we talking over?" gets answered
+  // as terminal/SSH/CLI instead of the channel.
   // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the peer-drift
   // incident) + the living layer (preferences + story). Applies to every channel.
   // CURRENT SPEAKER — an authoritative, always-present per-turn identity line. It is re-sent EVERY
@@ -299,8 +277,9 @@ async function handle(envelope, opts = {}) {
   // speaking now, their authz, per-turn context). A history-retaining engine (codex — its resume replays
   // prior turns) gets the stable block injected ONCE, then only the volatile tail on resumes; claude still
   // gets the full prompt every turn (its append lands on a cached system channel). See the gating below.
+  const engineId = (opts && opts.engine) || require('../../shared/engines').getDefault();
   const pIdentity = identity.fullIdentity();
-  const pChannel = buildChannelAwareness(e, resolved);
+  const pChannel = channelAwareness.buildChannelAwareness(e, resolved, { engineId });
   const pAuthz = trust.buildAuthzPrompt(resolved, e.channel);
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
   const pRel = trust.buildRelationshipPrompt(resolved, e) || '';
@@ -415,7 +394,6 @@ async function handle(envelope, opts = {}) {
   // AND was last delivered for THIS same engine (a mid-session engine switch has no replayed stable block,
   // so it must re-send). Otherwise send the full prompt. A NULL prior hash (fresh, or a turn that never
   // sent the stable block, e.g. an operator steer) also forces full — the correct, safe default.
-  const engineId = (opts && opts.engine) || require('../../shared/engines').getDefault();
   // Kill-switch: ASMLTR_INJECT_ONCE=off forces the full prompt every turn (revert to pre-optimization
   // behavior) without a redeploy — the escape hatch if an engine's resume ever fails to replay the stable block.
   let canInjectOnce = process.env.ASMLTR_INJECT_ONCE !== 'off';
