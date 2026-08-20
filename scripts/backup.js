@@ -351,12 +351,19 @@ async function runScheduled(opts = {}) {
 }
 
 /** Start an in-process timer that fires runScheduled() when the interval elapses. Returns the timer. */
+
+function grokChildRunning() {
+  const r = spawnSync('pgrep', ['-f', '[.]grok/bin/grok'], { encoding: 'utf8' });
+  return r.status === 0 && !!(r.stdout && r.stdout.trim());
+}
+
 function startScheduler({ log = () => {}, intervalMs = 10 * 60 * 1000 } = {}) {
   const tick = async () => {
     try {
       const s = getSchedule();
       if (!s.enabled) return;
       if (Date.now() - (s.last_run || 0) < (s.every_hours || 24) * 3600000) return;
+      if (grokChildRunning()) return void log('scheduled backup due but skipped — grok child running');
       if (!(process.env.ASMLTR_BACKUP_PASSPHRASE || process.env.TRUST_PROTOCOL_VAULT_PASSWORD)) return void log('scheduled backup due but skipped — no passphrase (set ASMLTR_BACKUP_PASSPHRASE)');
       log('running scheduled backup…');
       const r = await runScheduled({ log });
