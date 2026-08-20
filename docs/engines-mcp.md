@@ -1,6 +1,6 @@
 # MCP tools registry
 
-<p class="asmltr-gradient" style="font-size:1.2rem;font-weight:800;margin-top:-0.4rem">Declare a tool once. Every engine gets it — Claude, Gemini, and Codex alike.</p>
+<p class="asmltr-gradient" style="font-size:1.2rem;font-weight:800;margin-top:-0.4rem">Declare a tool once. Every engine gets it — Claude, Gemini, Codex, and Grok alike.</p>
 
 [MCP](https://modelcontextprotocol.io/) (the Model Context Protocol) is the standard way to give an AI
 agent extra tools — a fetch tool, a database tool, a company API, anything. The catch: each harness
@@ -67,6 +67,7 @@ You declare a server once; asmltr translates it into each harness's native shape
 | **Claude** | Passed as the Agent SDK's `mcpServers` option when the turn runs. |
 | **Codex** | Injected as per-launch `-c mcp_servers.<name>.{command,args,env\|url}` flags. |
 | **Gemini** | Reconciled into Gemini's own config via `gemini mcp add` (once per process; re-synced when the registry changes). |
+| **Grok** | Reconciled via `grok mcp add` (once per process; stdio servers; re-synced when the registry changes). |
 
 The registry lives in `~/.asmltr/mcp.json` (per-install, gitignored — it can carry env secrets). A
 `mcp.example.json` ships as a template.
