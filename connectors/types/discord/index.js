@@ -29,6 +29,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // Self-gating sentinel: in a multi-agent channel the model emits ONLY this token when a
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
+const { looksLikePromptLeak, discordToolLine, discordThoughtLine, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -86,8 +87,8 @@ const meta = {
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
-      stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
-      stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
+      stream_steps: { type: 'boolean', title: 'Post sanitized 💭 thought chips and human tool-start chips when addressed. Engine-agnostic (Claude thinking blocks included). Working / Still working if a bubble is dropped.', default: true },
+      stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
@@ -357,8 +358,7 @@ RESPONSE RULES:
   function formatCodeBlocks(text) {
     return text.replace(/```(?:\w+)?\n([\s\S]*?)```/g, (m, code) => '\n' + code.split('\n').map(l => '    ' + l).join('\n') + '\n');
   }
-  // Live "thinking step" — an intermediary narration block, rendered subdued (Discord subtext)
-  // so it reads as process, not the final answer. Clamped so a long step can't wall the thread.
+  // Live steps: sanitized thought chips + human tool chips. Not Grok-gated — see shared/step-public.js.
   const streamSteps = cfg.stream_steps !== false;
   const streamTools = cfg.stream_tools === true;
   function renderStep(t) {
@@ -486,19 +486,52 @@ RESPONSE RULES:
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
         // boundary closes — either a tool call starts (the common case: post immediately, no lag)
         // or a new narration block begins. The block still open at `done` is the final answer.
-        let pending = '', sawNoReply = false, chain = Promise.resolve();
+        let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
+        let beatTimer = null;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
-        const flushStep = () => {
-          const clean = (pending || '').trim(); pending = '';
-          if (!clean) return;
-          if (isSilence(clean)) { sawNoReply = true; return; }
-          if (sawNoReply) return;
-          enqueue(() => message.channel.send(renderStep(clean)));
+        const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
+        const armBeat = () => {
+          stopBeat();
+          beatTimer = setTimeout(() => {
+            beatTimer = null;
+            if (sawNoReply) return;
+            lastChip = STILL_WORKING_LINE;
+            enqueue(() => message.channel.send(STILL_WORKING_LINE));
+            armBeat();
+          }, THINK_HEARTBEAT_MS);
+        };
+        const postChip = (line) => {
+          if (!line || line === lastChip) return false;
+          lastChip = line;
+          enqueue(() => message.channel.send(line));
+          armBeat();
+          return true;
+        };
+        const holdAnswer = (t) => {
+          const clean = String(t || '').trim();
+          if (!clean) { pending = ''; return; }
+          if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
+          if (looksLikePromptLeak(clean)) { pending = ''; return; }
+          pending = t;
         };
         const actions = await ctx.core.handleStream(envelope, {
-          onSegment: (t) => { flushStep(); pending = t; },  // a new block ⇒ the prior one was intermediary
-          onTool: (name) => { flushStep(); if (streamTools) enqueue(() => message.channel.send(`-# 🔧 \`${name}\``)); }, // a tool ⇒ post the block NOW
+          onSegment: (t) => { holdAnswer(t); },
+          onTool: (tool) => {
+            pending = '';
+            if (sawNoReply) return;
+            const line = discordToolLine(streamTools, tool);
+            if (line) postChip(line);
+          },
+          // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
+          onThinking: (t) => {
+            if (sawNoReply) return;
+            const line = discordThoughtLine(t);
+            if (line) { postChip(line); return; }
+            if (!lastChip) postChip(WORKING_LINE);
+            else if (!beatTimer) armBeat();
+          },
         });
+        stopBeat();
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');
         replyText = ((pending && pending.trim()) || (reply ? reply.text.trim() : '')).trim();
