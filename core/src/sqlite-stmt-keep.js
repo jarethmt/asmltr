@@ -1,17 +1,15 @@
 'use strict';
 /**
- * Node 24.19.0 ObjectWrap dtor calls RemoveEnvironmentCleanupHook during GC
+ * Node 24 ObjectWrap dtor calls RemoveEnvironmentCleanupHook during GC
  * when Environment::GetCurrent() is nullptr. better-sqlite3 Statement is an
- * ObjectWrap; a throwaway db.prepare() collected during grok heap growth
- * ABRTs the process. Post-listen GC still has env==nullptr — keep-until-listen
- * was insufficient.
+ * ObjectWrap; a throwaway db.prepare() collected during engine heap growth
+ * ABRTs the process.
  *
  * Keep and reuse Statements for the process lifetime. Cache by SQL string
- * (per Database) so the same query reuses one Statement and we do not leak
- * an unbounded array of duplicates. armed stays true; disarm() is a no-op.
+ * (per Database) so the same query reuses one Statement.
  */
-const keep = new Map(); // sql -> Statement (inspectable union of SQL strings)
-const byDb = new WeakMap(); // Database -> Map(sql -> Statement)
+const keep = new Map();
+const byDb = new WeakMap();
 let armed = true;
 
 function cacheFor(db) {
@@ -39,12 +37,6 @@ function wrapBetterSqlite3(exported) {
     }
     return stmt;
   };
-  const origPragma = exported.prototype.pragma;
-  if (typeof origPragma === 'function') {
-    exported.prototype.pragma = function pragmaWrapped(source, options) {
-      return origPragma.call(this, source, options);
-    };
-  }
   exported.__asmltrStmtKeep = true;
   return exported;
 }
@@ -63,6 +55,6 @@ try {
   if (cached && cached.exports) wrapBetterSqlite3(cached.exports);
 } catch (_) {}
 
-function disarm() { /* never: post-listen GC during grok heap growth still has env==nullptr */ }
+function disarm() { /* keep statements for process lifetime */ }
 
 module.exports = { keep, disarm };

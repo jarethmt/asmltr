@@ -48,8 +48,8 @@ test('idlePolicyFromEnv defaults to idle:30 and honors ASMLTR_IDLE_MS / POLICY',
   if (prevM === undefined) delete process.env.ASMLTR_IDLE_MS; else process.env.ASMLTR_IDLE_MS = prevM;
 });
 
-test('resolveForTurn persists grok resume UUID then clears it after idle', () => {
-  const key = 'cli:local:james';
+test('resolveForTurn persists resume UUID then clears it after idle', () => {
+  const key = 'cli:local:owner';
   const uuid = '01234567-89ab-cdef-0123-456789abcdef';
   const r1 = sessions.resolveForTurn(key, 'cli', 'idle:15');
   assert.equal(r1.resume, null);

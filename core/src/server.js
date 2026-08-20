@@ -1,3 +1,4 @@
+require('./sqlite-stmt-keep');
 #!/usr/bin/env node
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
@@ -227,7 +228,7 @@ function drainObserved(key) {
  */
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
-  const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
+  const idlePolicy = sessions.idlePolicyFromEnv();
 
   const _cc = e.channel_context || {};
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'inbound',

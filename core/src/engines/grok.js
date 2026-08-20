@@ -15,17 +15,13 @@
  *   is cwd-implicit and too loose for asmltr. On a fresh turn we pass `-s <uuid>` so
  *   we have an addressable id even if JSON parse misses `.sessionId`. On resume we
  *   pass `-r <uuid>` only. `--fork-session` / `--restore-code` / `grok sessions` /
- *   `grok export` are preserved as notes, not wired. See /workspace/grok-cli-features.md.
+ *   `grok export` are preserved as notes, not wired.
  *
- * historyReplaysSystemPrompt is TRUE: osiris live-verified 2026-08-17 that `-r <uuid>`
- * replays the first-turn system block (probe: "What were you instructed to be?" →
- * "A one-word ping fixture."). ASMLTR_INJECT_ONCE=off remains the kill-switch.
+ * historyReplaysSystemPrompt is TRUE: `-r <uuid>` replays the first-turn system block.
+ * ASMLTR_INJECT_ONCE=off remains the kill-switch.
  */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const engines = require('../../../shared/engines');
 const { composePrompt } = require('../../../shared/prompt-compose');
 
@@ -34,7 +30,7 @@ const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — finite, never infinite
 const DEFAULT_MAX_TURNS = 20;
-const TIMEOUT_CAP_MS = 4 * 60 * 60 * 1000;
+const TIMEOUT_CAP_MS = 30 * 60 * 1000;
 const MAX_TURNS_CAP = 100;
 
 function timeoutMs() {
@@ -48,283 +44,27 @@ function maxTurns() {
   return DEFAULT_MAX_TURNS;
 }
 
-const TURNS_FOR_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
-const TIMEOUT_SCALE = { low: 1, medium: 1, high: 1, xhigh: 1.5 }; // unused for watchdog; interactive is absolute 5/10/60
+const TURNS_BY_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
+const EMAIL_XHIGH_TURNS = 100;
 
-/** medium 20 / high 40 / xhigh 60. Cap 100. Env MAX_TURNS is the complete() baseline, not a flatten. */
-function maxTurnsForEffort(effort, opts) {
+function normalizeEffort(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return ['low', 'medium', 'high', 'xhigh'].includes(s) ? s : '';
+}
+
+/** Always pass --effort. Env ASMLTR_GROK_EFFORT (default medium). Email defaults to xhigh. */
+function effortForTurn(opts = {}) {
+  const explicit = normalizeEffort(opts.effort);
+  if (explicit) return explicit;
+  const env = normalizeEffort(process.env.ASMLTR_GROK_EFFORT);
+  if (String(opts.channel || '').toLowerCase() === 'email') return env || 'xhigh';
+  return env || 'medium';
+}
+
+function maxTurnsForEffort(effort, opts = {}) {
   const e = normalizeEffort(effort) || 'medium';
-  const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
-  if (isEmailChannel(channel) && e === 'xhigh') return MAX_TURNS_CAP;
-  return Math.min(TURNS_FOR_EFFORT[e] || DEFAULT_MAX_TURNS, MAX_TURNS_CAP);
-}
-
-const EMAIL_TIMEOUT_MS = 60 * 60 * 1000; // inbound email xhigh (generic; 100 turns / 60 minutes)
-// Discord / assistant-web / assistant-native / mcp (and generic non-email). Absolute, not scale-from-env.
-const INTERACTIVE_TIMEOUT_MS = {
-  low: 5 * 60 * 1000,
-  medium: 5 * 60 * 1000,
-  high: 10 * 60 * 1000,
-  xhigh: 60 * 60 * 1000,
-};
-
-function isEmailChannel(channel) {
-  return String(channel || '').trim().toLowerCase() === 'email';
-}
-
-/** Watchdog by channel. Interactive 5 / 10 / 60. Email xhigh is 60 minutes.
- *  Second arg is opts `{ channel, sender }` or a channel string. */
-function timeoutMsForEffort(effort, opts) {
-  const channel = typeof opts === 'string' ? opts : (opts && opts.channel);
-  const e = normalizeEffort(effort) || 'medium';
-  if (isEmailChannel(channel) && e === 'xhigh') {
-    return Math.min(EMAIL_TIMEOUT_MS, TIMEOUT_CAP_MS);
-  }
-  const ms = INTERACTIVE_TIMEOUT_MS[e] || INTERACTIVE_TIMEOUT_MS.medium;
-  return Math.min(ms, TIMEOUT_CAP_MS);
-}
-
-// Reasoning effort — three tiers (James / Adjutant, 19 Aug 2026):
-//   Always pass `--effort <level>` (CLI alias of --reasoning-effort).
-//   Baseline is ASMLTR_GROK_EFFORT (Ivy live: medium). envEffort() if unset still
-//   || 'high' so other installs keep the old default. xhigh is NOT the default.
-//   medium  normal conversation
-//   high    lookup/research, Corona (recipe/cigar/cooking), Rolodex/contacts,
-//           standard troubleshooting/diagnosis/"why is X slow"/look it up/search.
-//           Not a coding session.
-//   xhigh   git or code, or a deep dive (implement, refactor, write/patch code,
-//           commit, PR, "deep dive"). Project git cwd that is not $HOME.
-//   HOME is never a project. Never use process.cwd() (the asmltr clone is a git
-//   repo and would xhigh every ask). Use the session/turn cwd if provided.
-//   Score opts.effortPrompt when set (current user message only) — NOT
-//   drainObserved/catch-up glued onto prompt in server.js.
-//   Tight: do not treat bare "fix" as xhigh (Eve "Proposed Fix", "quick fix").
-//   One-shot next-effort still wins. complete() skips auto-raise.
-//   Email channel (`email`) forces xhigh AFTER one-shot (a chatty mail body
-//   with no code words is still xhigh). Discord and others stay three-tier.
-//   Email xhigh timeout is 60 minutes, or 4 hours only when From is
-//    (case-insensitive, display-name wrapping ignored;
-//   //   5 / 10 / 60 (cap 4h so the owner-from path can use it; interactive
-//   stays absolute 5/10/60).
-//   Do not inherit last effort. Do not use a generic XHIGH_CHANNELS list.
-//   Ivy one-shot: write ~/.asmltr/next-effort (one line). Consumed once at the
-//   next grok -p spawn. sessions.next_effort is the same one-shot per key.
-//   Whole-word +xh / +h (whitespace-split, start/end/standalone) override to
-//   xhigh / high for this turn only when the sender is owner/bypass or their
-//   raw Discord id is in ASMLTR_GROK_EFFORT_ELEVATE_IDS. Honored token is
-//   stripped from effortPrompt and the grok user prompt. Unknown senders keep
-//   the token and stay on the picker. After one-shot / explicit; wins over
-//   three-tier and email. Do not persist nextEffort from the token. No
-//   owner snowflake in git.
-const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-// xhigh: code / git / deep dive. No bare \bfix\b.
-const XHIGH_PARTS = [
-  'implement(?:ing|ation)?',
-  'refactor(?:ing)?',
-  'debug(?:ging)?',
-  'deep\\s*div(?:e|ing)',
-  'pull[\\s-]?requests?',
-  'prs?',
-  'git',
-  'coding',
-  'codebase',
-  'write(?:ing)?\\s+(?:some\\s+|the\\s+|this\\s+|a\\s+|an\\s+)?(?:code|patch|function|module|helper|adapter)',
-  'patch(?:ing)?\\s+(?:the\\s+|this\\s+|some\\s+|a\\s+)?(?:code|file|module|function|repo|branch)',
-  'commit',
-];
-const XHIGH_RE = new RegExp('\\b(?:' + XHIGH_PARTS.join('|') + ')\\b', 'i');
-const CODE_WORD_RE = /\bcode\b/i;
-const CODE_WORD_EXCLUDE_RE = /\b(?:zip|area|dress|door|promo(?:tional)?|country|postal|access|error|status|exit|http)\s+codes?\b|\bcode of conduct\b/i;
-// high: find / read / recall. Not a coding session.
-const HIGH_PARTS = [
-  'look(?:ing)?\\s+(?:it\\s+)?up',
-  'look(?:ing)?\\s+into',
-  'lookup',
-  'research(?:ing)?',
-  'corona',
-  'recipes?',
-  'cigars?',
-  'cooking',
-  'rolodex',
-  'contacts',
-  'troubleshoot(?:ing)?',
-  'diagnos(?:e|is|ing)',
-  'search(?:ing)?',
-];
-const HIGH_RE = new RegExp('\\b(?:' + HIGH_PARTS.join('|') + ')\\b', 'i');
-const WHY_SLOW_RE = /\bwhy\s+is\b[\s\S]{0,60}?\bslow\b/i;
-const LAST_EFFORT_FILE = '/tmp/asmltr-last-effort';
-
-function nextEffortFile() {
-  return process.env.ASMLTR_GROK_NEXT_EFFORT_FILE || path.join(os.homedir(), '.asmltr', 'next-effort');
-}
-
-function normalizeEffort(v) {
-  const s = String(v || '').trim().toLowerCase();
-  return VALID_EFFORTS.includes(s) ? s : null;
-}
-
-/** Current user message only when opts.effortPrompt is set (skip catch-up glue). */
-function scoringPrompt(opts) {
-  opts = opts || {};
-  if (opts.effortPrompt != null) return String(opts.effortPrompt);
-  return String(opts.prompt || '');
-}
-
-function elevateIdSet() {
-  const raw = process.env.ASMLTR_GROK_EFFORT_ELEVATE_IDS || '';
-  return new Set(raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean));
-}
-
-/** Owner / bypass identity, or raw sender id in ASMLTR_GROK_EFFORT_ELEVATE_IDS. */
-function canElevateEffort(opts) {
-  opts = opts || {};
-  if (opts.owner === true || opts.bypass === true || opts.bypass_moderation === true) return true;
-  if (String(opts.user_key || '') === 'owner') return true;
-  let sid = opts.senderId;
-  if (sid == null && opts.sender && typeof opts.sender === 'object') sid = opts.sender.raw_id;
-  else if (sid == null) sid = opts.sender;
-  sid = String(sid || '').trim();
-  if (sid === 'owner') return true;
-  if (!sid) return false;
-  return elevateIdSet().has(sid);
-}
-
-/** Whole-word +xh / +h only. +xh wins if both present. */
-function detectElevateToken(text) {
-  const toks = String(text || '').split(/\s+/).filter(Boolean);
-  if (toks.some((t) => t.toLowerCase() === '+xh')) return '+xh';
-  if (toks.some((t) => t.toLowerCase() === '+h')) return '+h';
-  return null;
-}
-
-function stripElevateToken(text, token) {
-  if (!token || text == null) return text;
-  const escaped = String(token).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return String(text)
-    .replace(new RegExp('(^|\\s)' + escaped + '(?=\\s|$)', 'gi'), '$1')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/^\s+|\s+$/g, '');
-}
-
-function matchToken(re, text) {
-  const m = String(text || '').match(re);
-  if (!m) return '';
-  return String(m[0]).toLowerCase().replace(/\s+/g, ' ').slice(0, 32);
-}
-
-function xhighReason(prompt) {
-  const s = String(prompt || '');
-  const m = matchToken(XHIGH_RE, s);
-  if (m) return m;
-  if (CODE_WORD_RE.test(s) && !CODE_WORD_EXCLUDE_RE.test(s)) return 'code';
-  return '';
-}
-
-function highReason(prompt) {
-  const s = String(prompt || '');
-  const m = matchToken(HIGH_RE, s);
-  if (m) return m;
-  if (WHY_SLOW_RE.test(s)) return 'why-slow';
-  return '';
-}
-
-function looksLikeCode(prompt) {
-  return !!xhighReason(prompt);
-}
-
-function looksLikeLookup(prompt) {
-  return !!highReason(prompt);
-}
-
-function isProjectGitRepo(cwd) {
-  if (!cwd || typeof cwd !== 'string') return false;
-  let resolved;
-  try { resolved = path.resolve(cwd); } catch (_) { return false; }
-  let home = '';
-  try { home = path.resolve(os.homedir()); } catch (_) {}
-  // HOME is not a project even if it has .git.
-  if (home && resolved === home) return false;
-  try { return fs.existsSync(path.join(resolved, '.git')); } catch (_) { return false; }
-}
-
-function envEffort() {
-  return normalizeEffort(process.env.ASMLTR_GROK_EFFORT) || 'high';
-}
-
-/** Consume ~/.asmltr/next-effort once (deleted even if invalid). */
-function consumeNextEffortFile() {
-  const p = nextEffortFile();
-  try {
-    if (!fs.existsSync(p)) return null;
-    const raw = fs.readFileSync(p, 'utf8');
-    try { fs.unlinkSync(p); } catch (_) {}
-    return normalizeEffort(raw.split(/\r?\n/)[0]);
-  } catch (_) { return null; }
-}
-
-function consumeSessionNextEffort(conversationKey) {
-  if (!conversationKey) return null;
-  try { return require('../sessions').consumeNextEffort(conversationKey); } catch (_) { return null; }
-}
-
-/** File wins over session column. Both are one-shot. */
-function takeNextEffort(conversationKey) {
-  return consumeNextEffortFile() || consumeSessionNextEffort(conversationKey);
-}
-
-/**
- * Classify effort for this argv. Does NOT consume the next-effort file.
- * Priority: nextEffort / opts.effort → auto xhigh/high (current message or project git cwd) → env.
- * complete() skips auto-raise (cheap title/status calls).
- */
-function classifyEffort(opts) {
-  opts = opts || {};
-  const oneshotNext = normalizeEffort(opts.nextEffort);
-  if (oneshotNext) return { effort: oneshotNext, reason: 'oneshot' };
-  const oneshotExplicit = normalizeEffort(opts.effort);
-  if (oneshotExplicit) return { effort: oneshotExplicit, reason: 'explicit' };
-  if (opts.complete) return { effort: envEffort(), reason: 'complete' };
-  const token = detectElevateToken(scoringPrompt(opts));
-  if (token && canElevateEffort(opts)) {
-    return { effort: token === '+xh' ? 'xhigh' : 'high', reason: 'token:' + token, stripToken: token };
-  }
-  // After one-shot: inbound email is always xhigh. Discord/others keep the three-tier score.
-  if (isEmailChannel(opts.channel)) return { effort: 'xhigh', reason: 'email' };
-  const scored = scoringPrompt(opts);
-  const codeTok = xhighReason(scored);
-  const git = isProjectGitRepo(opts.cwd);
-  if (codeTok || git) return { effort: 'xhigh', reason: codeTok ? 'code:' + codeTok : 'git-cwd' };
-  const lookTok = highReason(scored);
-  if (lookTok) return { effort: 'high', reason: 'lookup:' + lookTok };
-  return { effort: envEffort(), reason: 'baseline' };
-}
-
-function chooseEffort(opts) {
-  return classifyEffort(opts).effort;
-}
-
-/** Spawn-time: consume one-shot then choose. */
-function effortForTurn(opts) {
-  opts = opts || {};
-  const nextEffort = opts.nextEffort !== undefined ? normalizeEffort(opts.nextEffort) : takeNextEffort(opts.conversationKey);
-  return chooseEffort(Object.assign({}, opts, { nextEffort }));
-}
-
-function recordLastEffort(effort, meta) {
-  try {
-    const m = meta || {};
-    const scored = scoringPrompt(m);
-    const line = [
-      String(effort),
-      'cwd=' + (m.cwd || ''),
-      'next=' + (m.nextEffort || ''),
-      'code=' + (looksLikeCode(scored) ? '1' : '0'),
-      'git=' + (isProjectGitRepo(m.cwd) ? '1' : '0'),
-      'reason=' + String(m.reason || ''),
-    ].join(' ');
-    fs.writeFileSync(LAST_EFFORT_FILE, line + '\n');
-  } catch (_) {}
+  if (String(opts.channel || '').toLowerCase() === 'email' && e === 'xhigh') return EMAIL_XHIGH_TURNS;
+  return TURNS_BY_EFFORT[e] || DEFAULT_MAX_TURNS;
 }
 
 function isUuid(s) {
@@ -355,17 +95,13 @@ function launchEnv(base) {
  * @param {{ prompt: string, systemPrompt?: string, resume?: string|null, cwd?: string, model?: string, complete?: boolean, sessionId?: string }} opts
  */
 function buildArgs(opts) {
-  const classified = classifyEffort(opts);
-  const userPrompt = classified.stripToken
-    ? stripElevateToken(opts.prompt, classified.stripToken)
-    : opts.prompt;
-  const prompt = composePrompt(opts.systemPrompt, userPrompt);
+  const prompt = composePrompt(opts.systemPrompt, opts.prompt);
   const args = ['--no-auto-update', '-p', prompt];
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
-  const turns = opts.complete ? maxTurns() : maxTurnsForEffort(classified.effort, opts);
-  args.push('--max-turns', String(turns));
-  args.push('--effort', classified.effort);
+  const effort = effortForTurn(opts);
+  args.push('--max-turns', String(opts.complete ? maxTurns() : maxTurnsForEffort(effort, opts)));
+  args.push('--effort', effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
   if (mdl) args.push('-m', mdl);
@@ -463,8 +199,6 @@ function applyEvent(ev, state) {
     const name = ev.name || (ev.tool && ev.tool.name) || ev.toolName || t;
     const input = ev.input || ev.args || ev.arguments || ev.tool || ev;
     const tool = { name, input };
-    // Discord: a tool closes the pending narration block. Later text is a new
-    // block — persistAskTurn must store the last block (the answer), not glue.
     if (t !== 'tool_call_update') {
       closeTextBlock(state);
       state.tools.push(tool);
@@ -480,12 +214,8 @@ function applyEvent(ev, state) {
     return { kind: t || 'meta' };
   }
   const text = extractText(ev);
-  // Keep space-only pieces (" "). Do not treat whitespace as empty and do not
-  // invent a space after .!? — if grok omitted it, persist stays honest
-  // ("time."+"The" → "time.The"). "time."+" "+"The" → "time. The".
+  // Keep space-only pieces. Never invent a space after .!?
   if (text != null && text !== '') {
-    // grok 1.0.5 streaming-json tokens are {type:"text", data:"..."}. Those are
-    // incremental — treat as delta so /v2/stream keeps writing until real done.
     const incremental = typeof ev.delta === 'string' || (t === 'text' && typeof ev.data === 'string');
     const prev = state.text || '';
     let joined;
@@ -494,8 +224,6 @@ function applyEvent(ev, state) {
     } else if (text.startsWith(prev) && prev) {
       joined = text;
     } else if (isCompleteBlock(prev) && isCompleteBlock(text)) {
-      // Status/narration then the real answer: last block wins (Discord split).
-      // Not the same as token glue ("time."+"The").
       closeTextBlock(state);
       joined = text;
     } else {
@@ -523,22 +251,16 @@ function newState(sessionId) {
 
 let _mcpSynced = false;
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender }) {
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
-  const nextEffort = takeNextEffort(conversationKey);
-  const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender };
-  const classified = classifyEffort(effortOpts);
-  const effort = classified.effort;
-  recordLastEffort(effort, Object.assign({}, effortOpts, { reason: classified.reason }));
-  try { process.stderr.write('[grok] --effort ' + effort + ' (' + classified.reason + ')\n'); } catch (_) {}
-  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender });
+  const args = buildArgs({ prompt, systemPrompt, resume, cwd, model, sessionId });
   const child = spawn(bin(), args, { cwd: cwd || undefined, env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);
-  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMsForEffort(effort, { channel, sender }));
+  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMs());
   if (watchdog.unref) watchdog.unref();
 
   const state = newState(sessionId);
@@ -599,11 +321,6 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, joinText, isCompleteBlock, newState, timeoutMs, maxTurns,
-  timeoutMsForEffort, maxTurnsForEffort, TIMEOUT_CAP_MS, MAX_TURNS_CAP, TURNS_FOR_EFFORT,
-  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS, EMAIL_TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS, isEmailChannel,
-  normalizeEffort, looksLikeCode, looksLikeLookup, isProjectGitRepo, scoringPrompt,
-  classifyEffort, chooseEffort, effortForTurn,
-  canElevateEffort, detectElevateToken, stripElevateToken, elevateIdSet,
-  takeNextEffort, consumeNextEffortFile, VALID_EFFORTS, LAST_EFFORT_FILE,
+  extractText, extractUsage, newState, timeoutMs, maxTurns, maxTurnsForEffort, effortForTurn, normalizeEffort, joinText, isCompleteBlock,
+  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
 };
