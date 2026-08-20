@@ -7,16 +7,17 @@
 //    reply routes back to the origin channel.
 //  • interactive `asmltr claude` (tmux) — compose = type into the pane (send-keys).
 // The header title is inline-editable — a manual title locks against AI regeneration.
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
 import { api, control, webChat, parsePayload } from '@/services/api'
 import { manager } from '@/services/manager'
 import { useSpeech } from '@/composables/useSpeech'
-import { statusMeta, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
+import { statusMeta, displayStatus, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
 import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
+import { applySegment, preferLastBlock, joinText } from '@/lib/segment'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -54,7 +55,7 @@ const sess = computed(() => {
   const real = store.sessions.find((s) => s.session_id === key.value)
   return real ? { ...props.session, ...real } : props.session
 })
-const st = computed(() => statusMeta(sess.value.status))
+const st = computed(() => statusMeta(displayStatus(sess.value, props.now)))
 
 const isWeb = computed(() => String(key.value || '').startsWith('web:'))
 const isCli = computed(() => sess.value.multiplexer === 'tmux' || sess.value.multiplexer === 'screen')
@@ -171,6 +172,14 @@ function cancelEditTitle() { editingTitle.value = false }
 const seeded = ref([])
 const loading = ref(true)
 const scrollBox = ref(null)
+const bottomSentinel = ref(null)
+const STICK_PX = 80
+const stickToBottom = ref(true)
+const streamTick = ref(0)
+let pinning = false
+let pinClear = 0
+const scrollerUnbind = []
+
 const maxSeededTs = computed(() => (seeded.value.length ? seeded.value[seeded.value.length - 1].ts : 0))
 const cutoffTs = ref(null)
 const history = computed(() => {
@@ -185,10 +194,79 @@ async function load() {
     const data = await api.events({ session: key.value, limit: 300 })
     seeded.value = (data.events || []).map((e) => ({ ...e, _payload: parsePayload(e.payload) })).reverse()
   } catch (e) { seeded.value = [] }
-  finally { loading.value = false; scrollToBottom() }
+  finally { loading.value = false; stickToBottom.value = true; scrollToBottom(true) }
 }
-function scrollToBottom() { nextTick(() => { const el = scrollBox.value; if (el) el.scrollTop = el.scrollHeight }) }
-onMounted(load)
+function nearBottom(el) {
+  if (!el) return true
+  return (el.scrollHeight - el.scrollTop - el.clientHeight) <= STICK_PX
+}
+function isScroller(el) {
+  if (!el || el.nodeType !== 1) return false
+  if (el === document.documentElement || el === document.body) return false
+  const oy = getComputedStyle(el).overflowY
+  return oy === 'auto' || oy === 'scroll' || oy === 'overlay'
+}
+function realScrollers(from) {
+  const out = []
+  let n = from
+  while (n && n !== document.body) {
+    if (isScroller(n)) out.push(n)
+    n = n.parentElement
+  }
+  return out
+}
+function bindScrollerListeners() {
+  while (scrollerUnbind.length) scrollerUnbind.pop()()
+  const box = scrollBox.value
+  if (!box) return
+  // Pin + stick against the REAL overflow ancestors (window host / flex parent),
+  // not only scrollBox — 29a0331 set scrollTop on an inner div that never overflowed.
+  for (const el of realScrollers(box.parentElement)) {
+    const h = () => { if (!pinning) stickToBottom.value = nearBottom(el) }
+    el.addEventListener('scroll', h, { passive: true })
+    scrollerUnbind.push(() => el.removeEventListener('scroll', h))
+  }
+}
+function onTranscriptScroll(e) {
+  if (pinning) return
+  const el = (e && e.currentTarget) || scrollBox.value
+  if (el) stickToBottom.value = nearBottom(el)
+}
+function pinNow() {
+  const box = scrollBox.value
+  const sent = bottomSentinel.value
+  pinning = true
+  clearTimeout(pinClear)
+  const targets = new Set()
+  if (box) {
+    targets.add(box)
+    for (const s of realScrollers(box)) targets.add(s)
+  }
+  if (sent) {
+    for (const s of realScrollers(sent)) targets.add(s)
+    try { sent.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' }) } catch (_) {}
+  }
+  for (const el of targets) {
+    try { el.scrollTop = el.scrollHeight } catch (_) {}
+  }
+  stickToBottom.value = true
+  pinClear = setTimeout(() => { pinning = false }, 80)
+}
+function scrollToBottom(force = false) {
+  nextTick(() => {
+    if (!force && !stickToBottom.value) return
+    pinNow()
+    requestAnimationFrame(() => {
+      if (force || stickToBottom.value) pinNow()
+    })
+  })
+}
+function bumpStream() {
+  streamTick.value++
+  scrollToBottom()
+}
+onMounted(() => { load(); nextTick(bindScrollerListeners) })
+watch(key, () => { load(); nextTick(bindScrollerListeners) })
 
 // ---- chat rows (events → transcript) ----------------------------------------
 // eventRow (event → chat row) lives in @/lib/transcript so this chat and the Schedules last-run
@@ -203,8 +281,8 @@ const rows = computed(() => {
   }
   return out
 })
-watch(() => rows.value.length, scrollToBottom)
-watch(() => localTurns.value.map((t) => t.reply.length + (t.streaming ? 1 : 0)).join(','), scrollToBottom)
+watch(() => rows.value.length, () => scrollToBottom())
+watch(streamTick, () => scrollToBottom())
 
 const expanded = ref({})
 function toggleExpand(i) { expanded.value = { ...expanded.value, [i]: !expanded.value[i] } }
@@ -238,21 +316,60 @@ function webSend() {
   const files = attached.value.slice()
   let body = text
   if (files.length) body += '\n\n' + files.map((f) => `[Attached file: ${f.name} → ${f.path}]`).join('\n')
-  const turn = { user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now() }
+  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now(), blockClosed: false })
   localTurns.value = [...localTurns.value, turn]
+  stickToBottom.value = true
+  scrollToBottom(true)
   draft.value = ''; attached.value = []; notice.value = null; busy.value = true
   streamCtrl = webChat.send(
     { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null, system_prompt_extra: props.contextProvider ? props.contextProvider() : null },
     {
-      onDelta: (t) => { turn.reply += t },
-      onTool: (name) => { if (name && !turn.tools.includes(name)) turn.tools = [...turn.tools, name] },
-      onSegment: (t) => { if (!turn.reply && t) turn.reply = t },
-      onDone: () => {
+      onDelta: (t) => {
+        // Discord: a tool (or a completed narration block) closes the pending
+        // draft. Later tokens are a new block — do not glue status + answer.
+        if (turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
+        else turn.reply = joinText(turn.reply, t)
+        bumpStream()
+      },
+      onTool: (name) => {
+        if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name] }
+        turn.blockClosed = true
+        bumpStream()
+      },
+      onSegment: (t) => {
+        turn.reply = applySegment(turn.blockClosed ? '' : turn.reply, t)
+        turn.blockClosed = false
+        bumpStream()
+      },
+      onDone: async (actions) => {
         turn.streaming = false; busy.value = false; streamCtrl = null; store.fetchSessions()
+        bumpStream()
         if (ttsOn.value && turn.reply) speak(turn.reply).catch(() => {}) // read the reply aloud when TTS is on
         if (pendingTitle.value != null) { control.setTitle(key.value, pendingTitle.value).then((r) => { if (r.ok) pendingTitle.value = null }).catch(() => {}) }
+        try {
+          let lastText = ''
+          const replyAct = (actions || []).find((a) => a && a.type === 'reply' && a.text)
+          if (replyAct) lastText = replyAct.text
+          if (!lastText) {
+            const data = await api.events({ session: key.value, limit: 300 })
+            let lastTs = -Infinity
+            for (const e of data.events || []) {
+              if (e.event_type !== 'outbound') continue
+              const ts = e.ts ?? 0
+              if (ts >= lastTs) {
+                lastTs = ts
+                const payload = parsePayload(e.payload) || {}
+                lastText = payload.text || ''
+              }
+            }
+          }
+          // Last finished block wins. Do not keep a longer glued draft+answer
+          // (live mash or stored mash) just because it has more characters.
+          const next = preferLastBlock(lastText, turn.reply)
+          if (next !== (turn.reply || '')) { turn.reply = next; bumpStream() }
+        } catch (_) {}
       },
-      onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null }
+      onError: (err) => { turn.streaming = false; turn.error = err; busy.value = false; streamCtrl = null; bumpStream() }
     }
   )
 }
@@ -315,7 +432,7 @@ async function onStop() {
   finally { busy.value = false }
 }
 
-onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} stopSpeaking(); cancelRecording(); stopLive() })
+onBeforeUnmount(() => { try { streamCtrl?.abort() } catch (_) {} while (scrollerUnbind.length) scrollerUnbind.pop()(); clearTimeout(pinClear); stopSpeaking(); cancelRecording(); stopLive() })
 
 const placeholder = computed(() => {
   if (isWeb.value) return 'Message this session… (Enter to send, Shift+Enter for a newline)'
@@ -355,6 +472,8 @@ const placeholder = computed(() => {
       </div>
     </template>
 
+    <!-- flex transcript pane: one bounded column so the window host cannot grow/clip (Titanic). -->
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <!-- meta strip -->
     <div class="mb-2 flex shrink-0 flex-wrap items-center gap-2 text-[11px]">
       <SurfaceBadge :surface="sess.surface" />
@@ -394,7 +513,7 @@ const placeholder = computed(() => {
     </div>
 
     <!-- transcript (fills the window) -->
-    <div ref="scrollBox" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-3">
+    <div ref="scrollBox" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-3" @scroll.passive="onTranscriptScroll">
       <p v-if="loading" class="py-6 text-center text-sm text-slate-500">loading history…</p>
       <p v-else-if="!rows.length" class="py-8 text-center text-sm text-slate-500">
         {{ isWeb ? 'New session — send a message below to begin.' : 'No events recorded for this session yet.' }}
@@ -433,6 +552,8 @@ const placeholder = computed(() => {
           >{{ expanded[i] ? truncate(r.text, 6000) : truncate(r.text, 140) }}</span>
         </div>
       </template>
+      <div ref="bottomSentinel" aria-hidden="true" class="h-px w-full shrink-0"></div>
+    </div>
     </div>
 
     <template #footer>
@@ -461,7 +582,7 @@ const placeholder = computed(() => {
             v-if="isWeb"
             type="button"
             :disabled="uploading"
-            title="Attach a file — saved to the shared upload area and referenced so the agent can read it"
+            title="Attach a file (max 25MB) — saved to the shared upload area and referenced so the agent can read it"
             class="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/10 disabled:opacity-40"
             @click="pickFile"
           ><AppIcon glyph="📎" /></button>
