@@ -64,21 +64,11 @@ const transcripts = require('../../shared/transcripts'); // Self-silo memory/tra
 
 /** Write a completed turn into the Self silo (memory/transcripts + last-topics)
  *  so a fresh session after idle can rehydrate without grepping events-*.jsonl.
- *  Best-effort: never fail the turn. `drafted` tags an unsent hold-for-approval reply. */
-async function persistAskTurn(e, result, assistantText, { drafted = false } = {}) {
-  if (!e || !result || result.isError) return;
-  const userText = String((e.content && e.content.text) || '');
-  const text = assistantText != null ? String(assistantText) : String(result.text || '');
-  if (!userText && !text) return;
-  try {
-    await transcripts.appendTurn({
-      conversationKey: e.conversation_key,
-      channel: e.channel,
-      userText,
-      assistantText: text,
-      drafted: !!drafted,
-    });
-  } catch (_) {}
+ *  Best-effort: never fail the turn. `drafted` tags an unsent hold-for-approval reply.
+ *  Pass the delivered (or drafted) text; never fall back to result.text — that would
+ *  record [[NO_REPLY]] / suppressed turns as spoken. */
+async function persistAskTurn(e, result, assistantText, opts) {
+  try { await transcripts.persistFromHandle(e, result, assistantText, opts); } catch (_) {}
 }
 
 let SELF_SILO_DIR = null;
@@ -615,6 +605,7 @@ async function handle(envelope, opts = {}) {
   // Universal silence sentinel: if the turn ends with [[NO_REPLY]] (e.g. the agent rerouted its
   // answer to another channel via `asmltr send` and doesn't want to post here), emit no action so
   // EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
+  // Nothing delivered → skip silo persist (do not record silence as a spoken turn).
   if (/\[\[NO_REPLY\]\]/i.test(result.text || '')) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });

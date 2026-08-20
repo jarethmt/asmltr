@@ -189,4 +189,70 @@ describe('transcripts', { concurrency: 1 }, () => {
     try { fs.rmSync(other, { recursive: true, force: true }); } catch (_) {}
     assert.equal(block, '');
   });
+
+  test('persistFromHandle does not record a missing reply as delivered result.text', async () => {
+    const key = 'discord:inst:guild:no-reply-fallback';
+    const secret = '[[NO_REPLY]] this must not be stored as a spoken turn';
+    const wrote = await transcripts.persistFromHandle(
+      { conversation_key: key, channel: 'discord', content: { text: 'hey every bot' } },
+      { text: secret, isError: false },
+      undefined,
+    );
+    assert.equal(wrote, null);
+    const md = await silo.ensureSelf().get(transcripts.transcriptRel(key)).catch(() => null);
+    assert.equal(md, null);
+  });
+
+  test('persistFromHandle skips [[NO_REPLY]] even if passed as the reply body', async () => {
+    const key = 'email:inst:thread-noreply';
+    const wrote = await transcripts.persistFromHandle(
+      { conversation_key: key, channel: 'email', content: { text: 'ops alert' } },
+      { text: '[[NO_REPLY]]', isError: false },
+      'Thanks, [[NO_REPLY]]',
+    );
+    assert.equal(wrote, null);
+  });
+
+  test('persistFromHandle writes a delivered reply and a drafted reply', async () => {
+    const delivered = await transcripts.persistFromHandle(
+      { conversation_key: 'telegram:inst:persist-delivered', channel: 'telegram', content: { text: 'status?' } },
+      { text: 'all good', isError: false },
+      'all good',
+    );
+    assert.ok(delivered.transcript);
+    const md = (await silo.ensureSelf().get(delivered.transcript)).toString('utf8');
+    assert.ok(md.includes('**assistant:** all good'));
+
+    const drafted = await transcripts.persistFromHandle(
+      { conversation_key: 'email:inst:thread-draft', channel: 'email', content: { text: 'please reply' } },
+      { text: 'held body', isError: false },
+      'held body',
+      { drafted: true },
+    );
+    const draftMd = (await silo.ensureSelf().get(drafted.transcript)).toString('utf8');
+    assert.ok(draftMd.includes('**assistant (unsent draft):** held body'));
+    assert.equal(draftMd.includes('**assistant:** held body'), false);
+  });
+
+  test('appendTurn rolls off old turns so the live file stays under the cap', async () => {
+    const key = 'mcp:inst:user:rotate';
+    const keep = 900;
+    for (let i = 0; i < 8; i++) {
+      await transcripts.appendTurn({
+        conversationKey: key,
+        channel: 'mcp',
+        userText: `old-turn-${i} ${'x'.repeat(120)}`,
+        assistantText: `reply-${i} ${'y'.repeat(120)}`,
+        ts: Date.UTC(2026, 7, 18, 23, i, 0),
+        keepChars: keep,
+      });
+    }
+    const md = (await silo.ensureSelf().get(transcripts.transcriptRel(key))).toString('utf8');
+    assert.ok(md.length <= keep, `capped length ${md.length} should be <= ${keep}`);
+    assert.equal(md.includes('old-turn-0'), false);
+    assert.ok(md.includes('old-turn-7'));
+    const block = await transcripts.recallForInject({ conversationKey: key });
+    assert.ok(block.includes('old-turn-7'));
+    assert.equal(block.includes('old-turn-0'), false);
+  });
 });
