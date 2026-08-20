@@ -33,12 +33,14 @@ test('speaker hints are runtime-only; thoughts mentioning them are dropped', () 
   assert.equal(discordThoughtLine('Let me search more thoroughly', hints), '-# 💭 Let me search more thoroughly');
 });
 
-test('thoughtBudget: public rooms cap at 2 unless xhigh; DMs uncap on high', () => {
-  assert.equal(thoughtBudget('medium', { publicChannel: true }), 2);
+test('thoughtBudget: xhigh uncapped; high/medium 2; below medium 0', () => {
+  assert.equal(thoughtBudget('xhigh'), Infinity);
+  assert.equal(thoughtBudget('high'), 2);
+  assert.equal(thoughtBudget('medium'), 2);
+  assert.equal(thoughtBudget('low'), 0);
+  assert.equal(thoughtBudget(''), 2); // default before onEffort = medium
   assert.equal(thoughtBudget('high', { publicChannel: true }), 2);
-  assert.equal(thoughtBudget('xhigh', { publicChannel: true }), Infinity);
-  assert.equal(thoughtBudget('high', { publicChannel: false }), Infinity);
-  assert.equal(thoughtBudget('medium', { publicChannel: false }), 2);
+  assert.equal(thoughtBudget('high', { publicChannel: false }), 2);
 });
 
 test('human chips: start only, no paths or ACP type names', () => {
@@ -78,4 +80,5 @@ test('Discord never renderSteps raw thought text', () => {
   assert.equal(src.includes("renderStep('💭 '"), false);
   assert.match(src, /discordThoughtLine/);
   assert.match(src, /onThinking:/);
+  assert.match(src, /if \(maxThoughts <= 0\) return;/);
 });

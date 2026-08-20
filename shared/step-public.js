@@ -15,9 +15,9 @@
  * in git. Speaker tokens (username / display name) are passed at runtime
  * from the Discord message and never hardcoded.
  *
- * Thought volume: medium/low → 2 chips. Public rooms stay at 2 unless xhigh.
- * DMs: high and xhigh are uncapped. Unknown tools named "Working" are
- * skipped in the quiet budget so the channel is not a wall of Working.
+ * Thought volume: xhigh uncapped. high and medium → 2 chips (public and DM).
+ * Below medium (low) → 0: no 💭 / Working chips, just the answer.
+ * Unknown tools named "Working" are skipped in the quiet (non-xhigh) budget.
  */
 
 const { redactSecrets } = require('./redact');
@@ -81,12 +81,12 @@ function mentionsSpeaker(text, hints) {
   return false;
 }
 
-/** How many 💭 chips to post. Infinity = no cap. */
-function thoughtBudget(effort, { publicChannel } = {}) {
-  const e = String(effort || '').toLowerCase();
+/** How many 💭 chips to post. Infinity = no cap. 0 = none (go straight to the answer). */
+function thoughtBudget(effort) {
+  const e = String(effort || 'medium').toLowerCase();
   if (e === 'xhigh') return Infinity;
-  if (e === 'high' && !publicChannel) return Infinity;
-  return 2;
+  if (e === 'high' || e === 'medium') return 2;
+  return 0;
 }
 
 function toolTitle(tool) {
