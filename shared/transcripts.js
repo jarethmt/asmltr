@@ -29,6 +29,9 @@ const TOPIC_CLIP = 160;
 const INJECT_TURNS = 6;
 const INJECT_CHARS = 8000;
 const RECALL_TAIL_CHARS = INJECT_CHARS * 4;
+// Encrypted silos re-seal the whole file on every Silo.put. Cap the live transcript so
+// write+read cost stays bounded instead of growing with history.
+const TRANSCRIPT_KEEP_CHARS = 64 * 1024;
 
 function clip(s, n) {
   s = String(s == null ? '' : s);
@@ -115,18 +118,47 @@ async function updateLastTopics({ ts, conversationKey, userText }) {
  * Append one user+assistant turn to the Self silo. Returns silo-relative paths
  * (no secrets). `ts` is caller-supplied so tests stay free of wall-clock coupling.
  * `drafted` tags an unsent hold-for-approval reply so memory does not claim it was delivered.
+ * Live file is size-capped (oldest turns roll off) so encrypted-silo re-seal stays O(cap).
  */
-async function appendTurn({ conversationKey, channel, userText, assistantText, ts, drafted } = {}) {
+async function appendTurn({ conversationKey, channel, userText, assistantText, ts, drafted, keepChars } = {}) {
   const t = Number.isFinite(ts) ? ts : Date.now();
   const key = conversationKey || 'unknown';
   const rel = transcriptRel(key);
+  const keep = Number.isFinite(keepChars) && keepChars > 0 ? keepChars : TRANSCRIPT_KEEP_CHARS;
   const prev = await siloGetText(rel);
-  await siloPutText(rel, prev + formatTurn({ ts: t, conversationKey: key, channel, userText, assistantText, drafted }));
+  const next = formatTurn({ ts: t, conversationKey: key, channel, userText, assistantText, drafted });
+  await siloPutText(rel, tailTranscript(prev + next, keep));
   await updateLastTopics({ ts: t, conversationKey: key, userText });
   return {
     transcript: rel,
     lastTopics: LAST_TOPICS_REL,
   };
+}
+
+/**
+ * Persist a completed handle() turn. `assistantText` is what the connector would
+ * actually send (redacted reply, or draft body). Missing/empty/`[[NO_REPLY]]` means
+ * nothing was delivered — do NOT fall back to result.text (that recorded silence
+ * as a spoken `**assistant:**` turn).
+ */
+async function persistFromHandle(e, result, assistantText, { drafted = false } = {}) {
+  if (!e || !result || result.isError) return null;
+  const userText = String((e.content && e.content.text) || '');
+  if (!drafted) {
+    if (assistantText == null) return null;
+    const delivered = String(assistantText);
+    if (!delivered.trim()) return null;
+    if (/\[\[NO_REPLY\]\]/i.test(delivered)) return null;
+  }
+  const text = assistantText != null ? String(assistantText) : '';
+  if (!userText && !text) return null;
+  return appendTurn({
+    conversationKey: e.conversation_key,
+    channel: e.channel,
+    userText,
+    assistantText: text,
+    drafted: !!drafted,
+  });
 }
 
 /** Cheap tail so recall does not split a multi-MB transcript in full. Driver has no range get. */
@@ -158,6 +190,6 @@ async function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxCh
 }
 
 module.exports = {
-  appendTurn, formatTurn, safeKey, lastTopicsPath, transcriptAbs, transcriptRel, recallForInject,
-  LAST_TOPICS_REL, TRANSCRIPTS_REL, LAST_TOPICS_KEEP, INJECT_TURNS, INJECT_CHARS,
+  appendTurn, persistFromHandle, formatTurn, safeKey, lastTopicsPath, transcriptAbs, transcriptRel, recallForInject,
+  LAST_TOPICS_REL, TRANSCRIPTS_REL, LAST_TOPICS_KEEP, INJECT_TURNS, INJECT_CHARS, TRANSCRIPT_KEEP_CHARS,
 };
