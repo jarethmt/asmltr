@@ -290,7 +290,7 @@ async function complete({ prompt, model, appendSystemPrompt = null }) {
   return out.trim();
 }
 
-// See file header: flip to true after osiris confirms `-r` replays the first-turn system block.
+// `-r` replays the first-turn system block (live-verified). See file header.
 const historyReplaysSystemPrompt = true;
 
 module.exports = {
