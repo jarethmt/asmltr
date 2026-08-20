@@ -101,8 +101,14 @@ remote destination too.
 | **Max stored** | keep only the newest N (`0` = unlimited) |
 | **Max age (days)** | drop anything older than this (`0` = no age limit) |
 
-The scheduler runs **in-process in the core** (checked every ~10 min; persisted in
-`~/.asmltr/backup-schedule.json`). It needs a passphrase available to the core process
+The scheduler **ticks in-process in the core** (~10 min; persisted in
+`~/.asmltr/backup-schedule.json`) but **must not open a second better-sqlite3 `Database` in the core
+process** — that ABRTs Node 24 (`Database::~Database` → `RemoveEnvironmentCleanupHook`). Dashboard
+POST `/v2/backups` and `runScheduled` spawn `node scripts/backup.js create` with `ASMLTR_BACKUP_CHILD=1`
+so sqlite runs in another isolate (child inherits env; do not log it). Direct CLI
+`node scripts/backup.js create` keeps the sqlite online-backup path.
+
+It needs a passphrase available to the core process
 (`ASMLTR_BACKUP_PASSPHRASE`, or the vault password) — without one, a due backup is logged and skipped
 rather than failing. Retention runs after each scheduled snapshot, on both local and the remote destination.
 

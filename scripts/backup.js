@@ -21,7 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 const HOME = os.homedir();
@@ -156,8 +156,56 @@ function resolvePassphrase(opts = {}) {
   return String(p);
 }
 
-// ── create ───────────────────────────────────────────────────────────────────
+
+// ── out-of-process create (core must never open a second sqlite handle) ───────
+// Node 24 + better-sqlite3: Database::~Database → RemoveEnvironmentCleanupHook
+// asserts env != nullptr and ABRTs the core (and whatever engine it was hosting).
+const BACKUP_CHILD_ENV = 'ASMLTR_BACKUP_CHILD';
+
+function parseChildCreateStdout(stdout) {
+  const lines = String(stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith('{')) continue;
+    try { const o = JSON.parse(lines[i]); if (o && o.file) return o; } catch (_) {}
+  }
+  throw new Error('backup child produced no JSON result');
+}
+
+function spawnCreateBackupChild(opts = {}) {
+  const args = [path.join(__dirname, 'backup.js'), 'create'];
+  if (opts.label) args.push('--label', String(opts.label));
+  if (opts.out) args.push('--out', String(opts.out));
+  if (opts.destination) args.push('--destination', String(opts.destination));
+  const env = { ...process.env, [BACKUP_CHILD_ENV]: '1' };
+  if (opts.passphrase) env.ASMLTR_BACKUP_PASSPHRASE = String(opts.passphrase);
+  const log = opts.log || (() => {});
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const combined = (stdout + '\n' + stderr).split(/\r?\n/);
+      for (const line of combined) {
+        const t = line.trim();
+        if (!t) continue;
+        if (t.startsWith('{')) continue;
+        if (/passphrase|ASMLTR_BACKUP_PASSPHRASE|TRUST_PROTOCOL_VAULT_PASSWORD|token|secret/i.test(t)) continue;
+        log(t);
+      }
+      if (code !== 0) {
+        const errLine = stderr.trim().split(/\r?\n/).filter(Boolean).pop() || ('exit ' + code);
+        return reject(new Error(errLine.replace(/passphrase[^\s]*/ig, 'passphrase<redacted>')));
+      }
+      try { resolve(parseChildCreateStdout(stdout)); } catch (e) { reject(e); }
+    });
+  });
+}
+
 async function createBackup(opts = {}) {
+  // Required from core (or any other module): sqlite in a child isolate. CLI main keeps the in-process path.
+  if (!process.env[BACKUP_CHILD_ENV] && require.main !== module) return spawnCreateBackupChild(opts);
   const passphrase = resolvePassphrase(opts);
   const label = (opts.label || 'manual').replace(/[^a-z0-9_-]/gi, '');
   ensureDir(BACKUP_DIR);
@@ -167,6 +215,7 @@ async function createBackup(opts = {}) {
     const manifest = { format: 1, tool: 'asmltr backup', version: readVersion(), label, created_at: Date.now(), host: os.hostname(), components: {}, checksums: {} };
 
     // 1) SQLite — consistent online-backup snapshots. better-sqlite3 lives in a workspace, not repo root.
+    // CLI / ASMLTR_BACKUP_CHILD only — core must never reach new Database() in this isolate.
     ensureDir(path.join(stage, 'db'));
     const Database = requireBetterSqlite();
     for (const d of SQLITE_DBS) {
@@ -378,11 +427,11 @@ if (require.main === module) {
   const log = (m) => console.log(m);
   (async () => {
     try {
-      if (cmd === 'create') { const r = await createBackup({ label: flags.label, passphrase: flags.passphrase, out: flags.out, log }); console.log(JSON.stringify({ file: r.file, bytes: r.bytes }, null, 2)); }
+      if (cmd === 'create') { const r = await createBackup({ label: flags.label, passphrase: flags.passphrase, out: flags.out, destination: flags.destination, log }); console.log(JSON.stringify({ file: r.file, bytes: r.bytes, remote: r.remote || null, manifest: r.manifest })); }
       else if (cmd === 'list') { for (const b of listBackups()) console.log(`${b.name}\t${(b.bytes / 1048576).toFixed(2)} MB`); }
       else if (cmd === 'verify') { const r = await verifyBackup(pos[0], { passphrase: flags.passphrase, log }); console.log(r.ok ? `OK — ${r.manifest.version}/${r.manifest.label} @ ${new Date(r.manifest.created_at).toISOString()} (${r.checked} artifacts verified)` : `INTEGRITY FAILED — ${r.mismatches.map((m) => m.file).join(', ')}`); if (!r.ok) process.exit(1); }
       else if (cmd === 'restore') { await restoreBackup(pos[0], { passphrase: flags.passphrase, dryRun: flags['dry-run'], activate: flags.activate, force: flags.force, log }); }
-      else { console.log('usage: node scripts/backup.js <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--out path]'); process.exit(cmd ? 1 : 0); }
+      else { console.log('usage: node scripts/backup.js <create|list|verify|restore> [file] [--label x] [--passphrase x] [--destination x] [--dry-run] [--out path]'); process.exit(cmd ? 1 : 0); }
     } catch (e) { console.error('backup error: ' + e.message); process.exit(1); }
   })();
 }
