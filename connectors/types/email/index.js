@@ -96,16 +96,17 @@ async function start(ctx) {
   const threads = new Map();
   const selfAddr = String(address).toLowerCase();
 
-  async function sendMail({ to, subject, text, inReplyTo, references, attachments }) {
+  async function sendMail({ to, cc, subject, text, inReplyTo, references, attachments }) {
     const info = await smtp.sendMail({
       from: `"${fromName}" <${address}>`, to,
+      cc: cc || undefined,
       subject: subject || `Message from ${fromName}`,
       text: (text || '') + signature,
       inReplyTo: inReplyTo || undefined,
       references: references && references.length ? references.join(' ') : undefined,
       attachments: attachments || undefined,
     });
-    ctx.emit({ event_type: 'outbound', session_id: `email:${ctx.instanceId}:to:${to}`, identity: address, payload: { to, subject } });
+    ctx.emit({ event_type: 'outbound', session_id: `email:${ctx.instanceId}:to:${to}`, identity: address, payload: { to, cc: cc || undefined, subject } });
     return info;
   }
 
@@ -301,12 +302,12 @@ async function start(ctx) {
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'email', instance: ctx.instanceId, address, imap: !!(imap && imap.usable) }));
   app.post('/out', async (req, res) => {
     try {
-      const { kind = 'text', target, text, subject, ref, path: filePath, caption } = req.body || {};
+      const { kind = 'text', target, text, subject, ref, path: filePath, caption, cc } = req.body || {};
       if (!target) return res.status(400).json({ ok: false, error: 'target (recipient) required' });
       const tc = (ref && threads.get(ref)) || {};
       const subj = subject || tc.subject || `Message from ${fromName}`;
       const attachments = kind === 'file' && filePath ? [{ path: filePath, filename: path.basename(filePath) }] : undefined;
-      await sendMail({ to: target, subject: subj, text: text || caption || '', inReplyTo: tc.messageId, references: tc.references, attachments });
+      await sendMail({ to: target, cc, subject: subj, text: text || caption || '', inReplyTo: tc.messageId, references: tc.references, attachments });
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });

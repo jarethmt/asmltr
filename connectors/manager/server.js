@@ -173,8 +173,8 @@ const ATTACH_KINDS = ['file', 'photo', 'document'];
 const supportsAttachments = (meta) => !!(meta && meta.outbound && (meta.outbound.kinds || []).some((k) => ATTACH_KINDS.includes(k)));
 
 // --- unified outbound: route a message OUT through a connector instance --------
-// POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, ref?, title?, require_headphones? }
-async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, ref, title, require_headphones }) {
+// POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, cc?, ref?, title?, require_headphones? }
+async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, cc, ref, title, require_headphones }) {
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
@@ -195,7 +195,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const bindHost = inst.config && inst.config.bind_host;
   const host = (bindHost && bindHost !== '0.0.0.0' && bindHost !== '::') ? bindHost : '127.0.0.1';
   try {
-    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, ref, title, require_headphones }) });
+    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones }) });
     const j = await r.json().catch(() => ({}));
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.

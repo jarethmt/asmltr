@@ -247,25 +247,26 @@ async function cmdRelease(key) {
 }
 
 async function cmdSend(rest) {
-  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."]
-  let file = null, caption = null, subject = null;
+  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
+  let file = null, caption = null, subject = null, cc = null;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === '--file') file = rest[++i];
     else if (t === '--caption') caption = rest[++i];
     else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
+    else if (t === '--cc') cc = rest[++i]; // email Cc (comma-separated ok)
     else words.push(t);
   }
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"]\n' +
-      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@b.com "the body" --subject "Hello" --file /root/report.pdf');
+      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"]\n' +
+      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@b.com "the body" --subject "Hello" --cc "boss@x.com" --file /root/report.pdf');
   }
   const body = file
-    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject }
-    : { channel, target, kind: 'text', text, subject };
+    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }
+    : { channel, target, kind: 'text', text, subject, cc };
   // Route through the CORE (/v2/send) so a cross-channel post is ASSIMILATED into the destination
   // session's context (it learns it "said" this, instead of it looking foreign on the next read).
   // Fall back to the manager's /send if the core is unreachable — delivery still works, just no assimilation.
@@ -568,6 +569,7 @@ function cmdHelp() {
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
        ... --subject "<subj>"           set the subject (email)
+       ... --cc "<addr>"                Cc (email; comma-separated ok)
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr steer <key> "<guidance>"      push guidance into another session's LIVE turn (COERCIVE;
