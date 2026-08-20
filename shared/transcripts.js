@@ -8,11 +8,12 @@
  *
  * Layout (silo-relative):
  *   memory/transcripts/<conversation-key>.md   append-only user+assistant turns
- *   memory/last-topics.md                      operator-wide newest-first index (NOT injected)
+ *   memory/last-topics.md                      operator-wide newest-first index
  *
- * Isolation: recallForInject reads only the per-key transcript (safeKey). The global
- * last-topics index is an operator convenience — injecting it would leak other
- * principals/channels into a fresh session prompt.
+ * Isolation: recallForInject reads the per-key transcript (safeKey) by default.
+ * The global last-topics index is cross-principal — inject it only when the
+ * caller passes includeLastTopics (full-trust / owner). Other principals must
+ * not see other people's threads.
  *
  * Writes go through Silo.put / Silo.get (the storage driver), not raw fs, so encrypted
  * and remote silos seal/sync conversation content.
@@ -177,15 +178,23 @@ function tailTranscript(transcript, maxChars = RECALL_TAIL_CHARS) {
  * into the system prompt. Empty string if nothing has been written yet.
  * This is the retrieve path: write-only is a fail.
  *
- * Injects ONLY this conversation_key's transcript — never the global last-topics
- * index, which is cross-principal by design.
+ * Default: this conversation_key's transcript only.
+ * includeLastTopics (owner / full-trust only): also the global last-topics index,
+ * so the operator can continue across channels. Never pass true for other principals.
  */
-async function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS } = {}) {
+async function recallForInject({ conversationKey, maxTurns = INJECT_TURNS, maxChars = INJECT_CHARS, includeLastTopics = false } = {}) {
+  let topics = '';
+  if (includeLastTopics) {
+    topics = (await siloGetText(LAST_TOPICS_REL)).trim();
+  }
   const transcript = tailTranscript(await siloGetText(transcriptRel(conversationKey || 'unknown')));
   const chunks = transcript.split(/^## /m).filter(Boolean);
   const recent = chunks.slice(-maxTurns).map((c) => '## ' + c).join('');
-  if (!recent.trim()) return '';
-  let body = 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent.trim();
+  let body = '';
+  if (topics) body += 'LAST TOPICS (newest first):\n' + topics + '\n\n';
+  if (recent.trim()) body += 'RECENT TURNS FROM THIS CONVERSATION:\n' + recent.trim();
+  body = body.trim();
+  if (!body) return '';
   if (body.length > maxChars) body = '…\n' + body.slice(body.length - maxChars);
   return body;
 }

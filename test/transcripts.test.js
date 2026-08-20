@@ -74,6 +74,29 @@ describe('transcripts', { concurrency: 1 }, () => {
     assert.ok(block.includes('**user:**'));
   });
 
+  test('recallForInject includeLastTopics is owner-only opt-in', async () => {
+    const secret = 'other-channel-topic-should-stay-gated';
+    await transcripts.appendTurn({
+      conversationKey: 'discord:inst:other',
+      channel: 'discord',
+      userText: secret,
+      assistantText: 'ok',
+      ts: Date.UTC(2026, 7, 18, 18, 30, 0),
+    });
+    const guest = await transcripts.recallForInject({ conversationKey: 'assistant-web:local:owner' });
+    assert.equal(guest.includes('LAST TOPICS'), false);
+    assert.equal(guest.includes(secret), false);
+
+    const owner = await transcripts.recallForInject({
+      conversationKey: 'assistant-web:local:owner',
+      includeLastTopics: true,
+    });
+    assert.ok(owner.includes('LAST TOPICS'));
+    assert.ok(owner.includes(secret));
+    assert.ok(owner.includes('Caol Ila'));
+    assert.ok(owner.includes('RECENT TURNS FROM THIS CONVERSATION'));
+  });
+
   test('recallForInject does not leak another conversation_key', async () => {
     const secret = 'owner-private-telegram-payment-update-xyzzy';
     await transcripts.appendTurn({

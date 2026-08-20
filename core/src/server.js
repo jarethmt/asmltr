@@ -444,9 +444,13 @@ async function handle(envelope, opts = {}) {
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
-    // Fresh engine session (first turn or idle expiry): inject THIS conversation's silo
-    // transcript only. Write-only is a fail. Not injected on resume (isNew-gated).
-    const recalled = await transcripts.recallForInject({ conversationKey: e.conversation_key });
+    // Fresh engine session (first turn or idle expiry). Write-only is a fail.
+    // Global last-topics is owner-only (cross-channel continuity). Other principals
+    // get this conversation_key's transcript only — never a Discord/email mix-in.
+    const recalled = await transcripts.recallForInject({
+      conversationKey: e.conversation_key,
+      includeLastTopics: !!resolved.bypass_moderation,
+    });
     if (recalled) {
       effectiveSystemPrompt += '\n\nPRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl.\n\n' + recalled;
     } else {
