@@ -52,17 +52,17 @@ function normalizeEffort(raw) {
   return ['low', 'medium', 'high', 'xhigh'].includes(s) ? s : '';
 }
 
-/** Always pass --effort. Env ASMLTR_GROK_EFFORT (default medium). Email defaults to xhigh. */
+/** Always pass --effort. Env ASMLTR_GROK_EFFORT (default high). Email is always xhigh. */
 function effortForTurn(opts = {}) {
   const explicit = normalizeEffort(opts.effort);
   if (explicit) return explicit;
+  if (String(opts.channel || '').toLowerCase() === 'email') return 'xhigh';
   const env = normalizeEffort(process.env.ASMLTR_GROK_EFFORT);
-  if (String(opts.channel || '').toLowerCase() === 'email') return env || 'xhigh';
-  return env || 'medium';
+  return env || 'high';
 }
 
 function maxTurnsForEffort(effort, opts = {}) {
-  const e = normalizeEffort(effort) || 'medium';
+  const e = normalizeEffort(effort) || 'high';
   if (String(opts.channel || '').toLowerCase() === 'email' && e === 'xhigh') return EMAIL_XHIGH_TURNS;
   return TURNS_BY_EFFORT[e] || DEFAULT_MAX_TURNS;
 }
@@ -313,7 +313,7 @@ async function complete({ prompt, model, appendSystemPrompt = null }) {
   return out.trim();
 }
 
-// See file header: flip to true after osiris confirms `-r` replays the first-turn system block.
+// `-r` replays the first-turn system block (live-verified). See file header.
 const historyReplaysSystemPrompt = true;
 
 module.exports = {

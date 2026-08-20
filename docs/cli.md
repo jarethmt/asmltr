@@ -10,8 +10,6 @@ set of one-shot subcommands.
 
 ```
 asmltr                 live TUI dashboard
-asmltr ask "<text>"    one local turn with the default engine (ivy: grok)
-asmltr chat            local readline REPL over the same session (resume UUID)
 asmltr ls              list active sessions
 asmltr map             active sessions grouped by working dir (collision radar)
 asmltr who <path>      which sessions recently touched a file/dir
@@ -49,7 +47,7 @@ asmltr update          pull + install the latest & restart (verifies; auto-rolls
     | Service | Default | Used by |
     |---|---|---|
     | collector | `http://127.0.0.1:3017` | reads (`ls`, `brief`, `events`, `tail`, `watch`, `system`, `map`, `who`) + control (`kill`, `stop`, `diff`) |
-    | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` + `ask` / `chat` |
+    | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` |
     | connector manager | `http://127.0.0.1:3024` | `send` (outbound to any channel) |
 
 ---
