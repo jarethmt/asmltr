@@ -58,7 +58,7 @@ MCP tools, or `GET/POST /v2/mcp`, `DELETE /v2/mcp/:name`, `POST /v2/mcp/:name/to
   id-addressable — `--session-file` continuity is the planned follow-up). Google deprecated the free OAuth
   tier, so Gemini's practical path is an **API key** (Settings → Engines → Gemini → API key).
 - **Grok** — spawn/argv/parser unit-tested; live turn needs the official CLI logged in (`grok login --device-auth`).
-  Resume UUID is captured and passed as `-r`. `historyReplaysSystemPrompt` is on (osiris live-verified `-r` replays the first-turn system block).
+  Resume UUID is captured and passed as `-r`. `historyReplaysSystemPrompt` is on (`-r` replays the first-turn system block).
 
 ## Using it today
 

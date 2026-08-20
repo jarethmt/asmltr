@@ -19,14 +19,15 @@ test('buildArgs always passes --effort', () => {
   assert.ok(['low', 'medium', 'high', 'xhigh'].includes(effortOf(args)));
 });
 
-test('effortForTurn defaults to medium; env and explicit override; email is xhigh', () => {
+test('effortForTurn defaults to high; env and explicit override; email is xhigh', () => {
   const prev = process.env.ASMLTR_GROK_EFFORT;
   delete process.env.ASMLTR_GROK_EFFORT;
   try {
-    assert.equal(grok.effortForTurn({}), 'medium');
-    assert.equal(grok.effortForTurn({ effort: 'high' }), 'high');
+    assert.equal(grok.effortForTurn({}), 'high');
+    assert.equal(grok.effortForTurn({ effort: 'medium' }), 'medium');
     assert.equal(grok.effortForTurn({ channel: 'email' }), 'xhigh');
     process.env.ASMLTR_GROK_EFFORT = 'low';
+    assert.equal(grok.effortForTurn({ channel: 'email' }), 'xhigh');
     assert.equal(grok.effortForTurn({}), 'low');
   } finally {
     if (prev === undefined) delete process.env.ASMLTR_GROK_EFFORT;
@@ -35,13 +36,20 @@ test('effortForTurn defaults to medium; env and explicit override; email is xhig
 });
 
 test('max-turns by effort: medium 20 / high 40 / xhigh 60; email xhigh 100', () => {
-  assert.equal(grok.maxTurnsForEffort('medium'), 20);
-  assert.equal(grok.maxTurnsForEffort('high'), 40);
-  assert.equal(grok.maxTurnsForEffort('xhigh'), 60);
-  assert.equal(grok.maxTurnsForEffort('xhigh', { channel: 'email' }), 100);
-  const args = grok.buildArgs({ prompt: 'hi', channel: 'email' });
-  assert.equal(effortOf(args), 'xhigh');
-  assert.equal(turnsOf(args), 100);
+  const prev = process.env.ASMLTR_GROK_EFFORT;
+  delete process.env.ASMLTR_GROK_EFFORT;
+  try {
+    assert.equal(grok.maxTurnsForEffort('medium'), 20);
+    assert.equal(grok.maxTurnsForEffort('high'), 40);
+    assert.equal(grok.maxTurnsForEffort('xhigh'), 60);
+    assert.equal(grok.maxTurnsForEffort('xhigh', { channel: 'email' }), 100);
+    const args = grok.buildArgs({ prompt: 'hi', channel: 'email' });
+    assert.equal(effortOf(args), 'xhigh');
+    assert.equal(turnsOf(args), 100);
+  } finally {
+    if (prev === undefined) delete process.env.ASMLTR_GROK_EFFORT;
+    else process.env.ASMLTR_GROK_EFFORT = prev;
+  }
 });
 
 test('buildArgs does not pass Grok 4.6 context or output-length flags', () => {

@@ -97,7 +97,7 @@ test('timeout and max-turns are finite (never infinite)', () => {
   assert.equal(grok.maxTurns(), grok.DEFAULT_MAX_TURNS);
 });
 
-test('historyReplaysSystemPrompt is true after osiris verified -r replay', () => {
+test('historyReplaysSystemPrompt is true', () => {
   assert.equal(grok.historyReplaysSystemPrompt, true);
 });
 
