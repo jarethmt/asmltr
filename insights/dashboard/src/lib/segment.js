@@ -22,11 +22,14 @@ export function isCompleteBlock(s) {
   return t.split(/\s+/).filter(Boolean).length >= 4
 }
 
-export function applySegment(reply, t) {
+// lastBlock: Grok-only. Growing snapshots still replace via startsWith on every engine
+// (Claude deltas do not look like that). Two finished blocks replacing each other is
+// Grok status→answer. Claude narrate→tool→answer must APPEND, not collapse.
+export function applySegment(reply, t, opts = {}) {
   if (t == null || t === '') return reply || ''
   if (reply == null || reply === '') return t
   if (t.startsWith(reply)) return t
-  if (isCompleteBlock(reply) && isCompleteBlock(t)) return t
+  if (opts.lastBlock && isCompleteBlock(reply) && isCompleteBlock(t)) return t
   return joinText(reply, t)
 }
 

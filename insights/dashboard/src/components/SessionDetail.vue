@@ -9,7 +9,7 @@
 // The header title is inline-editable — a manual title locks against AI regeneration.
 import { ref, computed, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
-import { api, control, webChat, parsePayload } from '@/services/api'
+import { api, control, webChat, parsePayload, enginesApi } from '@/services/api'
 import { manager } from '@/services/manager'
 import { useSpeech } from '@/composables/useSpeech'
 import { statusMeta, displayStatus, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
@@ -82,6 +82,17 @@ async function loadMuteState() {
 }
 onMounted(loadMuteState)
 watch(key, loadMuteState)
+// Last-block live replace is Grok (status snapshot → answer). Claude/Gemini/Codex
+// narrate→tool→answer must keep the narration. Default claude so a failed fetch
+// does not collapse Eve's dashboard.
+const reasoningEngine = ref('claude')
+const grokLive = computed(() => reasoningEngine.value === 'grok')
+onMounted(async () => {
+  try {
+    const r = await enginesApi.list()
+    if (r && r.default) reasoningEngine.value = r.default
+  } catch (_) {}
+})
 // Resolve this session to its mutable unit: { instanceId, channelId, label } (a parent prop wins).
 const myMutable = computed(() => {
   if (props.mutable) return props.mutable
@@ -325,19 +336,21 @@ function webSend() {
     { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null, system_prompt_extra: props.contextProvider ? props.contextProvider() : null },
     {
       onDelta: (t) => {
-        // Discord: a tool (or a completed narration block) closes the pending
+        // Grok: a tool (or a completed narration block) closes the pending
         // draft. Later tokens are a new block — do not glue status + answer.
-        if (turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
+        // Claude: keep appending; narrate→tool→answer is one turn.
+        if (grokLive.value && turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
         else turn.reply = joinText(turn.reply, t)
         bumpStream()
       },
       onTool: (name) => {
         if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name] }
-        turn.blockClosed = true
+        if (grokLive.value) turn.blockClosed = true
         bumpStream()
       },
       onSegment: (t) => {
-        turn.reply = applySegment(turn.blockClosed ? '' : turn.reply, t)
+        const prev = (grokLive.value && turn.blockClosed) ? '' : turn.reply
+        turn.reply = applySegment(prev, t, { lastBlock: grokLive.value })
         turn.blockClosed = false
         bumpStream()
       },
@@ -363,9 +376,9 @@ function webSend() {
               }
             }
           }
-          // Last finished block wins. Do not keep a longer glued draft+answer
-          // (live mash or stored mash) just because it has more characters.
-          const next = preferLastBlock(lastText, turn.reply)
+          // Grok: last finished block wins (status mash vs answer).
+          // Claude: keep the live reply — do not collapse narrate→tool→answer.
+          const next = grokLive.value ? preferLastBlock(lastText, turn.reply) : (turn.reply || lastText)
           if (next !== (turn.reply || '')) { turn.reply = next; bumpStream() }
         } catch (_) {}
       },
