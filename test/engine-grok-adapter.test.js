@@ -53,16 +53,14 @@ test('isUuid / resumeArgs: -r for a UUID, never -s or -c', () => {
   assert.deepEqual(grok.resumeArgs('latest'), []);
 });
 
-test('buildArgs is headless -p, streaming-json, finite max-turns, no TUI', () => {
+test('buildArgs is headless -p, streaming-json, no CLI turn cap, no TUI', () => {
   const args = grok.buildArgs({ prompt: 'hello', systemPrompt: 'IDENTITY', sessionId: '01234567-89ab-cdef-0123-456789abcdef' });
   assert.equal(args[0], '--no-auto-update');
   assert.ok(args.includes('-p'));
   assert.ok(args.includes('--output-format'));
   assert.equal(args[args.indexOf('--output-format') + 1], 'streaming-json');
   assert.ok(args.includes('--always-approve'));
-  assert.ok(args.includes('--max-turns'));
-  const mt = Number(args[args.indexOf('--max-turns') + 1]);
-  assert.ok(Number.isFinite(mt) && mt > 0 && mt <= 100);
+  assert.equal(args.includes('--max-turns'), false);
   assert.ok(args.includes('-s'));
   assert.ok(!args.includes('-r'));
   const p = args[args.indexOf('-p') + 1];
@@ -90,11 +88,22 @@ test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
   assert.ok(!('XAI_API_KEY' in env));
 });
 
-test('timeout and max-turns are finite (never infinite)', () => {
-  assert.ok(grok.DEFAULT_TIMEOUT_MS > 0 && grok.DEFAULT_TIMEOUT_MS <= 30 * 60 * 1000);
-  assert.ok(grok.DEFAULT_MAX_TURNS > 0 && grok.DEFAULT_MAX_TURNS <= 100);
-  assert.equal(grok.timeoutMs(), grok.DEFAULT_TIMEOUT_MS);
-  assert.equal(grok.maxTurns(), grok.DEFAULT_MAX_TURNS);
+test('buildArgs omits a turn-cap flag; runTurn/complete do not arm a kill timer', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--max-turns'), false);
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  const build = src.match(/function buildArgs\([\s\S]*?\n\}/);
+  assert.ok(build);
+  assert.equal(build[0].includes('--max-turns'), false);
+  assert.ok(src.includes('abortController'));
+  const run = src.match(/async function runTurn\([\s\S]*?\n\}/);
+  assert.ok(run);
+  assert.equal(run[0].includes('watchdog'), false);
+  const complete = src.match(/async function complete\([\s\S]*?\n\}/);
+  assert.ok(complete);
+  assert.equal(complete[0].includes('watchdog'), false);
 });
 
 test('historyReplaysSystemPrompt is true', () => {
@@ -231,7 +240,7 @@ test('applyEvent: time. + The as complete-shaped events stay honest, not replace
   assert.deepEqual(state.segments, []);
 });
 
-test('applyEvent: James kettle incremental draft + tool + answer stores FINAL only', () => {
+test('applyEvent: owner kettle incremental draft + tool + answer stores FINAL only', () => {
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
   const fin = 'TEST-FINAL: the tea is poured.';
@@ -256,7 +265,7 @@ test('applyEvent: James kettle incremental draft + tool + answer stores FINAL on
   assert.ok(!state.text.includes('on.Yes'));
 });
 
-test('applyEvent: James kettle snapshots last complete block wins', () => {
+test('applyEvent: owner kettle snapshots last complete block wins', () => {
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
   const fin = 'TEST-FINAL: the tea is poured.';

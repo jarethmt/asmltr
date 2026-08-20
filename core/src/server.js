@@ -228,6 +228,8 @@ function drainObserved(key) {
  */
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
+  // Grok session idle comes from ASMLTR_IDLE_POLICY (unset/infinite/off/none → infinite).
+  // ASMLTR_IDLE_MS is the Live card nap only. Do not read it here.
   const idlePolicy = sessions.idlePolicyFromEnv();
 
   const _cc = e.channel_context || {};

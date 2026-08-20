@@ -8,11 +8,6 @@ function effortOf(args) {
   const i = args.indexOf('--effort');
   return i >= 0 ? args[i + 1] : null;
 }
-function turnsOf(args) {
-  const i = args.indexOf('--max-turns');
-  return i >= 0 ? Number(args[i + 1]) : null;
-}
-
 test('buildArgs always passes --effort', () => {
   const args = grok.buildArgs({ prompt: 'hi' });
   assert.ok(args.includes('--effort'));
@@ -35,17 +30,13 @@ test('effortForTurn defaults to high; env and explicit override; email is xhigh'
   }
 });
 
-test('max-turns by effort: medium 20 / high 40 / xhigh 60; email xhigh 100', () => {
+test('email is xhigh and buildArgs has no --max-turns', () => {
   const prev = process.env.ASMLTR_GROK_EFFORT;
   delete process.env.ASMLTR_GROK_EFFORT;
   try {
-    assert.equal(grok.maxTurnsForEffort('medium'), 20);
-    assert.equal(grok.maxTurnsForEffort('high'), 40);
-    assert.equal(grok.maxTurnsForEffort('xhigh'), 60);
-    assert.equal(grok.maxTurnsForEffort('xhigh', { channel: 'email' }), 100);
     const args = grok.buildArgs({ prompt: 'hi', channel: 'email' });
     assert.equal(effortOf(args), 'xhigh');
-    assert.equal(turnsOf(args), 100);
+    assert.equal(args.includes('--max-turns'), false);
   } finally {
     if (prev === undefined) delete process.env.ASMLTR_GROK_EFFORT;
     else process.env.ASMLTR_GROK_EFFORT = prev;

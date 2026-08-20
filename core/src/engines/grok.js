@@ -7,7 +7,7 @@
  * and we STRIP XAI_API_KEY so the CLI cannot fall through to metered API billing.
  *
  * Harness turns are headless (`grok -p`), never the interactive TUI (bare `grok`).
- * Finite --max-turns + a spawn watchdog; no infinite idle.
+ * No spawn watchdog and no CLI turn cap. Operator abort (abortController) only.
  *
  * RESUME UUID (Grok-specific — do not drop):
  *   Sessions are UUIDs (UUIDv7 when the CLI assigns one). `-s/--session-id` CREATES
@@ -28,25 +28,6 @@ const { composePrompt } = require('../../../shared/prompt-compose');
 const id = 'grok';
 const cheapModel = process.env.ASMLTR_GROK_TITLE_MODEL || 'grok-4.6';
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — finite, never infinite
-const DEFAULT_MAX_TURNS = 20;
-const TIMEOUT_CAP_MS = 30 * 60 * 1000;
-const MAX_TURNS_CAP = 100;
-
-function timeoutMs() {
-  const n = Number(process.env.ASMLTR_GROK_TIMEOUT_MS);
-  if (Number.isFinite(n) && n > 0) return Math.min(n, TIMEOUT_CAP_MS);
-  return DEFAULT_TIMEOUT_MS;
-}
-function maxTurns() {
-  const n = Number(process.env.ASMLTR_GROK_MAX_TURNS);
-  if (Number.isFinite(n) && n > 0) return Math.min(Math.floor(n), MAX_TURNS_CAP);
-  return DEFAULT_MAX_TURNS;
-}
-
-const TURNS_BY_EFFORT = { low: 20, medium: 20, high: 40, xhigh: 60 };
-const EMAIL_XHIGH_TURNS = 100;
-
 function normalizeEffort(raw) {
   const s = String(raw || '').trim().toLowerCase();
   return ['low', 'medium', 'high', 'xhigh'].includes(s) ? s : '';
@@ -59,12 +40,6 @@ function effortForTurn(opts = {}) {
   if (String(opts.channel || '').toLowerCase() === 'email') return 'xhigh';
   const env = normalizeEffort(process.env.ASMLTR_GROK_EFFORT);
   return env || 'high';
-}
-
-function maxTurnsForEffort(effort, opts = {}) {
-  const e = normalizeEffort(effort) || 'high';
-  if (String(opts.channel || '').toLowerCase() === 'email' && e === 'xhigh') return EMAIL_XHIGH_TURNS;
-  return TURNS_BY_EFFORT[e] || DEFAULT_MAX_TURNS;
 }
 
 function isUuid(s) {
@@ -100,7 +75,6 @@ function buildArgs(opts) {
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   const effort = effortForTurn(opts);
-  args.push('--max-turns', String(opts.complete ? maxTurns() : maxTurnsForEffort(effort, opts)));
   args.push('--effort', effort);
   if (opts.cwd) args.push('--cwd', opts.cwd);
   const mdl = opts.model || (opts.complete ? cheapModel : engines.modelFor('grok'));
@@ -260,8 +234,6 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
 
   const kill = () => { try { child.kill('SIGTERM'); } catch (_) {} };
   if (abortController) abortController.signal.addEventListener('abort', kill);
-  const watchdog = setTimeout(() => { kill(); setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000); }, timeoutMs());
-  if (watchdog.unref) watchdog.unref();
 
   const state = newState(sessionId);
   let buf = '';
@@ -281,7 +253,6 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   child.stderr.on('data', (d) => { stderr += d.toString(); });
 
   const code = await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
-  clearTimeout(watchdog);
   if (buf.trim()) handleLine(buf);
   if (code !== 0 && !state.text) {
     state.isError = true;
@@ -304,12 +275,9 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
 async function complete({ prompt, model, appendSystemPrompt = null }) {
   const args = buildArgs({ prompt, systemPrompt: appendSystemPrompt, model: model || cheapModel, complete: true });
   const child = spawn(bin(), args, { env: launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
-  const watchdog = setTimeout(() => { try { child.kill('SIGTERM'); } catch (_) {} }, timeoutMs());
-  if (watchdog.unref) watchdog.unref();
   let out = '';
   child.stdout.on('data', (d) => { out += d.toString(); });
   await new Promise((res) => { child.on('close', res); child.on('error', () => res(1)); });
-  clearTimeout(watchdog);
   return out.trim();
 }
 
@@ -321,6 +289,5 @@ module.exports = {
   getLastModel: () => engines.modelFor('grok'),
   // testable internals (no spawn)
   isUuid, resumeArgs, buildArgs, launchEnv, parseLine, applyEvent, sessionIdFrom,
-  extractText, extractUsage, newState, timeoutMs, maxTurns, maxTurnsForEffort, effortForTurn, normalizeEffort, joinText, isCompleteBlock,
-  DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TURNS,
+  extractText, extractUsage, newState, effortForTurn, normalizeEffort, joinText, isCompleteBlock,
 };

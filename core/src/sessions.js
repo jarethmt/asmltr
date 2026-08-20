@@ -13,15 +13,16 @@
  *   passes resume=that UUID → grok.js emits `-r <uuid>`. That is the real
  *   continuity mechanism. Do not fake it by re-injecting the full system
  *   prompt every turn: grok's `-r` already replays the first-turn system
- *   block (historyReplaysSystemPrompt=true). When idle expires we CLEAR the
+ *   block (historyReplaysSystemPrompt=true). When a finite idle expires we CLEAR the
  *   UUID (and last_stable_*) so the next turn is a fresh grok session and
- *   the full identity prompt is sent again.
+ *   the full identity prompt is sent again. The infinite path never clears
+ *   the grok UUID.
  *
  * IDLE POLICY:
  *   Stored as 'infinite' | 'idle:<minutes>' (integer minutes — see
- *   parseIdlePolicy / idlePolicyFromEnv). Core used to hardcode infinite
- *   for every turn (token-burn). Default idle is 30 minutes, overridable
- *   by ASMLTR_IDLE_MS (milliseconds) or ASMLTR_IDLE_POLICY.
+ *   parseIdlePolicy / idlePolicyFromEnv). Default is infinite.
+ *   Session idle reads ASMLTR_IDLE_POLICY only (infinite/off/none or idle:N).
+ *   Do not read ASMLTR_IDLE_MS here — that env is the Live card nap.
  */
 
 const path = require('path');
@@ -132,16 +133,11 @@ function parseIdlePolicy(raw) {
   return null;
 }
 
-/** Default idle: 30 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:30. */
+/** Session idle: ASMLTR_IDLE_POLICY if set; else infinite. ASMLTR_IDLE_MS is Live-only. */
 function idlePolicyFromEnv() {
   const named = parseIdlePolicy(process.env.ASMLTR_IDLE_POLICY);
   if (named) return named;
-  const ms = Number(process.env.ASMLTR_IDLE_MS);
-  if (Number.isFinite(ms)) {
-    if (ms <= 0) return 'infinite';
-    return `idle:${Math.max(1, Math.round(ms / 60000))}`;
-  }
-  return `idle:${DEFAULT_IDLE_MINUTES}`;
+  return 'infinite';
 }
 
 const _setIdle = db.prepare('UPDATE sessions SET idle_policy = ? WHERE conversation_key = ?');
