@@ -15,9 +15,9 @@
  * in git. Speaker tokens (username / display name) are passed at runtime
  * from the Discord message and never hardcoded.
  *
- * Thought volume: xhigh uncapped. high and medium → 2 chips (public and DM).
- * Below medium (low) → 0: no 💭 / Working chips, just the answer.
- * Unknown tools named "Working" are skipped in the quiet (non-xhigh) budget.
+ * Thought volume: xhigh uncapped. high and medium → 2 💭 chips (public and DM).
+ * Below medium (low) → 0: no chips, just the answer.
+ * Tool / Working / Still working chips are xhigh only. medium/high are 💭 only.
  */
 
 const { redactSecrets } = require('./redact');
