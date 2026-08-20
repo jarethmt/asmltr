@@ -11,6 +11,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Added
 
 ### Changed
+- **Grok `--effort` is always set** (env `ASMLTR_GROK_EFFORT`, default medium; email defaults xhigh). Max-turns: medium 20 / high 40 / xhigh 60 / email xhigh 100. Idle default is 30 minutes. Scheduled backups skip while a grok child is running. Node 24 sqlite statements are reused for process lifetime.
 
 ### Fixed
 

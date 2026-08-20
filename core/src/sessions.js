@@ -132,7 +132,7 @@ function parseIdlePolicy(raw) {
   return null;
 }
 
-/** Default idle for ivy/grok: 30 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:30. */
+/** Default idle: 30 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:30. */
 function idlePolicyFromEnv() {
   const named = parseIdlePolicy(process.env.ASMLTR_IDLE_POLICY);
   if (named) return named;
@@ -165,21 +165,13 @@ function ensure(conversation_key, channel, idle_policy = 'infinite', working_dir
  */
 function resolveForTurn(conversation_key, channel, idle_policy = 'infinite', working_dir = DEFAULT_CWD) {
   const row = ensure(conversation_key, channel, idle_policy, working_dir);
-  // Keep the stored policy in sync with what this turn asked for (env can change
-  // without dropping the conversation_key).
-  if (idle_policy && row.idle_policy !== idle_policy) {
-    _setIdle.run(idle_policy, conversation_key);
-    row.idle_policy = idle_policy;
-  }
   if (!row.engine_session_id) return { resume: null, key: conversation_key, expired: false };
 
-  // idle:<minutes> → drop the engine UUID and start fresh; 'infinite' always resumes.
-  const m = /^idle:(\d+)$/.exec(row.idle_policy || 'infinite');
-  if (m) {
-    const windowMs = Number(m[1]) * 60 * 1000;
+  // idle:<minutes> policy → start fresh if past the window; 'infinite' always resumes.
+  const mm = /^idle:(\d+)$/.exec(row.idle_policy || 'infinite');
+  if (mm) {
+    const windowMs = Number(mm[1]) * 60 * 1000;
     if (nowMs() - row.last_activity_at > windowMs) {
-      // Fresh grok session: do not pass -r of a stale UUID, and drop last_stable_*
-      // so inject-once re-sends the full system prompt on the new session.
       _clearEngine.run(conversation_key);
       return { resume: null, key: conversation_key, expired: true };
     }
