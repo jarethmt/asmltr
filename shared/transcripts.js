@@ -19,6 +19,7 @@
  */
 const path = require('path');
 const silo = require('./silo');
+const { isNoReplySentinel } = require('./silence');
 
 const LAST_TOPICS_REL = 'memory/last-topics.md';
 const TRANSCRIPTS_REL = 'memory/transcripts';
@@ -148,7 +149,7 @@ async function persistFromHandle(e, result, assistantText, { drafted = false } =
     if (assistantText == null) return null;
     const delivered = String(assistantText);
     if (!delivered.trim()) return null;
-    if (/\[\[NO_REPLY\]\]/i.test(delivered)) return null;
+    if (isNoReplySentinel(delivered)) return null;
   }
   const text = assistantText != null ? String(assistantText) : '';
   if (!userText && !text) return null;

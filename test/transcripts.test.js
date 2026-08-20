@@ -203,14 +203,20 @@ describe('transcripts', { concurrency: 1 }, () => {
     assert.equal(md, null);
   });
 
-  test('persistFromHandle skips [[NO_REPLY]] even if passed as the reply body', async () => {
-    const key = 'email:inst:thread-noreply';
-    const wrote = await transcripts.persistFromHandle(
-      { conversation_key: key, channel: 'email', content: { text: 'ops alert' } },
+  test('persistFromHandle skips an exact [[NO_REPLY]] body, not a mention', async () => {
+    const silent = await transcripts.persistFromHandle(
+      { conversation_key: 'email:inst:thread-noreply', channel: 'email', content: { text: 'ops alert' } },
       { text: '[[NO_REPLY]]', isError: false },
-      'Thanks, [[NO_REPLY]]',
+      '[[NO_REPLY]]',
     );
-    assert.equal(wrote, null);
+    assert.equal(silent, null);
+
+    const mentioned = await transcripts.persistFromHandle(
+      { conversation_key: 'email:inst:thread-mention', channel: 'email', content: { text: 're-review' } },
+      { text: 'A [[NO_REPLY]] turn is skipped, not recorded as delivered.', isError: false },
+      'A [[NO_REPLY]] turn is skipped, not recorded as delivered.',
+    );
+    assert.ok(mentioned && mentioned.transcript);
   });
 
   test('persistFromHandle writes a delivered reply and a drafted reply', async () => {

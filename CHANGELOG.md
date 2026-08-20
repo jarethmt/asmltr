@@ -13,6 +13,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+- **`[[NO_REPLY]]` is exact or last-line only.** Core, Discord, and transcript persist no longer treat a mention of the token inside a real reply as silence. That substring match dropped a full email whose body discussed the sentinel.
 
 ## [0.13.1] - 2026-08-18
 

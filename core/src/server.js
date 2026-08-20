@@ -60,6 +60,7 @@ const vault = require('../../shared/vault'); // TRUST vault (credential broker +
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
 const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path
+const { isNoReplySentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 
 /** Write a completed turn into the Self silo (memory/transcripts + last-topics)
@@ -478,7 +479,7 @@ async function handle(envelope, opts = {}) {
   const _flushStream = () => {
     if (!opts.onText) return;
     const red = mustRedact ? redactSecrets(_streamRaw).text : _streamRaw;
-    if (/\[\[NO_REPLY\]\]/i.test(red)) return; // don't ship the silence sentinel
+    if (isNoReplySentinel(red)) return; // don't ship the silence sentinel
     if (red.length > _emitted) { try { opts.onText(red.slice(_emitted)); } catch (_) {} _emitted = red.length; }
   };
   // Step streaming (opts.onSegment/onTool/onThinking): a step consumer (e.g. Discord) posts each
@@ -602,11 +603,12 @@ async function handle(envelope, opts = {}) {
       auth_mode: authMode, billed, estimated: noReal || undefined,
       principal: resolved.user_key !== usageIdentity ? resolved.user_key : undefined } });
 
-  // Universal silence sentinel: if the turn ends with [[NO_REPLY]] (e.g. the agent rerouted its
-  // answer to another channel via `asmltr send` and doesn't want to post here), emit no action so
-  // EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
+  // Universal silence sentinel: if the turn IS or ENDS WITH [[NO_REPLY]] (e.g. the agent rerouted
+  // its answer to another channel via `asmltr send` and doesn't want to post here), emit no action
+  // so EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
+  // Mentioning the token in a real reply is not silence (substring match swallowed those).
   // Nothing delivered → skip silo persist (do not record silence as a spoken turn).
-  if (/\[\[NO_REPLY\]\]/i.test(result.text || '')) {
+  if (isNoReplySentinel(result.text)) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
     return [];
