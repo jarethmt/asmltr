@@ -500,6 +500,10 @@ async function handle(envelope, opts = {}) {
         if (opts.onSubagent) { try { opts.onSubagent(s); } catch (_) {} }
       },
       onEvent: (sdkEvt) => {
+        if (sdkEvt && sdkEvt.type === 'effort') {
+          try { if (opts.onEffort) opts.onEffort(sdkEvt.effort); } catch (_) {}
+          return;
+        }
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
           for (const c of sdkEvt.message?.content || []) {
@@ -1123,6 +1127,7 @@ app.post('/v2/stream', async (req, res) => {
       onToolCall: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name, input: t.input }); }, // a tool call + its args
       onToolResult: (r) => { if (r) frame({ type: 'tool_result', output: r.output, is_error: !!r.is_error }); }, // its result
       onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
+      onEffort: (effort) => { if (effort) frame({ type: 'effort', effort }); },
       onSubagent: (s) => { if (s && s.id) frame({ type: 'subagent', id: s.id, name: s.name, status: s.status, summary: s.summary }); }, // sub-agent (Task) start/stop
     });
     frame({ type: 'done', actions });

@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   looksLikePromptLeak, toolTitle, humanToolChip, discordToolLine, discordThoughtLine,
+  speakerHintsFrom, mentionsSpeaker, thoughtBudget,
 } = require('../shared/step-public');
 
 test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
@@ -13,6 +14,31 @@ test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
   assert.equal(looksLikePromptLeak('path is /home/someone/.asmltr'), true);
   assert.equal(looksLikePromptLeak('Reading a file'), false);
   assert.equal(looksLikePromptLeak('the answer is 42'), false);
+  assert.equal(looksLikePromptLeak('The user is Ada (ada-id) asking me (Ivy) in #room'), true);
+  assert.equal(looksLikePromptLeak('This is a Discord message in #food'), true);
+  assert.equal(looksLikePromptLeak('I was @-mentioned, so I should reply'), true);
+  assert.equal(looksLikePromptLeak('Let me search the recipe board'), false);
+});
+
+test('speaker hints are runtime-only; thoughts mentioning them are dropped', () => {
+  const hints = speakerHintsFrom({ username: 'wx412', globalName: 'Ada Lovelace' });
+  assert.ok(hints.includes('wx412'));
+  assert.ok(hints.includes('Ada Lovelace'));
+  assert.ok(hints.includes('Lovelace'));
+  assert.equal(hints.includes('Ada'), false); // tokens under 4 chars are skipped
+  assert.equal(mentionsSpeaker('Ada Lovelace asked for ingredients', hints), true);
+  assert.equal(mentionsSpeaker('wx412 is waiting', hints), true);
+  assert.equal(mentionsSpeaker('Checking the recipe board', hints), false);
+  assert.equal(discordThoughtLine('The user is Ada Lovelace (wx412) asking in #food', hints), '');
+  assert.equal(discordThoughtLine('Let me search more thoroughly', hints), '-# 💭 Let me search more thoroughly');
+});
+
+test('thoughtBudget: public rooms cap at 2 unless xhigh; DMs uncap on high', () => {
+  assert.equal(thoughtBudget('medium', { publicChannel: true }), 2);
+  assert.equal(thoughtBudget('high', { publicChannel: true }), 2);
+  assert.equal(thoughtBudget('xhigh', { publicChannel: true }), Infinity);
+  assert.equal(thoughtBudget('high', { publicChannel: false }), Infinity);
+  assert.equal(thoughtBudget('medium', { publicChannel: false }), 2);
 });
 
 test('human chips: start only, no paths or ACP type names', () => {

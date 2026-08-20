@@ -104,6 +104,7 @@ function makeCoreClient(coreUrl) {
               else if (obj.type === 'tool') { if (h.onTool && obj.name) { try { h.onTool(obj.name); } catch (_) {} } if (h.onToolCall) { try { h.onToolCall(obj); } catch (_) {} } }
               else if (obj.type === 'tool_result') { if (h.onToolResult) { try { h.onToolResult(obj); } catch (_) {} } }
               else if (obj.type === 'thinking') { if (h.onThinking && obj.text) { try { h.onThinking(obj.text); } catch (_) {} } }
+              else if (obj.type === 'effort') { if (h.onEffort && obj.effort) { try { h.onEffort(obj.effort); } catch (_) {} } }
               else if (obj.type === 'subagent') { if (h.onSubagent && obj.id) { try { h.onSubagent(obj); } catch (_) {} } }
               else if (obj.type === 'done') { settled = true; resolve(obj.actions || []); }
               else if (obj.type === 'error') { settled = true; reject(new Error(obj.error || 'stream error')); }
