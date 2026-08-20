@@ -29,14 +29,16 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // Self-gating sentinel: in a multi-agent channel the model emits ONLY this token when a
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
+const { isNoReplySentinel } = require('../../../shared/silence');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
 // mentions the phrase from being swallowed: only a short, self-contained refusal counts as silence.
+// The token itself is exact / last-line only — a mention in a real reply must still post.
 function isSilence(text) {
   const t = String(text || '').trim();
   if (!t) return true;
-  if (t.toUpperCase().includes(NO_REPLY.toUpperCase())) return true;
+  if (isNoReplySentinel(t)) return true;
   const s = t.replace(/^[[(*\s]+|[\])*.!\s]+$/g, '').toLowerCase();
   return s.length <= 40 && /^(no\s+(response|reply|comment)|n\/?a|silent)(\s+(requested|needed|required|necessary|expected|warranted|here|for me))?$/.test(s);
 }
