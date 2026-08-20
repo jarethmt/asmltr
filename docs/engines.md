@@ -20,6 +20,7 @@ than a hard dependency on any one provider.
 | **Claude** | Claude Code (local Agent SDK) | your Claude subscription | The default. Runs on your machine with full filesystem + project context + skills. **Never** uses an API key here (that would bypass your subscription). |
 | **Gemini** | Gemini CLI | Google login **or** API key | Google deprecated the free login tier, so an **API key** is the practical path today. |
 | **Codex** | Codex CLI | ChatGPT login **or** API key | Also the vehicle for **[self-hosted models](#self-hosted-models)**. |
+| **Grok** | Grok Build CLI | your xAI subscription | Official CLI (`curl https://x.ai/cli/install.sh`). **Never** uses `XAI_API_KEY` here. Login: `grok login --device-auth`. |
 
 Everything below lives in **Settings → Engines** in the dashboard (one card per engine), and is
 mirrored by the `asmltr` CLI + a shared settings manifest, so the terminal TUI stays in sync.
@@ -33,6 +34,7 @@ use. Any installed engine can also be launched directly from the terminal:
 asmltr claude          # a wrapped, monitored, takeover-able Claude session
 asmltr gemini
 asmltr codex
+asmltr grok
 ```
 
 Changing the default in the GUI re-points the `<assistant-name>` alias automatically.
@@ -111,7 +113,7 @@ To go back to hosted OpenAI, clear the custom endpoint (empty the field, or `POS
 Whatever engine runs, it can share the same set of tools. asmltr keeps **one MCP registry** and
 provisions it into each harness at launch — including a built-in **toolbelt** that exposes asmltr's own
 cross-session tools (list sessions, send a message out any channel, post an announcement, browse
-uploads) to Claude, Gemini, and Codex alike. → **[MCP tools registry](engines-mcp.md)**
+uploads) to Claude, Gemini, Codex, and Grok alike. → **[MCP tools registry](engines-mcp.md)**
 
 ## See also
 

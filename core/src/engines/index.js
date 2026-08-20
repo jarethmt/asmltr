@@ -18,6 +18,7 @@ function get(id) {
   if (!CACHE[key]) {
     if (key === 'gemini') CACHE[key] = require('./gemini');
     else if (key === 'codex') CACHE[key] = require('./codex');
+    else if (key === 'grok') CACHE[key] = require('./grok');
     else CACHE[key] = require('./claude');
   }
   return CACHE[key];
