@@ -29,7 +29,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // Self-gating sentinel: in a multi-agent channel the model emits ONLY this token when a
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
-const { looksLikePromptLeak, discordToolLine, discordThoughtLine, speakerHintsFrom, thoughtBudget, humanToolChip, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptLeak, discordToolLine, discordThoughtLine, speakerHintsFrom, thoughtBudget, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE } = require('../../../shared/step-public');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
@@ -87,7 +87,7 @@ const meta = {
       voice_drone: { type: 'boolean', title: 'Voice: play a soft ambient drone while processing a spoken reply', default: true },
       voice_post_transcript: { type: 'boolean', title: 'Voice: post the live transcript (🗣️ lines) into the text channel as people speak (off = no per-utterance flood)', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
-      stream_steps: { type: 'boolean', title: 'Post sanitized 💭 thought chips and human tool-start chips when addressed. Engine-agnostic (Claude thinking blocks included). Working / Still working if a bubble is dropped.', default: true },
+      stream_steps: { type: 'boolean', title: 'Post sanitized 💭 thought chips when addressed. medium/high: 💭 only. xhigh: 💭 plus tool / Working chips. Never raw thoughts.', default: true },
       stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
@@ -494,6 +494,7 @@ RESPONSE RULES:
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
         const stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
         const armBeat = () => {
+          if (maxThoughts !== Infinity) return; // medium/high: 💭 only, no Still working
           stopBeat();
           beatTimer = setTimeout(() => {
             beatTimer = null;
@@ -525,10 +526,9 @@ RESPONSE RULES:
           onTool: (tool) => {
             pending = '';
             if (sawNoReply) return;
-            if (maxThoughts <= 0) return;
+            if (maxThoughts !== Infinity) return; // not xhigh: 💭 only, no tooling
             const line = discordToolLine(streamTools, tool);
             if (!line) return;
-            if (maxThoughts !== Infinity && !streamTools && humanToolChip(tool) === 'Working') return;
             postChip(line);
           },
           // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
@@ -541,6 +541,7 @@ RESPONSE RULES:
               postChip(line);
               return;
             }
+            if (maxThoughts !== Infinity) return; // no Working filler on medium/high
             if (!lastChip) postChip(WORKING_LINE);
             else if (!beatTimer) armBeat();
           },

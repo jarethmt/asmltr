@@ -81,4 +81,6 @@ test('Discord never renderSteps raw thought text', () => {
   assert.match(src, /discordThoughtLine/);
   assert.match(src, /onThinking:/);
   assert.match(src, /if \(maxThoughts <= 0\) return;/);
+  assert.match(src, /not xhigh: 💭 only, no tooling/);
+  assert.match(src, /no Working filler on medium\/high/);
 });
