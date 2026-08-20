@@ -484,7 +484,16 @@ async function handle(envelope, opts = {}) {
       onDelta: opts.onText ? _pushDelta : undefined,
       onSegment: opts.onSegment ? _pushSegment : undefined,
       onTool: opts.onTool ? ((t) => { try { opts.onTool(t); } catch (_) {} }) : undefined,
-      onThinking: opts.onThinking ? _pushThinking : undefined,
+      // Always record thinking except email. Discord/web may also stream it.
+      // Not Grok-gated: Claude SDK thinking blocks take this path too.
+      onThinking: (t) => {
+        if (e.channel === 'email') return;
+        try {
+          record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
+            event_type: 'thinking', payload: { text: truncate(t, 2000) } });
+        } catch (_) {}
+        if (opts.onThinking) _pushThinking(t);
+      },
       // Sub-agent (Task) lifecycle → record for history replay + forward live to a step consumer.
       onSubagent: (s) => {
         try { record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core', event_type: 'subagent', payload: { id: s.id, name: s.name, status: s.status, summary: truncate(s.summary, 500) } }); } catch (_) {}
@@ -495,7 +504,7 @@ async function handle(envelope, opts = {}) {
         if (sdkEvt.type === 'assistant') {
           for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') { record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } }); if (opts.onToolCall) { try { opts.onToolCall({ name: c.name, input: c.input }); } catch (_) {} } }
-            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+            else if (c.type === 'thinking' && e.channel !== 'email') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
           }
         } else if (sdkEvt.type === 'user') {
           for (const c of sdkEvt.message?.content || []) {
@@ -1851,7 +1860,7 @@ app.post('/v2/inject', (req, res) => {
           const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } });
-            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+            else if (c.type === 'thinking' && row.channel !== 'email') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
           } else if (sdkEvt.type === 'user') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
           }
