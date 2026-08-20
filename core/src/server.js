@@ -1,6 +1,6 @@
-require('./sqlite-stmt-keep');
 #!/usr/bin/env node
 'use strict';
+require('./sqlite-stmt-keep');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
