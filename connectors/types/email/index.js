@@ -15,6 +15,8 @@
  *
  * Credentials come from the secret store (never a file): user_bws_key + pass_bws_key.
  */
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -34,6 +36,29 @@ async function imapNoopProbe(imap, timeoutMs = 15000) {
   const np = imap.noop();
   if (np && typeof np.catch === 'function') np.catch(() => {}); // never let a late rejection go unhandled
   await Promise.race([np, new Promise((_, rej) => setTimeout(() => rej(new Error('noop timeout')), timeoutMs))]);
+}
+
+
+// Per-instance IMAP UID cursor. Survives worker restart so a hang-up does not skip the failed uid.
+// Override with ASMLTR_EMAIL_LASTUID_FILE (tests / single-file installs).
+function lastUidFile(instanceId) {
+  if (process.env.ASMLTR_EMAIL_LASTUID_FILE) return process.env.ASMLTR_EMAIL_LASTUID_FILE;
+  return path.join(os.homedir(), '.asmltr', `email-lastuid-${instanceId}.json`);
+}
+
+function readLastUid(instanceId) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(lastUidFile(instanceId), 'utf8'));
+    const n = Number(raw && raw.lastUid);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  } catch (_) {}
+  return null;
+}
+
+function persistLastUid(instanceId, uid) {
+  const f = lastUidFile(instanceId);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ lastUid: uid }) + '\n', { mode: 0o600 });
 }
 
 const NAME = process.env.ASSISTANT_NAME || 'Assistant';
@@ -112,10 +137,10 @@ async function start(ctx) {
   async function processMessage(parsed) {
     const fromAddr = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
     const fromName2 = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].name) || fromAddr;
-    if (!fromAddr) return;
+    if (!fromAddr) return { handled: false };
     // Loop / automation guards — never answer ourselves or noreply/daemon senders.
-    if (fromAddr.toLowerCase() === selfAddr) return;
-    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return; }
+    if (fromAddr.toLowerCase() === selfAddr) return { handled: false };
+    if (/(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)([._+-]|@)/i.test(fromAddr)) { ctx.log(`skip automated sender ${fromAddr}`); return { handled: false }; }
 
     const subject = parsed.subject || '(no subject)';
     const body = (parsed.text || parsed.html || '').toString().trim();
@@ -176,13 +201,15 @@ async function start(ctx) {
         ctx.log(`replied to ${fromAddr} (${replySubject})`);
       } // 'drafted' → held for approval (dashboard); 'status'/others → nothing to mail
     }
+    return { handled: true };
   }
 
   // --- IMAP watch (IDLE) -----------------------------------------------------
   // A UID high-water mark (not read/unread flags) decides what's "new": on first connect the
   // baseline is the mailbox tip, so we only react to mail that arrives AFTER we start watching
   // (unless process_backlog). The cursor survives reconnects, so mail during a blip isn't missed.
-  let imap = null, stopped = false, lastUid = -1, busy = false;
+  const persistedUid = readLastUid(ctx.instanceId);
+  let imap = null, stopped = false, lastUid = persistedUid != null ? persistedUid : -1, busy = false;
   async function fetchNew() {
     if (!imap || !imap.usable || busy) return;
     busy = true;
@@ -190,9 +217,21 @@ async function start(ctx) {
     try {
       for await (const msg of imap.fetch({ uid: `${lastUid + 1}:*` }, { source: true, uid: true })) {
         if (msg.uid <= lastUid) continue; // `n:*` returns the tip even when empty — guard reprocessing
-        try { await processMessage(await simpleParser(msg.source)); }
-        catch (e) { ctx.log(`process failed uid ${msg.uid}: ${e.message}`); }
-        lastUid = Math.max(lastUid, msg.uid);
+        try {
+          const result = await processMessage(await simpleParser(msg.source));
+          // Advance + persist only on handled. Hang-up / parse failure must leave
+          // lastUid so the next start or exists re-fetches this uid.
+          if (result && result.handled) {
+            if (msg.uid > lastUid) {
+              lastUid = msg.uid;
+              try { persistLastUid(ctx.instanceId, lastUid); }
+              catch (e) { ctx.log(`persist lastUid ${lastUid}: ${e.message}`); }
+            }
+          }
+        } catch (e) {
+          ctx.log(`process failed uid ${msg.uid}: ${e.message}`);
+          break; // do not walk past a failed uid; retry it next fetch
+        }
       }
     } finally { lock.release(); busy = false; }
   }
@@ -328,4 +367,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start, imapNoopProbe };
+module.exports = { meta, start, imapNoopProbe, lastUidFile, readLastUid, persistLastUid };
