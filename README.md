@@ -122,7 +122,7 @@ The name maps to what it does:
 ## Reasoning engines — pick your brain
 
 asmltr's thinking is a **swappable layer**. Run it on **Claude Code** (on your subscription, the
-default), **Grok CLI**, **Gemini CLI**, **Codex CLI**, or your own **self-hosted model** behind an
+default), **Grok Build**, **Gemini CLI**, **Codex CLI**, or your own **self-hosted model** behind an
 OpenAI-compatible endpoint. Pick one as the default and *every* channel uses it — subscription login
 or a vaulted API key, your choice. The core loads only the engine you use, so a Grok-only, Gemini-only,
 or Codex-only box never touches the Claude SDK. → [Reasoning engines](https://jarethmt.github.io/asmltr/engines/)
@@ -168,7 +168,7 @@ envelope and renders a reply. → [How it works](https://jarethmt.github.io/asml
 
 | Area | Highlights | Docs |
 |------|-----------|------|
-| **Reasoning engines** | Pluggable agentic backends — **Claude Code, Grok CLI, Gemini CLI, Codex CLI, or a self-hosted model**. One default drives every channel (subscription or vaulted API key); per-engine model, one-click install/update + auto-update; an [MCP registry](https://jarethmt.github.io/asmltr/engines-mcp/) provisioned into every harness. | [Engines](https://jarethmt.github.io/asmltr/engines/) |
+| **Reasoning engines** | Pluggable agentic backends — **Claude Code, Grok Build, Gemini CLI, Codex CLI, or a self-hosted model**. One default drives every channel (subscription or vaulted API key); per-engine model, one-click install/update + auto-update; an [MCP registry](https://jarethmt.github.io/asmltr/engines-mcp/) provisioned into every harness. | [Engines](https://jarethmt.github.io/asmltr/engines/) |
 | **Channels** | Discord (+ autonomous participation, multi-agent, voice), Telegram, Email (SMTP/IMAP), GitHub issues, MCP (OAuth 2.1), OpenAI-compatible API, web chat, CLI. | [Connectors](https://jarethmt.github.io/asmltr/connectors/discord/) |
 | **Identity & memory** | Self anchor + aesthetic injected every turn; the *Cast* (cross-channel relationships); **data silos** — the assistant's memory and the default home for its artifacts, with layered search. | [Silos](https://jarethmt.github.io/asmltr/silos/) |
 | **Credentials** | A [TRUST-Protocol vault](https://jarethmt.github.io/asmltr/security/trust-vault/): use-but-never-see credential broker + KMS envelope encryption; storage integrations (WebDAV / S3 / local) with encryption-at-rest. | [Vault](https://jarethmt.github.io/asmltr/security/trust-vault/) · [Integrations](https://jarethmt.github.io/asmltr/integrations/) |
