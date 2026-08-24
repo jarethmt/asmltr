@@ -10,7 +10,7 @@ set of one-shot subcommands.
 
 ```
 asmltr                 live TUI dashboard
-asmltr ask "<text>"    one local turn with the default engine (ivy: grok)
+asmltr ask "<text>"    one local turn with the default engine (grok)
 asmltr chat            local readline REPL over the same session (resume UUID)
 asmltr ls              list active sessions
 asmltr map             active sessions grouped by working dir (collision radar)

@@ -1,7 +1,7 @@
 # extras/ivy-local — optional localhost MCP wrappers
 
 Stdio MCP servers the Grok engine can call via `~/.asmltr/mcp.json` and `grok mcp add`.
-They do **not** fork `grok.js`. Secrets stay out of git. Eve: skip unless you want the same extras.
+They do **not** fork `grok.js`. Secrets stay out of git. Skip unless you want the same extras.
 
 | Server | Talks to | Tools |
 | --- | --- | --- |

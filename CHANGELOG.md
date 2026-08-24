@@ -9,7 +9,8 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
-- **Example configs for ivy exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.ivy.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.ivy.example`.
+- **Example configs for local exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.ivy.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.ivy.example`.
+- **Discord thought chips** are a personal toggle (`stream_steps` / `ASMLTR_STREAM_STEPS`), default on.
 - **`asmltr guild-post` name lookup** also indexes threads on regular text/announcement channels (not only forums) and media channels.
 - **`asmltr bounce`:** queue a core+manager+collector restart until the current turn ends (then a short delay so Discord/email can post the reply). Inline `systemctl`/`pm2` restarts of the asmltr stack from a live turn are rewritten to the same queue. `--now` is refused inside a turn.
 
