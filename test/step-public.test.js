@@ -101,31 +101,16 @@ test('thoughtChipsEnabled: default on; instance config wins; env off', () => {
   assert.equal(thoughtChipsEnabled({}, { ASMLTR_STREAM_STEPS: 'on' }), true);
 });
 
-test('stripThoughtChrome: plan paragraph above a salutation is not mailed', () => {
-  const leaked = [
-    'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.',
-    '',
-    'Alex,',
-    '',
-    'Those are two CyberPower PR2200LCDRT2U units. Each takes one RB1290X4F.',
-  ].join('\n');
-  const out = stripThoughtChrome(leaked);
-  assert.equal(out.startsWith('Alex,'), true, out.slice(0, 80));
-  assert.equal(out.includes('I’ll send'), false);
-  assert.equal(out.includes('flag that'), false);
-  assert.ok(out.includes('RB1290X4F'));
-  assert.equal(stripThoughtChrome('Alex,\n\nThe SPF is fixed.'), 'Alex,\n\nThe SPF is fixed.');
-  assert.equal(
-    stripThoughtChrome('Working through the photos.\n\nDear Alex,\n\nThe invoice is attached.'),
-    'Dear Alex,\n\nThe invoice is attached.'
-  );
-  const signed = 'The SPF is fixed.\n\nSincerely,\nDionysus';
-  assert.equal(stripThoughtChrome(signed), signed);
-  const q2 = quietReplyFromResult({
-    segments: [leaked],
-    text: leaked,
-  });
-  assert.equal(q2.startsWith('Alex,'), true);
+test('stripThoughtChrome: glued plan+letter in one last segment survives (no name/plan cut)', () => {
+  const plan = 'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.';
+  const letter = "You're right — those are CyberPower. The model is PR2200LCDRT2U.";
+  const glued = plan + '\n\n' + letter;
+  assert.equal(stripThoughtChrome(glued), glued);
+  assert.equal(quietReplyFromResult({ segments: [glued], text: glued }), glued);
+  assert.equal(stripThoughtChrome("I'll send the invoice tomorrow."), "I'll send the invoice tomorrow.");
+  const greeted = 'Alex,\n\n' + letter;
+  assert.equal(stripThoughtChrome(greeted), greeted);
+  assert.equal(stripThoughtChrome(letter), letter);
 });
 
 test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {
