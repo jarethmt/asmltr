@@ -11,6 +11,7 @@
  *
  * Tables (in the core DB): streams · stream_events (+ FTS5 mirror) · stream_members · stream_cursors.
  */
+require('./sqlite-stmt-keep');
 const Database = require('better-sqlite3');
 const DB_PATH = require('./db-path').coreDbPath();
 const fs = require('fs');
@@ -18,7 +19,7 @@ const path = require('path');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL'); // exec, not pragma(): Node 24 GC of throwaway Statement ABRTs
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS streams (
