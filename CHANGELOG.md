@@ -13,6 +13,19 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
+- **Connector telemetry no longer silently dropped (`android`, `device`, `remote-desktop`, `notify`).**
+  `connectors/sdk` defaults every connector's emit surface to its connector *type*, but `buildEvent()`
+  validates against a separate, hand-maintained `SURFACES` list — so any connector whose type was not
+  *also* a surface had **every** event rejected and thrown away. The mobile app was the visible victim:
+  its surface reported 0 tokens in Insights/Usage while turns really ran, and the only trace was
+  thousands of `unknown surface: android` lines in the process log. `shared/events.js` now maps
+  channel → surface at the single `buildEvent()` choke point that every producer (core's `record()`,
+  connectors' `ctx.emit`, the collector's ingest and tailer) funnels through. Channel names stay
+  intact where they are routing-critical — `asmltr send android <device> --file …`, channel-specific
+  prompt behaviour, and the moderation `platform` are unchanged. Both fail-silent drop sites now log,
+  and core additionally re-emits an `event-dropped` marker on the always-valid `core` surface so the
+  next hole shows up in the dashboard rather than only in logs. A new test asserts every
+  `connectors/types/*/meta.type` resolves to a valid surface, so the two lists cannot drift again.
 
 ## [0.16.1] - 2026-08-24
 
