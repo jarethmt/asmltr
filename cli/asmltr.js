@@ -749,12 +749,12 @@ function webOwnerId() {
 /**
  * Local one-shot turn against asmltr-core. CLI is NOT a trust channel — this
  * posts the same assistant-web envelope the dashboard does. Core stamps
- * sender.raw_id from ASMLTR_WEB_OWNER_ID (ivy: owner). conversation_key is
+ * sender.raw_id from ASMLTR_WEB_OWNER_ID (example: owner). conversation_key is
  * stable so grok `-r` resume works. No Discord. Needs asmltr-core on 127.0.0.1.
  */
 async function cmdAsk(rest) {
   const text = rest.join(' ').trim();
-  if (!text) throw new Error('usage: asmltr ask "<text>"\n       asmltr chat            local ivy REPL (no Discord, no TUI grok)');
+  if (!text) throw new Error('usage: asmltr ask "<text>"\n       asmltr chat            local REPL (no Discord, no TUI grok)');
   const owner = webOwnerId();
   const conversation_key = process.env.ASMLTR_CLI_SESSION || `assistant-web:local:${owner}`;
   const envelope = {
@@ -784,7 +784,7 @@ async function cmdChat() {
   const readline = require('readline');
   const owner = webOwnerId();
   const key = process.env.ASMLTR_CLI_SESSION || `assistant-web:local:${owner}`;
-  console.log(A.dim(`ivy local chat · ${key} as ${owner} · empty line / quit to exit`));
+  console.log(A.dim(`local chat · ${key} as ${owner} · empty line / quit to exit`));
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const prompt = () => new Promise((res) => rl.question(A.cyn('you> '), res));
   try {
@@ -802,8 +802,8 @@ function cmdHelp() {
   console.log(`${A.bold('asmltr')} — asmltr insights terminal client
 
   asmltr                 live TUI dashboard
-  asmltr ask "<text>"    one local turn with ivy (core / grok, no Discord)
-  asmltr chat            local ivy REPL over the same session (resume UUID)
+  asmltr ask "<text>"    one local turn with the default engine (core / grok, no Discord)
+  asmltr chat            local REPL over the same session (resume UUID)
   asmltr ls              list active sessions
   asmltr map             active sessions grouped by working dir (collision radar)
   asmltr who <path>      which sessions recently touched a file/dir

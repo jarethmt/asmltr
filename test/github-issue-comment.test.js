@@ -25,8 +25,8 @@ test('final comment is last segment only — no thinking, no tool chrome', () =>
 test('empty reply still posts one placeholder line, never a trace dump', () => {
   assert.equal(finalIssueComment([]), '_(no response generated)_');
   assert.equal(issueCommentBodies(null).length, 1);
-  assert.equal(looksLikeEngineTrace(workingPlaceholder('Ivy')), false);
-  assert.match(workingPlaceholder('Ivy'), /Ivy is on it/);
+  assert.equal(looksLikeEngineTrace(workingPlaceholder('Dionysus')), false);
+  assert.match(workingPlaceholder('Dionysus'), /Dionysus is on it/);
 });
 
 test('secrets in the answer are redacted before post', () => {

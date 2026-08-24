@@ -6,7 +6,7 @@ const {
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
   publicBlockHints, pickPublicReply, thoughtBudget,
   isImageGenTool,
-  stripThoughtChrome, quietReplyFromResult, GENERATING_LINE,
+  stripThoughtChrome, quietReplyFromResult, thoughtChipsEnabled, GENERATING_LINE,
 } = require('../shared/step-public');
 
 test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
@@ -17,7 +17,7 @@ test('looksLikePromptLeak: generic prompt-restatement patterns only', () => {
   assert.equal(looksLikePromptLeak('path is /home/someone/.asmltr'), true);
   assert.equal(looksLikePromptLeak('Reading a file'), false);
   assert.equal(looksLikePromptLeak('the answer is 42'), false);
-  assert.equal(looksLikePromptLeak('The user is Ada (ada-id) asking me (Ivy) in #room'), true);
+  assert.equal(looksLikePromptLeak('The user is Ada (ada-id) asking me (Dionysus) in #room'), true);
   assert.equal(looksLikePromptLeak('This is a Discord message in #food'), true);
   assert.equal(looksLikePromptLeak('I was @-mentioned, so I should reply'), true);
   assert.equal(looksLikePromptLeak('Let me search the recipe board'), false);
@@ -91,6 +91,43 @@ test('stripThoughtChrome: email/mcp drop chips and thought preamble, keep the an
   assert.equal(q, '**What worked**\nYou did not take $1,000.');
 });
 
+test('thoughtChipsEnabled: default on; instance config wins; env off', () => {
+  assert.equal(thoughtChipsEnabled({}, {}), true);
+  assert.equal(thoughtChipsEnabled(undefined, {}), true);
+  assert.equal(thoughtChipsEnabled({ stream_steps: true }, { ASMLTR_STREAM_STEPS: 'false' }), true);
+  assert.equal(thoughtChipsEnabled({ stream_steps: false }, { ASMLTR_STREAM_STEPS: 'true' }), false);
+  assert.equal(thoughtChipsEnabled({}, { ASMLTR_STREAM_STEPS: 'false' }), false);
+  assert.equal(thoughtChipsEnabled({}, { ASMLTR_THOUGHT_CHIPS: 'off' }), false);
+  assert.equal(thoughtChipsEnabled({}, { ASMLTR_STREAM_STEPS: 'on' }), true);
+});
+
+test('stripThoughtChrome: plan paragraph above a salutation is not mailed', () => {
+  const leaked = [
+    'Photo is two CyberPower PR2200LCDRT2U units. OEM cartridge is RB1290X4F — I’ll send the Amazon links and flag that you need two, one per unit.',
+    '',
+    'Alex,',
+    '',
+    'Those are two CyberPower PR2200LCDRT2U units. Each takes one RB1290X4F.',
+  ].join('\n');
+  const out = stripThoughtChrome(leaked);
+  assert.equal(out.startsWith('Alex,'), true, out.slice(0, 80));
+  assert.equal(out.includes('I’ll send'), false);
+  assert.equal(out.includes('flag that'), false);
+  assert.ok(out.includes('RB1290X4F'));
+  assert.equal(stripThoughtChrome('Alex,\n\nThe SPF is fixed.'), 'Alex,\n\nThe SPF is fixed.');
+  assert.equal(
+    stripThoughtChrome('Working through the photos.\n\nDear Alex,\n\nThe invoice is attached.'),
+    'Dear Alex,\n\nThe invoice is attached.'
+  );
+  const signed = 'The SPF is fixed.\n\nSincerely,\nDionysus';
+  assert.equal(stripThoughtChrome(signed), signed);
+  const q2 = quietReplyFromResult({
+    segments: [leaked],
+    text: leaked,
+  });
+  assert.equal(q2.startsWith('Alex,'), true);
+});
+
 test('discordThoughtLine: leaky bubbles dropped whole; safe intent becomes 💭 chip', () => {
   assert.equal(discordThoughtLine('CURRENT SPEAKER — READ FIRST, TRUST THIS'), '');
   assert.equal(discordThoughtLine('I should open identity.md next'), '');
@@ -111,6 +148,7 @@ test('Discord never renderSteps raw thought text', () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '../connectors/types/discord/index.js'), 'utf8');
   assert.equal(src.includes("renderStep('💭 '"), false);
   assert.match(src, /discordThoughtLine/);
+  assert.match(src, /thoughtChipsEnabled\(cfg\)/);
   assert.match(src, /onThinking:/);
   assert.match(src, /if \(quietImageGen \|\| maxThoughts <= 0\) return;/);
   assert.match(src, /not xhigh: 💭 only, no tooling/);
