@@ -3,15 +3,14 @@
  * asmltr connector type: DISCORD — full-feature Discord adapter.
  *
  * All Discord-specific behavior stays HERE (the plugin): hierarchical memory,
- * autonomous-participation logic, control commands, code-block reformat +
+ * autonomous-participation logic, control commands, fenced-block split +
  * chunking, and the /send-message HTTP endpoint (message-discord depends on it).
  * The LLM turn goes through asmltr-core: the rich Discord context + server-aware
  * authorization rides as `system_prompt_extra`; content.text is the clean user
- * message (so moderation + identity work correctly). Per-guild continuity comes
- * from the core's session resume (conversation_key), replacing the old per-server
- * session-ids file.
+ * message (so moderation + identity work correctly). Continuity is per-channel
+ * (conversation_key), not per-guild. DMs are per user.
  *
- * conversation_key = discord:<instanceId>:guild:<guildId>  (DMs: :dm:<userId>)
+ * conversation_key = discord:<instanceId>:channel:<channelId>  (DMs: :dm:<userId>)
  */
 
 const fs = require('fs');
@@ -19,7 +18,6 @@ const path = require('path');
 const express = require('express');
 const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, Status } = require('discord.js');
 const { requireConnectorToken } = require('../../../shared/connector-http-auth');
-const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 // THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
 const sharedTts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
@@ -33,14 +31,24 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 // Self-gating sentinel: in a multi-agent channel the model emits ONLY this token when a
 // message isn't meant for it, and the connector drops the reply instead of posting it.
 const NO_REPLY = '[[NO_REPLY]]';
+const { isNoReplySentinel } = require('../../../shared/silence');
+const { parseReact } = require('../../../shared/react-token');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
+const { injectBy } = require('./inject-by');
+const { splitResponse } = require('../../../shared/discord-split');
+const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
+const { referentPromptBlock, shouldQueueLateMedia, isReplyToUs } = require('./referent');
+const { updateResetArgv, fetchOriginArgv } = require('../../../shared/update-ref');
+const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 // The model sometimes PARAPHRASES the sentinel ("No response requested.", "No reply needed",
 // "[no response]") instead of emitting the exact token — those must be dropped too, or the
 // paraphrase gets posted as a message. The length guard keeps a genuine reply that merely
 // mentions the phrase from being swallowed: only a short, self-contained refusal counts as silence.
+// The token itself is exact / last-line only — a mention in a real reply must still post.
 function isSilence(text) {
   const t = String(text || '').trim();
   if (!t) return true;
-  if (t.toUpperCase().includes(NO_REPLY.toUpperCase())) return true;
+  if (isNoReplySentinel(t)) return true;
   const s = t.replace(/^[[(*\s]+|[\])*.!\s]+$/g, '').toLowerCase();
   return s.length <= 40 && /^(no\s+(response|reply|comment)|n\/?a|silent)(\s+(requested|needed|required|necessary|expected|warranted|here|for me))?$/.test(s);
 }
@@ -61,11 +69,11 @@ const meta = {
   type: 'discord',
   displayName: 'Discord',
   supportsMultiple: true,
-  capabilities: { max_message_chars: 2000, supports_markdown: true, supports_code_blocks: false, supports_attachments_out: true },
+  capabilities: { max_message_chars: 2000, supports_markdown: true, supports_code_blocks: true, supports_attachments_out: true },
   credentialKeys: ['bot_token_bws_key'],
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
-  outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. TD-TSD-main)' } },
+  outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. general)' } },
   // Per-unit monitoring on/off: the assistant sits in many Discord channels and decides when to
   // chime in; each can be individually muted via the connector's /channels endpoint (no restart).
   // The dashboard reads this to know a session is mutable (matching a channel_id in the roster).
@@ -93,8 +101,8 @@ const meta = {
       voice_barge_in: { type: 'boolean', title: 'Voice: barge-in — let someone interrupt a spoken reply by talking over it (off = quieter in noisy/cross-talk meetings)', default: true },
       voice_realtime: { type: 'boolean', title: 'Voice: realtime streaming transcription (server-VAD turn-taking + live captions) instead of batch-per-utterance', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
-      stream_steps: { type: 'boolean', title: 'Post intermediary narration steps to the thread live as they land (only when directly addressed)', default: true },
-      stream_tools: { type: 'boolean', title: 'Also post a subdued line for each tool call while streaming steps', default: false },
+      stream_steps: { type: 'boolean', title: 'Post sanitized 💭 thought chips when addressed. medium/high: 💭 only. xhigh: 💭 plus tool / Working chips. Never raw thoughts.', default: true },
+      stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
       channels_default: { type: 'boolean', title: 'Listen in channels by default (false = allowlist: ignore every channel except ones you enable)', default: true },
@@ -129,7 +137,7 @@ async function start(ctx) {
   const dataDir = cfg.data_dir || path.join(__dirname, '..', '..', 'manager', 'data');
   const memoryFile = path.join(dataDir, `discord-${ctx.instanceId}-memory.json`);
 
-  // channel aliases for unified outbound (TD-TSD-main → channel id)
+  // channel aliases for unified outbound (alias → channel id)
   let aliases = {};
   try { aliases = JSON.parse(fs.readFileSync(cfg.aliases_file || path.join(__dirname, 'channel-aliases.json'), 'utf8')).aliases || {}; } catch (_) {}
   const resolveChannel = (t) => aliases[t] || t;
@@ -137,11 +145,26 @@ async function start(ctx) {
   // --- state ---
   let memory = { servers: {}, globalTimeline: [] };
   const processing = new Map();
+  const lateMedia = new Map(); // cid -> message (same-author upload during a turn; run after)
   const pendingReply = new Map(); // cid -> { timer, message, forced } — the reply-debounce quiet-window
   let silenced = false;
   let lastResponseTime = 0;
   const responseCount = new Map();
   const recentReplies = new Map(); // cid -> last few reply texts (dedup verbatim repeats)
+  // Access principal ids / names / mailboxes for public 💭 + reply drop. Runtime, not a git denylist.
+  let identityHints = [];
+  let identityHintKinds = new Map();
+  let identityHintsAt = 0;
+  async function loadIdentityHints() {
+    if (Date.now() - identityHintsAt < 60 * 1000) return identityHints;
+    try {
+      const list = ctx.core.trustPrincipals ? await ctx.core.trustPrincipals() : [];
+      identityHints = identityHintsFrom(list || []);
+      identityHintKinds = identityHintKindMap(list || []);
+    } catch (e) { ctx.log('identity hints failed: ' + e.message); }
+    identityHintsAt = Date.now();
+    return identityHints;
+  }
   // persisted per-instance settings: per-channel enable/disable + engage-all-bots toggle.
   // channelStates holds EXPLICIT per-channel overrides (cid -> bool); channelsDefault decides
   // any channel without an override. default=true → "listen everywhere except disabled" (blocklist);
@@ -220,6 +243,7 @@ async function start(ctx) {
   function shouldRespondTo(message) {
     if (message.channel.type === 1) return message.author.id === dmUser; // DM: only the owner
     if (message.mentions.has(client.user)) return true;
+    if (isReplyToUs(message, client.user && client.user.id)) return true;
     if (message.attachments.size > 0) return true;
     const now = Date.now();
     if (now - lastResponseTime < minInterval) return false;
@@ -266,6 +290,7 @@ async function start(ctx) {
   function isAddressed(message, forced) {
     if (forced || message.channel.type === 1) return true;
     if (message.mentions.has(client.user)) return true;
+    if (isReplyToUs(message, client.user && client.user.id)) return true;
     const botMember = message.guild ? (message.guild.members.me || message.guild.members.cache.get(client.user.id)) : null;
     return !!botMember && message.mentions.roles.some((r) => botMember.roles.cache.has(r.id));
   }
@@ -312,14 +337,29 @@ async function start(ctx) {
         await doLeaveVoice(message); return true;
       case 'stop': case 'cancel': case 'abort': case 'halt': {
         // Interrupt the running turn for THIS channel AND fan the stop through to a live voice session
-        // joined from this channel (#138). The session survives and stays resumable. 🤷 if nothing ran.
+        // joined from this channel (#138). Starter or owner only for a running text turn (V2) —
+        // a mid-turn steerer who did not start it cannot abort. Do not put stop in OWNER_ONLY_CMDS.
+        // Session survives; next message continues it.
+        const slot = processing.get(cid);
         const gid = message.guild?.id;
         let voice; try { voice = require('./voice'); } catch (_) {}
         const originCh = gid ? voiceText.get(gid) : null;
         const voiceHere = !!(gid && voice && voice.isConnected(gid) && (!originCh || originCh.id === message.channel.id));
+        if (slot) {
+          const starterId = starterIdFromSlot(slot);
+          const owner = await isOwner(message);
+          if (!canAbortTurn({ isOwner: owner, authorId: message.author.id, starterId })) {
+            await message.react('🙅').catch(() => {});
+            await message.channel.send('Only the person who started this turn (or my owner) can stop it.').catch(() => {});
+            return true;
+          }
+        } else if (!voiceHere) {
+          await message.react('🤷').catch(() => {});
+          return true;
+        }
         let acted = false;
         if (voiceHere) { const s = await stopVoiceReply(gid, { chime: false }); acted = acted || s; }
-        if (processing.get(cid)) {
+        if (slot) {
           try { await ctx.core.abort(convKeyFor(message)); acted = true; }
           catch (e) { ctx.log('abort failed: ' + e.message); await message.channel.send('⚠ Couldn\'t stop the current turn.'); }
         }
@@ -380,41 +420,65 @@ RESPONSE RULES:
 1. Your text output IS the Discord message — do NOT call any external send/notify tool; just output the text.
 2. Output ONLY your conversational response — no summary/narration afterward.
 3. Keep it conversational and substantive (under ~1500 chars ideally).
-4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.`;
+4. If this message is not for you (see MULTI-AGENT CHANNEL), output ONLY the literal token ${NO_REPLY} and nothing else — do not explain, do not greet, just the token. Do NOT paraphrase it: writing "No response requested", "No reply needed", "N/A", or any prose instead of the exact token will get POSTED to the channel as spam. The verbatim token ${NO_REPLY} is the only way to stay silent.
+5. Sparse color reaction (not every post): if THIS message is extra — extra funny, outrageous, a Homer d'oh / facepalm, genuinely wild, or a rare salute — you MAY add a single line \`[[REACT:😂]]\` using one of: 😂 🤣 💀 🤯 🫠 🤡 😳 🤦 😬 😅 🔥 🫡 🙌 💯 🤨 🙄. Do NOT react to ordinary chat. At most one. React and reply are NOT mutually exclusive: if the conversation is ongoing, react AND write the reply (REACT line + your text). If there is really nothing else to say, react-only is enough (REACT line, and ${NO_REPLY} so no message posts). Never use 👀 (mid-turn steer) or 🛑 (stop).
+${referentPromptBlock()}`;
   }
 
-  function formatCodeBlocks(text) {
-    return text.replace(/```(?:\w+)?\n([\s\S]*?)```/g, (m, code) => '\n' + code.split('\n').map(l => '    ' + l).join('\n') + '\n');
-  }
-  // Live "thinking step" — an intermediary narration block, rendered subdued (Discord subtext)
-  // so it reads as process, not the final answer. Clamped so a long step can't wall the thread.
+  // Subdued Discord line helper. Tool chips are built in shared/step-public (not raw thoughts).
   const streamSteps = cfg.stream_steps !== false;
   const streamTools = cfg.stream_tools === true;
   function renderStep(t) {
     const clamped = t.length > 700 ? t.slice(0, 700) + '…' : t;
     return clamped.split('\n').map(l => '-# ' + (l.trim() ? l : '​')).join('\n').slice(0, 1900);
   }
-  function splitResponse(text, max = 1900) {
-    // Pack paragraphs into <=max chunks AND hard-split any single paragraph longer than max
-    // (e.g. a big code block with no blank lines) — otherwise it goes out as one >2000-char
-    // message and Discord rejects it with "Invalid Form Body".
-    const chunks = []; let cur = '';
-    const flush = () => { const t = cur.trim(); if (t) chunks.push(t); cur = ''; };
-    for (let para of String(text || '').split('\n\n')) {
-      while (para.length > max) {
-        flush();
-        let cut = para.lastIndexOf('\n', max);          // prefer a line boundary
-        if (cut <= 0) cut = para.lastIndexOf(' ', max);  // else a word boundary
-        if (cut <= 0) cut = max;                         // else a hard cut
-        const piece = para.slice(0, cut).trim();
-        if (piece) chunks.push(piece);
-        para = para.slice(cut);
-      }
-      if ((cur + '\n\n' + para).length > max) flush();
-      cur += (cur ? '\n\n' : '') + para;
+
+  async function persistInboundMedia(message, conversationKey) {
+    const inboundMedia = require('../../../shared/inbound-media');
+    const imageAttachments = [];
+    const mediaFiles = [];
+    const savedNotes = [];
+    if (!message || !message.attachments || message.attachments.size === 0) {
+      return { imageAttachments, mediaFiles, savedNotes };
     }
-    flush();
-    return chunks;
+    for (const a of message.attachments.values()) {
+      const mt = (a.contentType || '').split(';')[0].trim();
+      const claimed = Number(a.size) || 0;
+      if (claimed > inboundMedia.MAX_VIDEO) {
+        savedNotes.push(`- ignored ${a.name}: too large`);
+        continue;
+      }
+      try {
+        const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
+        const cls = inboundMedia.classify(buf, mt, a.name);
+        if (!cls.kind) {
+          savedNotes.push(`- ignored ${a.name} (${mt || 'unknown'}): not a still image or video — not opened`);
+          continue;
+        }
+        const saved = inboundMedia.saveRef(buf, { name: a.name, mime: mt });
+        if (!saved.ok) {
+          savedNotes.push(`- ignored ${a.name}: ${saved.error}`);
+          continue;
+        }
+        try {
+          ctx.uploads.save({
+            channel: 'discord', instance: ctx.instanceId, buffer: buf,
+            filename: a.name, mime: saved.mime, kind: saved.kind,
+            caption: message.content || '', sender: message.author && message.author.username, senderId: message.author && message.author.id,
+            conversationKey,
+          });
+        } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
+        mediaFiles.push({ kind: saved.kind, path: saved.path, mime: saved.mime, name: saved.name });
+        if (saved.kind === 'image' && imageAttachments.length < 5) {
+          imageAttachments.push({ type: 'image', media_type: saved.mime, data: buf.toString('base64'), name: a.name, path: saved.path });
+        }
+        savedNotes.push(`- ${saved.kind}: ${saved.name} (generation reference; do not execute)`);
+      } catch (e) {
+        ctx.log(`[att] download failed ${a.name}: ${e.message}`);
+        savedNotes.push(`- ${a.name}: could not download`);
+      }
+    }
+    return { imageAttachments, mediaFiles, savedNotes };
   }
 
   async function handleMessage(message, forced) {
@@ -425,21 +489,32 @@ RESPONSE RULES:
       // don't start a concurrent turn. The core folds it into the work in progress and continues; its
       // reply comes back out to the channel via the stored outbound route. Non-addressed chatter is still
       // ignored so idle channel noise can't derail the work. (`@handle stop` interrupts — handled earlier.)
+      // Same-author uploads during the turn are SAVED (so "look up" can find them) and run as their
+      // own turn after this one — not a look-ahead wait. Bystander attachments are not persisted
+      // into this conversation's uploads while the lock is held.
+      const slot = processing.get(cid);
+      if (shouldQueueLateMedia(slot, message)) {
+        try { await persistInboundMedia(message, convKeyFor(message)); }
+        catch (e) { ctx.log('late media save failed: ' + e.message); }
+        lateMedia.set(cid, message);
+      }
       if (isAddressed(message, forced)) {
         const guidance = String(message.content || '').replace(/<@[!&]?\d+>/g, ' ').replace(/\s+/g, ' ').trim();
         if (guidance) {
-          ctx.core.inject(convKeyFor(message), guidance, { by: 'operator', interrupt: false })
+          const by = injectBy(await isOwner(message), message.author.id);
+          ctx.core.inject(convKeyFor(message), guidance, { by, interrupt: false })
             .then(() => message.react('👀').catch(() => {}))
             .catch((e) => ctx.log('mid-turn steer failed: ' + e.message));
         }
       }
       return;
     }
-    processing.set(cid, true);
+    processing.set(cid, { starterId: String(message.author.id) });
     // Discord's typing indicator auto-expires after ~10s. Re-trigger it every
     // 8s so the "…is typing" shows for the ENTIRE (possibly multi-minute)
     // processing time, not just the first few seconds. Cleared in finally.
     let typingInterval = null;
+    let stopBeat = () => {};
     try {
       await message.channel.sendTyping();
       typingInterval = setInterval(() => { message.channel.sendTyping().catch(() => {}); }, 8000);
@@ -451,40 +526,19 @@ RESPONSE RULES:
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
       let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
       text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
-      // Vision: download supported image attachments and pass them as real image
-      // content (base64) so the assistant actually SEES them — not a CDN URL it can't open.
-      // Non-image / oversized / unsupported attachments stay as a text URL mention.
-      const SUPPORTED_IMG = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-      const MAX_IMG_BYTES = 5 * 1024 * 1024;
-      const imageAttachments = [];
-      if (message.attachments.size > 0) {
-        const savedNotes = [];
-        // Register every inbound attachment on the shared, channel-agnostic upload surface so
-        // it's findable from any channel — and so non-image files survive Discord's expiring
-        // CDN URLs (we keep the bytes on disk, not just a link).
-        const register = (buf, a, kind) => {
-          try {
-            const rec = ctx.uploads.save({
-              channel: 'discord', instance: ctx.instanceId, buffer: buf,
-              filename: a.name, mime: (a.contentType || '').split(';')[0].trim() || 'application/octet-stream', kind,
-              caption: message.content || '', sender: message.author.username, senderId: message.author.id,
-              conversationKey,
-            });
-            savedNotes.push(`- ${kind || 'file'}: ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
-          } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
-        };
-        for (const a of message.attachments.values()) {
-          const mt = (a.contentType || '').split(';')[0].trim();
-          const isImg = SUPPORTED_IMG.includes(mt);
-          try {
-            const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
-            register(buf, a, isImg ? 'image' : 'file');
-            if (isImg && imageAttachments.length < 5 && (a.size || 0) <= MAX_IMG_BYTES) {
-              imageAttachments.push({ type: 'image', media_type: mt, data: buf.toString('base64'), name: a.name });
-            }
-          } catch (e) { ctx.log(`[att] download failed ${a.name}: ${e.message}`); savedNotes.push(`- ${a.name} (${a.contentType}): ${a.url} (couldn't download — link only)`); }
-        }
-        if (savedNotes.length) text += '\n\nATTACHMENTS (saved to the shared asmltr upload area, findable via `asmltr uploads`; Read a path to use it):\n' + savedNotes.join('\n');
+      // Image/video only. Magic bytes win. Never persist or open exe/html/js/pdf/zip.
+      // If this message has no still but replies to one, that still IS the referent — pull it in.
+      let mediaSource = message;
+      if ((!message.attachments || message.attachments.size === 0) && message.reference) {
+        const ref = await message.fetchReference().catch(() => null);
+        if (ref && ref.attachments && ref.attachments.size > 0) mediaSource = ref;
+      }
+      const persisted = await persistInboundMedia(mediaSource, conversationKey);
+      const imageAttachments = persisted.imageAttachments;
+      const mediaFiles = persisted.mediaFiles;
+      if (persisted.savedNotes.length) {
+        const viaReply = mediaSource !== message ? ' (from the message this replies to)' : '';
+        text += '\n\nCHANNEL MEDIA' + viaReply + ':\n' + persisted.savedNotes.join('\n');
       }
       // server + channel names ride in channel_context → the core records them on the inbound
       // event (and the collector stores them on the session) so the dashboard shows where a
@@ -494,7 +548,7 @@ RESPONSE RULES:
         conversation_key: conversationKey,
         message_id: String(message.id),
         sender: { raw_id: String(message.author.id), raw_username: message.author.username },
-        content: { text, attachments: imageAttachments },
+        content: { text, attachments: imageAttachments, media_files: mediaFiles },
         delivery: 'sync',
         capabilities: meta.capabilities,
         public: message.channel.type !== 1, // guild channel = public; DM (type 1) = private
@@ -511,31 +565,124 @@ RESPONSE RULES:
       const addressed = forced || message.channel.type === 1 || message.mentions.has(client.user)
         || addressesName(message.cleanContent || message.content || '');
       let replyText = '';
+      let leakDropped = false;
+      let actions = [];
+      const hints = [...new Set([...speakerHintsFrom(message.author, message.member), ...(await loadIdentityHints())])];
+      const hintKinds = mergeSpeakerLastNames(identityHintKinds, message.author, message.member);
+      const blockHints = publicBlockHints(hints, hintKinds);
       if (streamSteps && addressed) {
         // Hold the latest narration block in `pending`; flush it as a live step the moment its
         // boundary closes — either a tool call starts (the common case: post immediately, no lag)
         // or a new narration block begins. The block still open at `done` is the final answer.
-        let pending = '', sawNoReply = false, chain = Promise.resolve();
+        let pending = '', sawNoReply = false, chain = Promise.resolve(), lastChip = '';
+        let beatTimer = null;
+        // Image gen: core classifies first. No chips until effort.imageGen (or image_gen tool).
+        let quietImageGen = false;
+        let maxThoughts = thoughtBudget('medium');
+        let thoughtsPosted = 0;
         const enqueue = (fn) => { chain = chain.then(fn).catch(() => {}); };
-        const flushStep = () => {
-          const clean = (pending || '').trim(); pending = '';
-          if (!clean) return;
-          if (isSilence(clean)) { sawNoReply = true; return; }
-          if (sawNoReply) return;
-          enqueue(() => message.channel.send(renderStep(clean)));
+        stopBeat = () => { if (beatTimer) { clearTimeout(beatTimer); beatTimer = null; } };
+        const armBeat = () => {
+          if (quietImageGen || maxThoughts !== Infinity) return; // medium/high/image-gen: no Still working
+          stopBeat();
+          beatTimer = setTimeout(() => {
+            beatTimer = null;
+            if (sawNoReply) return;
+            lastChip = STILL_WORKING_LINE;
+            enqueue(() => message.channel.send(STILL_WORKING_LINE));
+            armBeat();
+          }, THINK_HEARTBEAT_MS);
         };
-        const actions = await ctx.core.handleStream(envelope, {
-          onSegment: (t) => { flushStep(); pending = t; },  // a new block ⇒ the prior one was intermediary
-          onTool: (name) => { flushStep(); if (streamTools) enqueue(() => message.channel.send(`-# 🔧 \`${name}\``)); }, // a tool ⇒ post the block NOW
+        const postChip = (line) => {
+          if (!line || line === lastChip) return false;
+          lastChip = line;
+          enqueue(() => message.channel.send(line));
+          armBeat();
+          return true;
+        };
+        const enterImageGenQuiet = () => {
+          quietImageGen = true;
+          maxThoughts = 0;
+          stopBeat();
+          postChip(GENERATING_LINE);
+        };
+        const holdAnswer = (t) => {
+          const clean = String(t || '').trim();
+          if (!clean) { pending = ''; return; }
+          if (isSilence(clean)) { sawNoReply = true; pending = ''; stopBeat(); return; }
+          if (looksLikePromptRestatement(clean) || (envelope.public && privacyHitKind(clean, hints, hintKinds))) {
+            pending = '';
+            leakDropped = true;
+            return;
+          }
+          leakDropped = false;
+          pending = t;
+        };
+        actions = await ctx.core.handleStream(envelope, {
+          onEffort: (effort, meta) => {
+            if (meta && meta.imageGen) {
+              enterImageGenQuiet();
+              return;
+            }
+            maxThoughts = thoughtBudget(effort, { imageGen: quietImageGen });
+          },
+          onSegment: (t) => { holdAnswer(t); },
+          onTool: (tool) => {
+            pending = '';
+            if (sawNoReply) return;
+            if (isImageGenTool(tool)) {
+              enterImageGenQuiet();
+              return;
+            }
+            if (quietImageGen) return;
+            if (maxThoughts !== Infinity) return; // not xhigh: 💭 only, no tooling
+            const line = discordToolLine(streamTools, tool);
+            if (!line) return;
+            postChip(line);
+          },
+          // Engine-agnostic: Claude/Grok/Gemini/Codex all use onThinking. No-op if none.
+          onThinking: (t) => {
+            if (sawNoReply) return;
+            if (quietImageGen || maxThoughts <= 0) return;
+            const line = discordThoughtLine(t, hints, hintKinds);
+            if (line && thoughtsPosted < maxThoughts) {
+              thoughtsPosted += 1;
+              postChip(line);
+              return;
+            }
+            if (maxThoughts !== Infinity) return; // no Working filler on medium/high
+            if (!lastChip) postChip(WORKING_LINE);
+            else if (!beatTimer) armBeat();
+          },
         });
+        stopBeat();
         await chain; // all step messages posted before the final answer
         const reply = actions.find(a => a.type === 'reply');
-        replyText = ((pending && pending.trim()) || (reply ? reply.text.trim() : '')).trim();
+        replyText = pickPublicReply({
+          pending,
+          replyText: reply ? reply.text.trim() : '',
+          leakDropped,
+          publicSurface: !!envelope.public,
+          hints,
+          hintKinds,
+        });
       } else {
-        const actions = await ctx.core.handle(envelope);
+        actions = await ctx.core.handle(envelope);
         const reply = actions.find(a => a.type === 'reply');
-        replyText = reply ? reply.text.trim() : '';
+        replyText = pickPublicReply({
+          pending: '',
+          replyText: reply ? reply.text.trim() : '',
+          leakDropped: false,
+          publicSurface: !!envelope.public,
+          hints,
+          hintKinds,
+        });
       }
+      const color = parseReact(replyText);
+      replyText = color.text;
+      const fromCore = actions.find((a) => a && a.type === 'react');
+      const reactEmoji = color.emoji || (fromCore && fromCore.emoji) || '';
+      if (reactEmoji) await message.react(reactEmoji).catch((e) => ctx.log('react failed: ' + e.message));
       // Self-gated suppression: the model decided this message wasn't for it (multi-agent
       // channel), or there's nothing to say. Drop it — don't post to the channel.
       if (isSilence(replyText)) { ctx.log(`suppressed reply (not addressed to ${NAME})`); return; }
@@ -544,7 +691,7 @@ RESPONSE RULES:
       const recents = recentReplies.get(cid) || [];
       if (recents.includes(replyText)) { ctx.log('suppressed duplicate reply (verbatim repeat of a recent message)'); return; }
       recents.push(replyText); if (recents.length > 6) recents.shift(); recentReplies.set(cid, recents);
-      for (const chunk of splitResponse(formatCodeBlocks(replyText))) await message.channel.send(chunk);
+      for (const chunk of splitResponse(replyText)) await message.channel.send(chunk);
       saveMemory(message, NAME, replyText);
       lastResponseTime = Date.now();
       responseCount.set(cid, (responseCount.get(cid) || 0) + 1);
@@ -553,8 +700,16 @@ RESPONSE RULES:
       ctx.log('handle error: ' + e.message);
       await message.channel.send('⚠️ I hit an error processing that. Recalibrating...').catch(() => {});
     } finally {
+      try { stopBeat(); } catch (_) {}
       if (typingInterval) clearInterval(typingInterval);
       processing.delete(cid);
+      const queued = lateMedia.get(cid);
+      if (queued) {
+        lateMedia.delete(cid);
+        setImmediate(() => {
+          handleMessage(queued, true).catch((e) => ctx.log('late media turn failed: ' + e.message));
+        });
+      }
     }
   }
 
@@ -1014,10 +1169,19 @@ RESPONSE RULES:
   // `update-asmltr` command: pull the latest code, reinstall deps, and restart — DETACHED so the
   // restart survives this very connector being cycled — then confirm in-channel after it's back up.
   async function doUpdateAsmltr(message) {
-    const { exec, spawn, execSync } = require('child_process');
+    const { exec, spawn, execSync, execFile, execFileSync } = require('child_process');
     const repo = path.join(__dirname, '..', '..', '..'); // connectors/types/discord → repo root
     await message.channel.send('🔄 Updating asmltr — pulling latest + reinstalling. I\'ll confirm here once the restart completes (~15s).').catch(() => {});
-    exec('git fetch origin && git reset --hard origin/main', { cwd: repo, timeout: 120000 }, (e1, o1, s1) => {
+    let branch;
+    try { branch = execFileSync('git', ['-C', repo, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', timeout: 15000 }).trim(); }
+    catch (e0) { message.channel.send(`⚠️ Update failed (branch): ${String(e0.message).slice(0, 400)}`).catch(() => {}); return; }
+    let resetArgv, fetchArgv;
+    try { resetArgv = updateResetArgv(branch); fetchArgv = fetchOriginArgv(branch); }
+    catch (e0) { message.channel.send(`⚠️ Update failed (ref): ${String(e0.message).slice(0, 400)}`).catch(() => {}); return; }
+    execFile('git', ['-C', repo, ...fetchArgv], { timeout: 120000 }, (e1, o1, s1) => {
+      if (e1) { message.channel.send(`⚠️ Update failed (git): ${String(s1 || e1.message).slice(0, 400)}`).catch(() => {}); return; }
+      execFile('git', ['-C', repo, ...resetArgv], { timeout: 120000 }, (e1b, o1b, s1b) => {
+      const e1 = e1b, o1 = o1b, s1 = s1b;
       if (e1) { message.channel.send(`⚠️ Update failed (git): ${String(s1 || e1.message).slice(0, 400)}`).catch(() => {}); return; }
       exec('for d in core connectors insights/collector cli; do (cd "$d" && npm install) || exit 1; done', { cwd: repo, timeout: 600000, shell: '/bin/bash' }, (e2, o2, s2) => {
         if (e2) { message.channel.send(`⚠️ Update failed (npm install): ${String(s2 || e2.message).slice(0, 400)}`).catch(() => {}); return; }
@@ -1030,6 +1194,7 @@ RESPONSE RULES:
         const script = 'sleep 5; pm2 restart asmltr-core asmltr-insights-collector asmltr-connector-manager';
         try { spawn('setsid', ['bash', '-c', script], { detached: true, stdio: 'ignore', cwd: repo }).unref(); }
         catch (e3) { message.channel.send(`⚠️ Update installed but restart-launch failed: ${e3.message}`).catch(() => {}); }
+      });
       });
     });
   }
@@ -1086,11 +1251,50 @@ RESPONSE RULES:
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
   });
   // Unified outbound endpoint (manager /send router → here). Resolves aliases.
+  // File posts (`kind: file` + path) are how `asmltr post` attaches without Bash:
+  // stage a safe name, POST here, delete the staged copy only after messageId.
   app.post('/out', requireConnectorToken, async (req, res) => {
     try {
-      const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
+      const { kind = 'text', target: tg, text, path: filePath, caption, source_guild, on_behalf_of, reply_to, title, source_channel, query } = req.body || {};
+      if (kind === 'guild_resolve') {
+        // Mute/disable is inbound only. Name lookup includes muted channels/threads.
+        const gp = require('../../../shared/guild-post');
+        const q = String(query || tg || '').trim();
+        if (!source_guild) return res.status(400).json({ ok: false, error: 'source guild required' });
+        if (!q) return res.status(400).json({ ok: false, error: 'query required' });
+        const rows = await listGuildPostTargets(client, source_guild, gp);
+        return res.json({ ok: true, posted: false, matches: gp.rankTargets(q, rows) });
+      }
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
-      if (!channel || !channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
+      if (!channel) return res.status(404).json({ ok: false, error: 'channel not found' });
+      if (kind === 'guild_post') {
+        // Mute/disable is inbound only. Cross-post into a muted channel/thread is allowed.
+        const gp = require('../../../shared/guild-post');
+        if (gp.sameChannel(source_channel, channel.id) || gp.sameChannel(source_channel, resolveChannel(tg))) {
+          return res.json({ ok: true, skipped: true, reason: 'same_channel' });
+        }
+        const same = gp.sameGuild(source_guild, gp.destGuildId(channel));
+        if (!same.ok) return res.status(403).json({ ok: false, error: same.error });
+        const pref = gp.prefaceOnBehalf(on_behalf_of, text);
+        if (!pref.ok) return res.status(400).json({ ok: false, error: pref.error });
+        if (gp.isForumChannel(channel)) {
+          const thread = await channel.threads.create({
+            name: gp.forumTitle(title, pref.body || String(text || '')),
+            message: { content: pref.text },
+          });
+          return res.json({ ok: true, messageId: thread.id, threadId: thread.id,
+            conversation_key: `discord:${ctx.instanceId}:channel:${thread.id}` });
+        }
+        if (!channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
+        const opts = { content: pref.text };
+        if (reply_to) opts.reply = { messageReference: String(reply_to) };
+        const posted = await channel.send(opts);
+        const conversation_key = channel.type === 1
+          ? `discord:${ctx.instanceId}:dm:${(channel.recipient && channel.recipient.id) || tg}`
+          : `discord:${ctx.instanceId}:channel:${channel.id}`;
+        return res.json({ ok: true, messageId: posted.id, conversation_key });
+      }
+      if (!channel.isTextBased()) return res.status(404).json({ ok: false, error: 'channel not found / not text' });
       // any file kind (photo/file/attachment/document/image) → send as a Discord attachment
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
@@ -1177,4 +1381,51 @@ RESPONSE RULES:
   };
 }
 
-module.exports = { meta, start };
+/** Name lookup for guild-post: text + announcement + forum + media, plus their threads. */
+async function listGuildPostTargets(client, sourceGuild, gp) {
+  const guild = await client.guilds.fetch(String(sourceGuild));
+  await guild.channels.fetch();
+  const rows = [];
+  const seen = new Set();
+  const add = (row) => {
+    const id = String((row && row.id) || '');
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    rows.push(row);
+  };
+  async function pullThreads(ch) {
+    if (!ch || !ch.threads) return;
+    try {
+      if (ch.threads.fetchActive) {
+        const active = await ch.threads.fetchActive();
+        for (const th of (active.threads || active).values()) {
+          add({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
+        }
+      }
+    } catch (_) {}
+    try {
+      if (ch.threads.fetchArchived) {
+        const arch = await ch.threads.fetchArchived({ limit: 100 });
+        for (const th of (arch.threads || arch).values()) {
+          add({ id: String(th.id), name: th.name, kind: 'thread', parent: ch.name, parentId: String(ch.id) });
+        }
+      }
+    } catch (_) {}
+  }
+  for (const ch of guild.channels.cache.values()) {
+    if (gp.isThreadChannel(ch)) {
+      add({
+        id: String(ch.id), name: ch.name, kind: 'thread',
+        parent: (ch.parent && ch.parent.name) || undefined,
+        parentId: ch.parentId ? String(ch.parentId) : undefined,
+      });
+      continue;
+    }
+    if (gp.isForumChannel(ch)) add({ id: String(ch.id), name: ch.name, kind: 'forum' });
+    else if (gp.isPostableGuildChannel(ch)) add({ id: String(ch.id), name: ch.name, kind: 'channel' });
+    if (gp.shouldFetchThreads(ch)) await pullThreads(ch);
+  }
+  return rows;
+}
+
+module.exports = { meta, start, listGuildPostTargets };
