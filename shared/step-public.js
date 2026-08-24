@@ -25,6 +25,19 @@
 
 const { redactSecrets } = require('./redact');
 
+/**
+ * Personal thought-chip toggle. Default ON.
+ * Precedence: Discord instance `stream_steps` if boolean, else
+ * ASMLTR_STREAM_STEPS / ASMLTR_THOUGHT_CHIPS (true/false/on/off), else true.
+ */
+function thoughtChipsEnabled(cfg, env) {
+  if (cfg && typeof cfg.stream_steps === 'boolean') return cfg.stream_steps;
+  const e = String((env || process.env).ASMLTR_STREAM_STEPS
+    || (env || process.env).ASMLTR_THOUGHT_CHIPS || '').trim().toLowerCase();
+  if (e === '0' || e === 'false' || e === 'off' || e === 'no') return false;
+  return true;
+}
+
 const ACP_TYPE = /^(tool_call|tool_call_update|tool_use|function_call)$/i;
 const THINK_HEARTBEAT_MS = 45000;
 const WORKING_LINE = '-# Working';
@@ -382,7 +395,31 @@ function stripThoughtChrome(text) {
       s = paras.slice(1).join('\n\n').trim();
     }
   }
-  return s;
+  return stripLeadingLetterStart(s);
+}
+
+/** Closings that look like "Name," but are not the start of the letter. */
+const LETTER_CLOSE = /^(sincerely|thanks|thank you|best|cheers|regards|respectfully|cordially|warmly|best regards|kind regards),$/i;
+const LETTER_OPEN = /^(?:dear|hi|hello|hey)\s+[A-Za-z][\w .'-]{0,40},$/i;
+const LETTER_NAME = /^[A-Z][a-z]{1,30},$/;
+
+/**
+ * Email/MCP: if grok glued a plan/thought paragraph above the salutation
+ * ("Name," / "Dear …,"), mail from the greeting only. Closings stay.
+ */
+function stripLeadingLetterStart(text) {
+  const lines = String(text || '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t) continue;
+    if (LETTER_CLOSE.test(t)) continue;
+    if (LETTER_OPEN.test(t) || LETTER_NAME.test(t)) {
+      const before = lines.slice(0, i).join('\n').trim();
+      if (!before) return String(text || '').trim();
+      return lines.slice(i).join('\n').trim();
+    }
+  }
+  return String(text || '').trim();
 }
 
 /** Last narration block, with thought chrome removed. Email/MCP reply body. */
@@ -410,6 +447,6 @@ module.exports = {
   speakerHintsFrom, mentionsSpeaker, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames,
   publicBlockHints, privacyBlockLine, privacyHitKind, lastNameOnlyUnitUses, lastNameIsLanguageUse, pickPublicReply, thoughtBudget,
   isImageGenTool,
-  stripThoughtChrome, quietReplyFromResult,
+  stripThoughtChrome, quietReplyFromResult, thoughtChipsEnabled,
   THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE, THOUGHT_CLAMP,
 };

@@ -12,12 +12,12 @@ const uploads = require('../shared/uploads');
 test('recentSummary lists THIS conversation only; CLI list stays global', () => {
   const a = uploads.save({
     channel: 'discord', buffer: Buffer.from('aaa'), filename: 'king.jpg',
-    caption: 'ivy what is this from', sender: 'wx412',
+    caption: 'what is this from', sender: 'wx412',
     conversationKey: 'discord:i:channel:asmltr', kind: 'image',
   });
   uploads.save({
     channel: 'discord', buffer: Buffer.from('bbb'), filename: 'other.jpg',
-    caption: 'ivy what is this from', sender: 'wx412',
+    caption: 'what is this from', sender: 'wx412',
     conversationKey: 'discord:i:channel:everyone', kind: 'image',
   });
   const mine = uploads.recentSummary(6, { conversationKey: 'discord:i:channel:asmltr' });
