@@ -6,7 +6,7 @@ require('../../../shared/loadenv');
  * The trust store is DEFAULT-DENY — only seeded principals get access.
  * Idempotent: seeds only when the principals table is empty (use --force to wipe + reseed).
  * If no seed file exists, the store simply starts empty; add principals via the Access UI/API.
- * See seed.example.json for the shape.
+ * See seed.example.json for the shape (Access-card friend at default_tier 3).
  */
 const fs = require('fs');
 const path = require('path');

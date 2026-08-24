@@ -19,6 +19,13 @@ in the repo. Per-install private notes live in `CLAUDE.local.md` (gitignored).
    full-autonomy equivalent is `permissionMode: 'bypassPermissions'` (`core/src/runner.js`) **plus
    `IS_SANDBOX=1`** (set in `core/src/server.js` — must be `'1'`, not `'true'`). Never pass the raw
    `dangerously-skip-permissions` flag via `extraArgs`; the modern CLI fatals on it as root.
+5. **This repository is public. No personal or install-specific data in tracked files.** Never
+   commit household / family / staff names, personal or work emails, phone numbers, Discord
+   snowflakes, internal hostnames, live vhosts, home-directory paths, per-box bind ports,
+   backup clocks, or staff directories. Local notes go in `CLAUDE.local.md` (gitignored), the
+   live `.env`, or the Self silo — never in `docs/`, examples, tests, unit files, or anything
+   else that gets pushed. A real address that the code needs (e.g. owner-from email) is an
+   env var, not a string in git.
 
 ## Architecture in one breath
 
@@ -39,6 +46,7 @@ core emits the shared event stream (`shared/events.js`) to the collector; dashbo
   hardcode values or vault-specific commands. Config that carries secrets is gitignored with an `.example` twin.
 - **Paths** come from config/env with portable defaults (`~/.asmltr/...`) — never hardcode host paths.
 - **Identity** is `process.env.ASSISTANT_NAME`; never hardcode the assistant's name in strings/prompts.
+- **Public tree:** no PII, no this-install internals. If it would help an attacker or identify a household, it does not go in git.
 - **New env var?** Add it to `.env.example`. **New secret-bearing file?** Gitignore it + commit `<name>.example`.
 
 ## Dev loop

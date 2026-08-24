@@ -57,7 +57,7 @@ Edit `.env` and set:
 
 - `ASSISTANT_NAME` — what the assistant is called.
 - Secret keys for the channels/features you enable:
-    - `OPENAI_API_KEY` — required (moderation; Discord voice STT).
+    - `OPENAI_API_KEY` — required (moderation + picture-intent classify; Discord voice STT). If unset, picture-intent classify logs once and stays OFF; `image_gen` tools still work.
     - `ELEVENLABS_API_KEY` — only for Discord voice mode.
     - `DISCORD_BOT_TOKEN` / `TELEGRAM_BOT_TOKEN` — for those channels.
     - A GitHub PAT env var (e.g. `MY_GITHUB_PAT`) — you reference its lowercase name as a connector's `pat_bws_key`.
@@ -87,7 +87,12 @@ Then seed:
 node core/src/trust/seed.js
 ```
 
-Add teammates as additional principals (optionally with a limited `role_id`).
+Add teammates as additional principals (optionally with a limited `role_id`). Anyone who should **same-guild Discord post** needs `default_tier` 1–5 (the example `friend` principal uses `3`). Stills/video/code are a separate allowlist:
+
+```bash
+mkdir -p ~/.asmltr
+cp shared/tool-policy.example.json ~/.asmltr/tool-policy.json   # edit locally; no real ids in git
+```
 
 ## 4. Start the host services
 
