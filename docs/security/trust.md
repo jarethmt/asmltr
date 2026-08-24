@@ -8,6 +8,11 @@ that resolves an inbound envelope to effective capabilities on every turn.
     The trust store is **default-deny**. An unknown sender — one whose identifier matches no
     principal — gets **no capabilities at all**. Until you seed the store, nobody has access.
 
+
+!!! warning "Discord is invite-only"
+    The current Discord path (silo on, `observe_only` context on the next @, `announce *`) is for
+    servers you invite people into. A truly public/open Discord is not trusted yet.
+
 ## The trust store (SQLite)
 
 A single SQLite database (`trust.db`, path via `ASMLTR_TRUST_DB`) with four tables:
@@ -91,19 +96,20 @@ Seed file shape (`seed.example.json`):
       "forbidden": ["write", "deploy", "credentials"] }
   ],
   "principals": [
-    { "id": "owner", "display_name": "Owner",
+    { "id": "owner", "display_name": "Owner", "default_tier": 5,
       "identifiers": [
-        { "surface": "discord", "value": "000000000000000000" },
-        { "surface": "telegram", "value": "your_telegram_username" },
-        { "surface": "mcp", "value": "owner" }
+        { "surface": "assistant-web", "value": "owner" },
+        { "surface": "discord", "value": "000000000000000000" }
       ],
       "grants": [ { "bypass_moderation": true, "allow": ["*"] } ] },
-    { "id": "teammate", "display_name": "Teammate",
+    { "id": "friend", "display_name": "Friend", "default_tier": 3,
       "identifiers": [ { "surface": "discord", "value": "111111111111111111" } ],
       "grants": [ { "role_id": "readonly" } ] }
   ]
 }
 ```
+
+`default_tier` **1–5** is an Access card: they may `asmltr guild-post` in the **same** Discord server (not `asmltr send`, not other servers, not DMs/email). Tier 0 cannot. Tiers 6+ cannot. Owner (`bypass_moderation`) always can. Discord ids in the example are placeholders — replace locally; never commit real snowflakes. Stills/video/code allowlists are `~/.asmltr/tool-policy.json` (copy `shared/tool-policy.example.json`).
 
 !!! note "Identifier surfaces"
     `surface` is the connector channel (`discord`, `telegram`, `mcp`, `github`) or `apikey`;

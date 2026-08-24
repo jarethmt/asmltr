@@ -1,8 +1,11 @@
 # HTTP endpoints
 
-Three host services expose HTTP APIs. **All bind `127.0.0.1`** — put a reverse proxy (with
-auth) in front of anything you expose. Ports are configurable (see
+Three host services expose HTTP APIs. **All bind `127.0.0.1`**. Ports are configurable (see
 [Configuration & environment](config.md#ports-inter-service-urls)); defaults are shown below.
+
+Core `/v2` HTTP is only a security boundary when it stays on loopback. It has no caller auth.
+**Do not expose it** (no public bind, no unauthenticated reverse-proxy). If you front manager or
+collector, put auth on that proxy — never punch a hole to core `/v2`.
 
 | Service | Default | Source | Auth |
 |---|---|---|---|

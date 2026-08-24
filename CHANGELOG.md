@@ -9,10 +9,17 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Example configs for ivy exceptions (no PII):** `shared/tool-policy.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.ivy.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_TOOL_POLICY_FILE` in `.env.example` / `env.ivy.example`.
+- **`asmltr guild-post` name lookup** also indexes threads on regular text/announcement channels (not only forums) and media channels.
+- **`asmltr bounce`:** queue a core+manager+collector restart until the current turn ends (then a short delay so Discord/email can post the reply). Inline `systemctl`/`pm2` restarts of the asmltr stack from a live turn are rewritten to the same queue. `--now` is refused inside a turn.
 
 ### Changed
 
 ### Fixed
+- **Discord "email me that" no longer sits on Working and sends twice.** After a mid-turn context cut the origin session distrusted the compaction summary, grepped for proof, and SMTP'd the same reminder again. `asmltr send` now refuses the same email To+subject for 30 minutes (`--force` only if they said it never arrived). Toolbelt: send, confirm here, end the turn — do not wait on another session.
+- **Moderation no longer spends 2–3.5s reasoning on every inbound.** Default classifier `gpt-5-nano` is a reasoning model; the OpenAI call now sets `reasoning_effort: 'minimal'` on gpt-5-family models only (override `ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Decision logs include `duration_ms`. A model that rejects the field is retried without it.
+- **Live chat attach no longer 413s on a ~1.5MB photo.** Dashboard nginx defaulted to 1m; Live sent JSON base64 (~2MB on the wire). Nginx is now 32m; Live POSTs raw bytes like recordings; core caps original files at 25MB.
+- **Discord "Working" lock after a mid-turn bounce.** Still-working heartbeat is always cleared in `finally`, even when `/v2/stream` errors because core died.
 
 ## [0.16.1] - 2026-08-24
 

@@ -1,0 +1,24 @@
+{
+  "_comment": "Example seed. Copy to seed.json then: node core/src/trust/seed.js. Principal id `owner`. Identifier assistant-web:owner matches ASMLTR_WEB_OWNER_ID=owner so web chat and asmltr ask are not default-deny. No real Discord snowflakes, names, or emails in git. Access cards: default_tier 1–5 (example friend uses 3) may same-guild Discord post; add a discord identifier locally before they can match. Stills/video/code allowlists live in ~/.asmltr/tool-policy.json (see shared/tool-policy.example.json), not here.",
+  "roles": [],
+  "principals": [
+    {
+      "id": "owner",
+      "display_name": "Owner",
+      "default_tier": 5,
+      "notes": "Owner of this install. Full trust / bypass_moderation.",
+      "identifiers": [
+        { "surface": "assistant-web", "value": "owner" }
+      ],
+      "grants": [ { "bypass_moderation": true, "allow": ["*"] } ]
+    },
+    {
+      "id": "friend",
+      "display_name": "Friend",
+      "default_tier": 3,
+      "notes": "Example Access card (tier 1–5). Same-guild Discord post allowed. Not owner. Add a discord identifier (numeric user id) locally before seeding — leave empty in git.",
+      "identifiers": [],
+      "grants": []
+    }
+  ]
+}

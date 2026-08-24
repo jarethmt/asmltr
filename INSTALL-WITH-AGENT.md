@@ -59,7 +59,7 @@ cp .env.example .env
 Edit `.env` and set:
 - `ASSISTANT_NAME` — from step 0.
 - The secret keys for the chosen channels/features. **⛏ ASK USER** for each needed value:
-  - `OPENAI_API_KEY` — required (moderation; Discord voice STT).
+  - `OPENAI_API_KEY` — required for moderation and for picture-intent classify (gpt-5-nano YES/NO before still gen). If unset, moderation fails-secure on non-owner inbound; picture-intent classify logs once and stays OFF (image_gen tools still work).
   - `ELEVENLABS_API_KEY` — only if Discord voice mode is wanted.
   - `DISCORD_BOT_TOKEN` / `TELEGRAM_BOT_TOKEN` — for those channels.
   - For GitHub: a PAT env var, e.g. `MY_GITHUB_PAT` (you'll reference its lowercase name as the connector's `pat_bws_key`).
@@ -88,7 +88,14 @@ Then seed:
 ```bash
 node core/src/trust/seed.js
 ```
-Add teammates as additional principals (optionally with a limited `role_id`) — but only people the user names.
+Add teammates as additional principals — but only people the user names.
+- **Access cards (recommended):** anyone who should same-guild Discord post (`asmltr guild-post`) needs `default_tier` **1–5** (example seed uses `3` on `friend`). Tier 0 cannot post. Owner (`bypass_moderation`) always can. Tiers 6+ cannot. This is **not** `asmltr send` (public Discord still denies cross-channel send).
+- **Stills / video / code (recommended):** copy `shared/tool-policy.example.json` → `~/.asmltr/tool-policy.json`. List trust `principals.id` under `photoAllow` if they may generate stills. Leave `videoAllow` empty unless the user wants clips. ⛏ ASK USER who (if anyone) is on each list — never copy real names or Discord ids into git.
+
+```bash
+mkdir -p ~/.asmltr
+cp shared/tool-policy.example.json ~/.asmltr/tool-policy.json   # then edit locally
+```
 
 ---
 

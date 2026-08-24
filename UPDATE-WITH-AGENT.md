@@ -104,7 +104,8 @@ curl -s -X POST 127.0.0.1:3024/announce -H 'Content-Type: application/json' \
   -d '{"channel":"discord","target":"<CHANNEL_ID>","text":"✅ Update complete — back online on the latest."}'
 ```
 
-Then launch a **detached, delayed** restart that survives your turn ending and runs *after* you've
+Prefer **`asmltr bounce`** (queues until this turn ends, then restarts). If you must script it,
+launch a **detached, delayed** restart that survives your turn ending and runs *after* you've
 replied. Restarting the connector manager cleanly cycles every connector onto the new code — the
 manager reaps its own child connectors on stop, so there is **no `pkill`** here. (An earlier version
 of this guide ran `pkill -f "…run-instance.js"`, but inside a `bash -c` that pattern matches the
