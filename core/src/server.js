@@ -510,6 +510,22 @@ async function handle(envelope, opts = {}) {
         if (opts.onSubagent) { try { opts.onSubagent(s); } catch (_) {} }
       },
       onEvent: (sdkEvt) => {
+        if (sdkEvt && sdkEvt.type === 'effort') {
+          const cu = sdkEvt.classifyUsage;
+          if (cu && (cu.tokens_in || cu.tokens_out)) {
+            try {
+              record(auxUsage({
+                surface: e.channel, session_id: e.conversation_key,
+                identity: (e.sender && (e.sender.raw_username || e.sender.raw_id)) || null,
+                feature: 'image-gen-classify',
+                provider: cu.provider, model: cu.model,
+                tokens_in: cu.tokens_in, tokens_out: cu.tokens_out,
+              }));
+            } catch (_) {}
+          }
+          try { if (opts.onEffort) opts.onEffort(sdkEvt.effort, sdkEvt); } catch (_) {}
+          return;
+        }
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
           for (const c of sdkEvt.message?.content || []) {
