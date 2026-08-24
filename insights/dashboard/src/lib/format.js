@@ -51,6 +51,32 @@ export function statusMeta(s) {
   return STATUS_META[s] || { color: '#64748B', label: s || 'unknown', pulse: false }
 }
 
+// Live card nap (display-only). 30 minutes. ASMLTR_IDLE_MS. Not grok session idle.
+export const DEFAULT_IDLE_MS = 1_800_000
+
+/** Collector timestamps are unix ms; tolerate accidental seconds. */
+export function activityMs(unix) {
+  if (!unix) return 0
+  return unix < 1e12 ? unix * 1000 : unix
+}
+
+/**
+ * Derived status word (History SessionDetail, Live exclusion).
+ * Collector web rows stay status=active (no pid for reconcile). After
+ * last_activity + idle, return `idle` so Live can drop the card and
+ * History can still show the existing idle word. Do not badge Live as Idle —
+ * past-idle cards must not appear there. A live pid stays Active.
+ */
+export function displayStatus(session, now = Date.now(), idleMs = DEFAULT_IDLE_MS) {
+  const stored = session && session.status
+  if (stored && stored !== 'active') return stored
+  if (session && session.pid) return stored || 'active'
+  const last = activityMs(session && session.last_activity_unix)
+  if (!last) return stored || 'active'
+  if (idleMs > 0 && now - last > idleMs) return 'idle'
+  return stored || 'active'
+}
+
 // Connector-instance runtime status -> pill styling (manager control plane).
 export const RUNTIME_STATUS_META = {
   running: { color: '#34D399', label: 'running', pulse: true },
