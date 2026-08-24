@@ -2040,7 +2040,7 @@ async function pokeRdBroker(body) {
 }
 
 // Per-device authorization for the broker: (principal x device x transport) -> capabilities.
-app.post('/v2/devices/grants/resolve', (req, res) => {
+app.post('/v2/device-grants/resolve', (req, res) => {
   const b = req.body || {};
   res.json(deviceStore.resolveDeviceGrants(b.principal_id, b.device_id, b.transport || null));
 });

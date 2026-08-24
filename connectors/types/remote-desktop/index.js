@@ -128,7 +128,7 @@ async function start(ctx) {
   async function deviceGrants(principalId, deviceId) {
     if (!principalId || !deviceId) return { view: false, control: false };
     try {
-      const r = await ctx.core._post('/v2/devices/grants/resolve', { principal_id: principalId, device_id: deviceId, transport: 'rd' });
+      const r = await ctx.core._post('/v2/device-grants/resolve', { principal_id: principalId, device_id: deviceId, transport: 'rd' });
       return { view: !!(r && r.allow && r.allow.view), control: !!(r && r.allow && r.allow.control) };
     } catch (_) { return { view: false, control: false }; } // fail closed
   }
