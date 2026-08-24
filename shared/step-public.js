@@ -395,31 +395,7 @@ function stripThoughtChrome(text) {
       s = paras.slice(1).join('\n\n').trim();
     }
   }
-  return stripLeadingLetterStart(s);
-}
-
-/** Closings that look like "Name," but are not the start of the letter. */
-const LETTER_CLOSE = /^(sincerely|thanks|thank you|best|cheers|regards|respectfully|cordially|warmly|best regards|kind regards),$/i;
-const LETTER_OPEN = /^(?:dear|hi|hello|hey)\s+[A-Za-z][\w .'-]{0,40},$/i;
-const LETTER_NAME = /^[A-Z][a-z]{1,30},$/;
-
-/**
- * Email/MCP: if grok glued a plan/thought paragraph above the salutation
- * ("Name," / "Dear …,"), mail from the greeting only. Closings stay.
- */
-function stripLeadingLetterStart(text) {
-  const lines = String(text || '').split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (!t) continue;
-    if (LETTER_CLOSE.test(t)) continue;
-    if (LETTER_OPEN.test(t) || LETTER_NAME.test(t)) {
-      const before = lines.slice(0, i).join('\n').trim();
-      if (!before) return String(text || '').trim();
-      return lines.slice(i).join('\n').trim();
-    }
-  }
-  return String(text || '').trim();
+  return s;
 }
 
 /** Last narration block, with thought chrome removed. Email/MCP reply body. */
