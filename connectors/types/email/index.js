@@ -650,6 +650,7 @@ async function start(ctx) {
         extra += ' This is an out-of-office / automatic reply. Follow memory/ops/workflows/out-of-office.md. Never reply to the auto-reply. Never owner-forward it. @techdirect.io is always silent. Customer we already emailed on an open ticket: one notice to Tech Direct Services staff only.';
       }
     }
+    extra += ' Write the letter only. The first line of the mailed body is the greeting or the first sentence to the reader. No notes-to-self, no photo captions, no I\'ll-send plans above that.';
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,
