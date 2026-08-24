@@ -375,7 +375,7 @@ test('email channel forces xhigh even without code words', () => {
   process.env.ASMLTR_GROK_EFFORT = 'medium';
   try {
     const prompt = 'Thanks for the update, see you Monday';
-    const chatty = 'Hi Ivy,\n\nJust circling back on dinner Thursday and whether Jess is free. Nothing urgent — hope you had a quiet weekend.\n\nThanks for the update, see you Monday\n';
+    const chatty = 'Hi Dionysus,\n\nJust circling back on dinner Thursday and whether Pat is free. Nothing urgent — hope you had a quiet weekend.\n\nThanks for the update, see you Monday\n';
     for (const p of [prompt, chatty]) {
       assert.equal(grok.chooseEffort({ prompt: p, cwd: noGit, channel: 'email' }), 'xhigh', p.slice(0, 40));
       assert.equal(effortOf(grok.buildArgs({ prompt: p, cwd: noGit, channel: 'email' })), 'xhigh');
