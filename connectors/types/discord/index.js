@@ -18,6 +18,8 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, Status } = require('discord.js');
+const { requireConnectorToken } = require('../../../shared/connector-http-auth');
+const { crossContextForPrompt, crossContextBlock } = require('./prompt-cross');
 // THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
 const sharedTts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
@@ -209,7 +211,7 @@ async function start(ctx) {
     // provides only what the SESSION doesn't have: cross-channel references + location/participants.
     const sid = message.guild?.id || 'DM', cid = message.channel.id;
     return {
-      crossContext: searchGlobalTimeline(message.content, sid, cid).slice(0, 3),
+      crossContext: crossContextForPrompt(),
       location: { serverName: memory.servers[sid]?.name || 'Direct Message', channelName: memory.servers[sid]?.channels[cid]?.name || 'DM', participants: Array.from(memory.servers[sid]?.channels[cid]?.participants || []) },
     };
   }
@@ -353,7 +355,7 @@ async function start(ctx) {
     const mode = forced ? 'You were directly @-mentioned (silence mode is on, so only mentions reach you).'
       : mentioned ? 'You were directly @-mentioned.'
       : 'You were NOT @-mentioned — this message was surfaced as *possibly* relevant. Decide whether it is actually for you (see MULTI-AGENT below) before replying.';
-    const cross = context.crossContext.length ? `\n\nCROSS-CONTEXT (other servers/channels, reference only):\n${context.crossContext.map(m => `- [${m.serverName}/#${m.channelName}] ${m.author}: ${m.content.substring(0, 100)}...`).join('\n')}` : '';
+    const cross = crossContextBlock(context.crossContext);
     // NOTE: authorization/trust is now the core's trust framework (data-driven,
     // scoped per server) — NOT hardcoded here. This preamble is Discord CONTEXT only.
     const iAmMentioned = message.mentions.has(client.user);
@@ -1073,7 +1075,7 @@ RESPONSE RULES:
   const app = express();
   app.use(express.json({ limit: '4mb' }));
   app.get('/health', (req, res) => res.json({ status: 'ok', type: 'discord', instance: ctx.instanceId, uptime: process.uptime() }));
-  app.post('/send-message', async (req, res) => {
+  app.post('/send-message', requireConnectorToken, async (req, res) => {
     try {
       const { channelId, message } = req.body;
       if (!channelId || !message) return res.status(400).json({ success: false, error: 'channelId and message required' });
@@ -1084,7 +1086,7 @@ RESPONSE RULES:
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
   });
   // Unified outbound endpoint (manager /send router → here). Resolves aliases.
-  app.post('/out', async (req, res) => {
+  app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
       const channel = await client.channels.fetch(resolveChannel(tg), { force: true });
@@ -1092,6 +1094,12 @@ RESPONSE RULES:
       // any file kind (photo/file/attachment/document/image) → send as a Discord attachment
       const isFile = ['photo', 'file', 'attachment', 'document', 'image'].includes(kind);
       if (isFile && !filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+      if (isFile) {
+        const stage = require('../../../shared/outbound-stage');
+        if (!stage.outboundFileAllowed(filePath)) {
+          return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+        }
+      }
       const m = isFile ? await channel.send({ content: caption || text || '', files: [filePath] }) : await channel.send(text);
       // Report the conversation_key this target maps to (matches an inbound from the same place), so a
       // core-mediated send can ASSIMILATE this message into that session's context (it was posted from
