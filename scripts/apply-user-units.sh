@@ -33,7 +33,7 @@ else
   echo ".env already present — leaving it"
 fi
 chmod 600 .env || true
-grep -q '^ASSISTANT_NAME=ivy' .env || echo "WARN: ASSISTANT_NAME is not ivy"
+grep -q '^ASSISTANT_NAME=' .env || echo "WARN: ASSISTANT_NAME is unset"
 grep -q '^ASMLTR_WEB_OWNER_ID=owner' .env || echo "WARN: ASMLTR_WEB_OWNER_ID should be owner"
 
 if [[ ! -f core/src/trust/seed.json ]]; then
