@@ -13,7 +13,7 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ### Changed
 
 ### Fixed
-- **Connector telemetry no longer silently dropped (`android`, `device`, `remote-desktop`, `notify`).**
+- **Connector telemetry no longer silently dropped (`android`, `device`, `remote-desktop`, `notify`, `recorder`).**
   `connectors/sdk` defaults every connector's emit surface to its connector *type*, but `buildEvent()`
   validates against a separate, hand-maintained `SURFACES` list — so any connector whose type was not
   *also* a surface had **every** event rejected and thrown away. The mobile app was the visible victim:

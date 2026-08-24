@@ -62,6 +62,17 @@ test('non-connector core producers emit too', () => {
   assert.doesNotThrow(() => buildEvent({
     surface: 'notify', session_id: 'notify', event_type: 'outbound', identity: 'notify', source: 'core',
   }));
+
+  // `recorder` is the recording app's STT aux-usage. These carry real BILLED cost, so dropping them
+  // silently under-reported the Billed $ total rather than merely losing a row.
+  assert.equal(surfaceFor('recorder'), 'core');
+  const rec = buildEvent({
+    surface: 'recorder', event_type: 'token-usage', source: 'aux', billed_cost_usd: 0.42,
+    payload: { feature: 'stt', provider: 'openai', units: 'seconds', count: 90 },
+  });
+  assert.equal(rec.surface, 'core');
+  assert.equal(rec.billed_cost_usd, 0.42);
+  assert.equal(rec.payload.feature, 'stt', 'per-feature breakdown must survive the mapping');
 });
 
 test('surfaceFor is identity for surfaces that need no mapping', () => {

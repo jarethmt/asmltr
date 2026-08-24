@@ -80,6 +80,9 @@ const CHANNEL_SURFACE = Object.freeze({
   notify: 'core',                     // the notify ladder (/v2/notify) — core-internal outbound, and
                                       // synthetic (session_id/identity are both literally 'notify').
                                       // Promote to its own surface if it ever needs its own rollup.
+  recorder: 'core',                   // recording app STT aux-usage. These carry real BILLED cost, so
+                                      // dropping them under-reported the Billed $ total outright. The
+                                      // per-feature breakdown still works: payload keeps feature/provider.
 });
 
 /**
