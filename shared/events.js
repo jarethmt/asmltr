@@ -54,6 +54,46 @@ const SURFACE_SET = new Set(SURFACES);
 const EVENT_TYPE_SET = new Set(EVENT_TYPES);
 
 /**
+ * CHANNEL (connector type) → SURFACE (telemetry bucket).
+ *
+ * These are two DIFFERENT things and conflating them is what made the phone invisible for weeks.
+ * A `channel` is the connector's routing identity: it names the thing you address in
+ * `asmltr send <channel> <target>`, it selects channel-specific prompt behaviour, and it is passed
+ * to moderation as the platform. A `surface` is the user-facing CLASS a turn happened on — the
+ * bucket the Usage/Insights views roll up by. Most connectors are their own surface, so the two
+ * names coincide and no entry is needed here; entries exist only where they legitimately differ.
+ *
+ * Why it matters: `connectors/sdk` defaults every connector's emit surface to its TYPE, so a
+ * connector whose type isn't a valid surface had every event silently rejected by buildEvent().
+ * Mapping here (rather than renaming the channel) keeps `asmltr send android <device> --file …`
+ * and the android-specific voice prompt working — those genuinely need the channel name.
+ *
+ * Fine-grained attribution is NOT lost by mapping: the concrete producer is already recorded
+ * separately in `source` (`connector:<instanceId>`), so a Pi kiosk stays distinguishable from a
+ * phone even though both roll up as `assistant-native`.
+ */
+const CHANNEL_SURFACE = Object.freeze({
+  android: 'assistant-native',        // the native mobile app IS the native assistant (its own
+                                      // in-connector emits already hardcoded this; unify with them)
+  device: 'assistant-native',         // generic device gateway — same class (the android base)
+  'remote-desktop': 'core',           // "conversation-less: infra signaling, not a chat channel"
+  notify: 'core',                     // the notify ladder (/v2/notify) — core-internal outbound, and
+                                      // synthetic (session_id/identity are both literally 'notify').
+                                      // Promote to its own surface if it ever needs its own rollup.
+  recorder: 'core',                   // recording app STT aux-usage. These carry real BILLED cost, so
+                                      // dropping them under-reported the Billed $ total outright. The
+                                      // per-feature breakdown still works: payload keeps feature/provider.
+});
+
+/**
+ * Resolve a producer's channel/type to its canonical telemetry surface.
+ * Identity for anything already a valid surface (and for unknowns, which buildEvent then rejects).
+ */
+function surfaceFor(channel) {
+  return CHANNEL_SURFACE[channel] || channel;
+}
+
+/**
  * Build a normalized event. Fills defaults, validates enums, and clamps the
  * payload so a producer can never accidentally ship a malformed event.
  *
@@ -72,7 +112,10 @@ const EVENT_TYPE_SET = new Set(EVENT_TYPES);
  */
 function buildEvent(e) {
   if (!e || typeof e !== 'object') throw new TypeError('event must be an object');
-  if (!SURFACE_SET.has(e.surface)) {
+  // Normalize channel→surface FIRST: every producer (core's record(), connectors' ctx.emit, the
+  // collector's ingest + tailer) funnels through here, so this one line is the whole fix.
+  const surface = surfaceFor(e.surface);
+  if (!SURFACE_SET.has(surface)) {
     throw new RangeError(`unknown surface: ${e.surface} (expected one of ${SURFACES.join(', ')})`);
   }
   if (!EVENT_TYPE_SET.has(e.event_type)) {
@@ -81,7 +124,7 @@ function buildEvent(e) {
   return Object.freeze({
     v: SCHEMA_VERSION,
     ts: Number.isFinite(e.ts) ? e.ts : nowMs(),
-    surface: e.surface,
+    surface,
     session_id: e.session_id != null ? String(e.session_id) : null,
     identity: e.identity != null ? String(e.identity) : null,
     event_type: e.event_type,
@@ -120,6 +163,8 @@ module.exports = {
   SCHEMA_VERSION,
   SURFACES,
   EVENT_TYPES,
+  CHANNEL_SURFACE,
+  surfaceFor,
   buildEvent,
   validateEvent,
 };

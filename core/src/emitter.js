@@ -36,6 +36,11 @@ function emit(partial) {
   } catch (err) {
     // A malformed event is a producer bug — log locally, don't throw into a turn.
     console.error('[emitter] dropping malformed event:', err.message);
+    // ...but NEVER drop it silently into a logfile nobody reads. A rejected event used to vanish
+    // entirely, which is how the android surface reported 0 tokens for weeks while burning ~456M:
+    // the only trace was a console line buried in PM2 logs. Re-emit a degraded marker on the
+    // always-valid `core` surface so the hole is visible IN THE DASHBOARD, where someone looks.
+    emitDropMarker(partial, err);
     return null;
   }
 
@@ -50,6 +55,34 @@ function emit(partial) {
   postToCollector(evt);
 
   return evt;
+}
+
+// Report a rejected event as a `control` event on the `core` surface. Guarded against recursion:
+// this builds a known-good event, but if it somehow still fails we give up rather than loop.
+let _inDropMarker = false;
+function emitDropMarker(partial, err) {
+  if (_inDropMarker) return;
+  _inDropMarker = true;
+  try {
+    const evt = buildEvent({
+      surface: 'core',
+      event_type: 'control',
+      session_id: partial && partial.session_id != null ? partial.session_id : null,
+      source: 'emitter',
+      payload: {
+        action: 'event-dropped',
+        reason: err && err.message ? String(err.message).slice(0, 300) : 'unknown',
+        rejected_surface: partial && partial.surface != null ? String(partial.surface) : null,
+        rejected_event_type: partial && partial.event_type != null ? String(partial.event_type) : null,
+      },
+    });
+    try { fs.appendFileSync(logFileFor(evt.ts), JSON.stringify(evt) + '\n'); } catch (_) {}
+    postToCollector(evt);
+  } catch (_) {
+    // give up — a drop marker must never itself break a turn
+  } finally {
+    _inDropMarker = false;
+  }
 }
 
 function postToCollector(evt) {

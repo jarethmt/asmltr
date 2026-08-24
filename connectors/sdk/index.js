@@ -221,7 +221,15 @@ function makeUploads() {
 function makeEmitter(collectorUrl, token, defaults) {
   return function emit(partial) {
     let evt;
-    try { evt = buildEvent({ ...defaults, ...partial }); } catch (e) { return; }
+    try {
+      evt = buildEvent({ ...defaults, ...partial });
+    } catch (e) {
+      // Was a bare `return` — the quietest of the drop sites (not even a log line). Since `defaults`
+      // sets surface to the connector TYPE, any connector whose type isn't a valid surface had EVERY
+      // event discarded here without a trace. Say so loudly; the shared channel→surface map is the fix.
+      console.error(`[connector-emit] dropping malformed event (surface=${partial && partial.surface != null ? partial.surface : (defaults && defaults.surface)}):`, e.message);
+      return;
+    }
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 2000);
     const headers = { 'Content-Type': 'application/json' };
