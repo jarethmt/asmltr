@@ -33,7 +33,7 @@ const WAKE = NAME.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex
 const NO_REPLY = '[[NO_REPLY]]';
 const { isNoReplySentinel } = require('../../../shared/silence');
 const { parseReact } = require('../../../shared/react-token');
-const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
+const { looksLikePromptRestatement, discordToolLine, discordThoughtLine, speakerHintsFrom, identityHintsFrom, identityHintKindMap, mergeSpeakerLastNames, publicBlockHints, privacyHitKind, pickPublicReply, thoughtBudget, isImageGenTool, thoughtChipsEnabled, THINK_HEARTBEAT_MS, WORKING_LINE, STILL_WORKING_LINE, GENERATING_LINE } = require('../../../shared/step-public');
 const { injectBy } = require('./inject-by');
 const { splitResponse } = require('../../../shared/discord-split');
 const { canAbortTurn, starterIdFromSlot } = require('./abort-allow');
@@ -101,7 +101,7 @@ const meta = {
       voice_barge_in: { type: 'boolean', title: 'Voice: barge-in — let someone interrupt a spoken reply by talking over it (off = quieter in noisy/cross-talk meetings)', default: true },
       voice_realtime: { type: 'boolean', title: 'Voice: realtime streaming transcription (server-VAD turn-taking + live captions) instead of batch-per-utterance', default: true },
       voice_transcript_file: { type: 'boolean', title: 'Voice: upload a full transcript .txt to the origin channel when leaving the voice channel', default: true },
-      stream_steps: { type: 'boolean', title: 'Post sanitized 💭 thought chips when addressed. medium/high: 💭 only. xhigh: 💭 plus tool / Working chips. Never raw thoughts.', default: true },
+      stream_steps: { type: 'boolean', title: 'Thought chips (personal): post sanitized 💭 reasoning while working. Default on. Off = Discord gets the final answer only. Same knob: ASMLTR_STREAM_STEPS.', default: true },
       stream_tools: { type: 'boolean', title: 'When true, post a sanitized tool title (-# 🔧 `Read`) on start instead of the human chip. Default off. Never args/paths/updates.', default: false },
       ignore_other_mentions: { type: 'boolean', title: 'Do not REPLY to messages @-directed at other specific users/bots (still ingested for awareness)', default: true },
       ingest_unaddressed: { type: 'boolean', title: 'Ingest EVERY message in enabled channels into context (stay current on the whole conversation), replying only when addressed. False = only ingest what you might reply to.', default: true },
@@ -426,7 +426,7 @@ ${referentPromptBlock()}`;
   }
 
   // Subdued Discord line helper. Tool chips are built in shared/step-public (not raw thoughts).
-  const streamSteps = cfg.stream_steps !== false;
+  const streamSteps = thoughtChipsEnabled(cfg);
   const streamTools = cfg.stream_tools === true;
   function renderStep(t) {
     const clamped = t.length > 700 ? t.slice(0, 700) + '…' : t;
@@ -855,7 +855,7 @@ ${referentPromptBlock()}`;
   const voiceActive = new Map(); // guildId -> expiry ts of the "answering mode" follow-up window
   const voiceReplyStart = new Map(); // guildId -> ts a reply began (barge-in grace window)
   const BARGE_GRACE_MS = 1200;   // ignore barge-in this long after a reply starts (don't cut off on the asker's own trailing words)
-  const voiceMuted = new Set();  // guildIds where Eve is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
+  const voiceMuted = new Set();  // guildIds where the bot is MUTED in-voice: keeps transcribing, but never speaks/replies until unmuted (P2)
   const voiceGen = new Map();    // guildId -> reply generation. stopVoiceReply bumps it; the in-flight reply checks it and bails, so a stopped turn never speaks even if the LLM finishes after the abort.
   // 0 (default) = STRICT: respond ONLY when directly addressed by name, then go passive. A positive
   // value opens a "keep answering follow-ups without the wake word" window for that many ms.
@@ -1062,7 +1062,7 @@ ${referentPromptBlock()}`;
         message_id: `voice-${Date.now()}`,
         // Identity = the SPEAKER who said her name. Pass their immutable Discord user ID as raw_id (same
         // key the text path uses) so the core resolves the RIGHT principal + trust per turn, instead of a
-        // display name that matches no identity mapping (that's what made Eve address everyone as one person).
+        // display name that matches no identity mapping (that's what made the bot address everyone as one person).
         sender: { raw_id: meta.userId ? String(meta.userId) : name, raw_username: name },
         content: { text },
         delivery: 'sync',
