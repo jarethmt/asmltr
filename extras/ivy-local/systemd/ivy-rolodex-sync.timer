@@ -1,0 +1,12 @@
+[Unit]
+Description=Rolodex cache refresh (edit OnCalendar for your install)
+
+[Timer]
+OnCalendar=daily
+OnBootSec=3min
+Persistent=true
+AccuracySec=1min
+Unit=ivy-rolodex-sync.service
+
+[Install]
+WantedBy=timers.target

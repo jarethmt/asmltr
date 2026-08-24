@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Rolodex cache from localhost
+After=network-online.target rolodex.service
+
+[Service]
+Type=oneshot
+# register.sh rewrites ExecStart to this clone. Placeholder must not be a real home path.
+ExecStart=/path/to/asmltr/extras/ivy-local/rolodex/sync.sh
+Nice=10

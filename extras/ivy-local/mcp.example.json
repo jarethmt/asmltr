@@ -1,0 +1,26 @@
+{
+  "servers": {
+    "corona": {
+      "type": "stdio",
+      "command": "/path/to/asmltr/extras/ivy-local/corona/run.sh",
+      "args": [],
+      "env": {
+        "CORONA_URL": "http://127.0.0.1:12701"
+      }
+    },
+    "rolodex": {
+      "type": "stdio",
+      "command": "/path/to/asmltr/extras/ivy-local/rolodex/run.sh",
+      "args": [],
+      "env": {
+        "ROLODEX_URL": "http://127.0.0.1:12702"
+      }
+    },
+    "onenote": {
+      "type": "stdio",
+      "command": "/path/to/asmltr/extras/ivy-local/onenote/run.sh",
+      "args": [],
+      "env": {}
+    }
+  }
+}
