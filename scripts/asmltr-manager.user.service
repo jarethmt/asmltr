@@ -1,0 +1,18 @@
+[Unit]
+Description=asmltr-connector-manager (127.0.0.1:3024)
+After=network-online.target asmltr-core.service
+# User-level template. No channel tokens in git.
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/asmltr/connectors/manager
+EnvironmentFile=-%h/src/asmltr/.env
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:%h/.grok/bin:/usr/bin:/bin
+Environment=ASMLTR_MANAGER_PORT=3024
+ExecStart=%h/.local/bin/node server.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

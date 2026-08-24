@@ -21,7 +21,7 @@ const os = require('os');
 // $/1M tokens {in,out}. Aliases (opus/sonnet/haiku) resolve to the current tier they track.
 const DEFAULTS = {
   models: {
-    // Anthropic (subscription via the Agent SDK on Eve's box → billed:false, but the equivalent value is real)
+    // Anthropic (subscription via the Agent SDK → billed:false, but the equivalent value is real)
     'opus': { in: 15, out: 75 }, 'claude-opus': { in: 15, out: 75 },
     'sonnet': { in: 3, out: 15 }, 'claude-sonnet': { in: 3, out: 15 },
     'haiku': { in: 0.8, out: 4 }, 'claude-haiku': { in: 0.8, out: 4 },
@@ -33,6 +33,9 @@ const DEFAULTS = {
     'gpt-4.1': { in: 2, out: 8 }, 'gpt-4.1-mini': { in: 0.4, out: 1.6 },
     'gpt-4o': { in: 2.5, out: 10 }, 'gpt-4o-mini': { in: 0.15, out: 0.6 },
     'o3': { in: 2, out: 8 }, 'o4-mini': { in: 1.1, out: 4.4 },
+    // xAI Grok (subscription via the CLI → billed:false; equivalent value at public API rates)
+    'grok-4': { in: 2, out: 6 }, 'grok-4.6': { in: 2, out: 6 }, 'grok-4.5': { in: 2, out: 6 },
+    'grok-3': { in: 3, out: 15 }, 'grok-code': { in: 1, out: 2 }, 'grok-build': { in: 1, out: 2 }, 'grok': { in: 2, out: 6 },
   },
   // $ per 1,000 characters
   tts: {

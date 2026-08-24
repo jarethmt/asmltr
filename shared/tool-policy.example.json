@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to ~/.asmltr/tool-policy.json (or set ASMLTR_TOOL_POLICY_FILE). Principal ids must match trust store principals.id — placeholders only, never real names. discordIds are numeric Discord user ids; leave empty in git and fill locally. photoAllow / imageAllow: stills + asmltr post, not video. videoAllow: clips AND stills. mediaAllow: both. codeAllow: write-a-program for that caller. Empty list = owner/bypass only. Recommended: list Access-card principal ids under photoAllow if they may generate stills; leave videoAllow empty unless you want clips. Same-guild Discord post is NOT this file — that is principals.default_tier 1–5 (see seed.example.json).",
+  "photoAllow": {
+    "principals": ["friend"],
+    "discordIds": []
+  },
+  "videoAllow": {
+    "principals": [],
+    "discordIds": []
+  },
+  "codeAllow": {
+    "principals": [],
+    "discordIds": []
+  },
+  "siloAllow": {
+    "guilds": [],
+    "channels": []
+  }
+}

@@ -18,6 +18,10 @@ const fs = require('fs');
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 
+// Node 24 + better-sqlite3: load stmt-keep BEFORE sessions opens a Database
+// (same hook server.js loads first). Without it, Statement dtor at test exit ABRTs.
+require('../core/src/sqlite-stmt-keep');
+
 // Point the session store at a throwaway DB before it is required (it opens on import).
 const TMP_DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-sessions-')), 'core.db');
 process.env.ASMLTR_CORE_DB = TMP_DB;

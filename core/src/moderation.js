@@ -9,12 +9,17 @@
  *
  * Decision: bypass for bypass_moderation; otherwise gpt-5-nano risk score,
  * 0-6 allow / 7-10 block. Fail-secure (block + alert) on error.
+ * classifyRaw is a separate YES/NO helper (picture-intent today) on the same
+ * key/model. Do not fold intent into moderate() — every inbound path would change.
+ * OpenAI calls omit reasoning_effort by default (API default, pre-PR 122).
+ * Set ASMLTR_MODERATION_REASONING_EFFORT=minimal later to cap gpt-5-nano latency.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const OpenAI = require('openai');
+let OpenAI = null;
+function loadOpenAI() { if (!OpenAI) OpenAI = require('openai'); return OpenAI; }
 
 const MOD_LOG_DIR = process.env.ASMLTR_MOD_LOG_DIR || path.join(__dirname, '..', 'data', 'moderation-logs');
 
@@ -29,12 +34,24 @@ const MOD_MODEL = process.env.ASMLTR_MODERATION_MODEL
   || (MOD_PROVIDER === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-5-nano');
 const MOD_KEY_NAME = process.env.ASMLTR_MODERATION_KEY
   || (MOD_PROVIDER === 'anthropic' ? 'anthropic_api_key' : 'openai_api_key');
+// gpt-5-nano is a reasoning model. Uncapped, chat.completions spends ~2–3.5s thinking
+// on every inbound before the agent even starts (synchronous dead time). Default
+// omits the field (unset/empty/off/none — same as API default). Set minimal/low/
+// medium/high to send reasoning_effort. Knob is kept; live default is omit.
+function parseReasoningEffort(raw) {
+  if (raw === undefined || raw === null) return '';
+  const s = String(raw).trim().toLowerCase();
+  if (!s || s === 'off' || s === 'none' || s === '0') return '';
+  return s;
+}
+const MOD_REASONING_EFFORT = parseReasoningEffort(process.env.ASMLTR_MODERATION_REASONING_EFFORT);
+function isGpt5Family(model) { return /^gpt-5/i.test(String(model || '')); }
 
 const getModKey = () => require('../../shared/secrets').get(MOD_KEY_NAME);
 
 let _openai = null;
 async function getOpenAIClient() {
-  if (!_openai) _openai = new OpenAI({ apiKey: await getModKey() });
+  if (!_openai) _openai = new (loadOpenAI())({ apiKey: await getModKey() });
   return _openai;
 }
 
@@ -59,6 +76,23 @@ function extractJson(t) {
   return JSON.parse(body);
 }
 
+// Build the OpenAI chat.completions payload. Exported so tests can assert the
+// reasoning_effort cap without hitting the network.
+function buildOpenAIParams(systemPrompt, userPrompt, { jsonMode = false, reasoningEffort = MOD_REASONING_EFFORT, model = MOD_MODEL } = {}) {
+  const params = {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+  };
+  if (jsonMode) params.response_format = { type: 'json_object' };
+  // Only gpt-5-* on the OpenAI path accept reasoning_effort. Never send it on
+  // 4o / other chat models (or the Anthropic branch, which never calls this).
+  if (reasoningEffort && isGpt5Family(model)) params.reasoning_effort = reasoningEffort;
+  return params;
+}
+
 // Raw provider call → the model's reply text (unparsed). jsonMode asks OpenAI for a guaranteed
 // JSON object (its models require the word "json" somewhere in the messages — the prompts have it).
 async function providerRaw(systemPrompt, userPrompt, jsonMode) {
@@ -81,12 +115,82 @@ async function providerRaw(systemPrompt, userPrompt, jsonMode) {
     return { text, usage: { tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0 } };
   }
   const client = await getOpenAIClient();
-  const params = { model: MOD_MODEL, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] };
-  if (jsonMode) params.response_format = { type: 'json_object' };
-  const completion = await client.chat.completions.create(params);
+  const params = buildOpenAIParams(systemPrompt, userPrompt, { jsonMode });
+  let completion;
+  try {
+    completion = await client.chat.completions.create(params);
+  } catch (err) {
+    // A non-reasoning model rejects reasoning_effort — drop it and retry once.
+    if (params.reasoning_effort && /reasoning_effort/i.test(err.message)) {
+      delete params.reasoning_effort;
+      completion = await client.chat.completions.create(params);
+    } else {
+      throw err;
+    }
+  }
   const u = completion.usage || {};
   return { text: (completion.choices[0].message.content || '').trim(),
     usage: { tokens_in: u.prompt_tokens || 0, tokens_out: u.completion_tokens || 0 } };
+}
+
+/**
+ * Picture-intent classify (gpt-5-nano YES/NO) uses the SAME secret as
+ * moderation: `openai_api_key` unless ASMLTR_MODERATION_KEY points elsewhere.
+ *
+ * SETUP (for an LLM installing asmltr):
+ *   1. Put `openai_api_key` in .env / secrets / the TRUST vault.
+ *   2. If that key is missing, picture-intent classify is OFF — log once, do
+ *      not call OpenAI, do not spawn grok to classify, do not crash.
+ *   3. image_gen / image_edit still work. Discord will not post the Generating
+ *      chip until those tools fire. moderate() is a separate allow/block call.
+ */
+function pictureIntentOffLog(keyName) {
+  return '[asmltr] picture-intent classify OFF: missing ' + keyName
+    + ' (same secret as moderation / ASMLTR_MODERATION_KEY). '
+    + 'Set openai_api_key to enable gpt-5-nano YES/NO before still generation. '
+    + 'image_gen tools still work. Discord Generating-chip waits until image_gen fires. '
+    + 'Not a crash — this install has no moderation LLM key.';
+}
+
+let _loggedPictureIntentOff = false;
+async function moderationKeyPresent() {
+  const key = await getModKey();
+  return !!(key && String(key).trim());
+}
+
+/**
+ * Lightweight YES/NO classify on the moderation key/model.
+ * Fail-closed at the caller. Does not block, does not alert, does not JSON-mode.
+ * Do not fold intent into moderate() — every inbound path would change.
+ * No key → skipped:true (picture-intent using OpenAI is off).
+ */
+async function classifyRaw(systemPrompt, userPrompt, { timeoutMs = 15000 } = {}) {
+  if (!(await moderationKeyPresent())) {
+    if (!_loggedPictureIntentOff) {
+      _loggedPictureIntentOff = true;
+      try { console.error(pictureIntentOffLog(MOD_KEY_NAME)); } catch (_) {}
+    }
+    return { text: '', skipped: true, usage: null };
+  }
+  const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : 15000;
+  let timer = null;
+  const work = providerRaw(systemPrompt, userPrompt, false);
+  try {
+    const r = await Promise.race([
+      work,
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('classify timeout')), ms); }),
+    ]);
+    return {
+      text: r.text,
+      skipped: false,
+      usage: { tokens_in: r.usage.tokens_in, tokens_out: r.usage.tokens_out, model: MOD_MODEL, provider: MOD_PROVIDER },
+    };
+  } catch (err) {
+    work.catch(() => {});
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // Run the classifier; returns the parsed assessment. Deterministic JSON on OpenAI + a single
@@ -180,7 +284,9 @@ async function moderate(userMessage, resolved, meta = {}) {
     : `USER: ${resolved.display_name}\nALLOWED: ${JSON.stringify(resolved.permissions)}\nREQUIRES APPROVAL: ${JSON.stringify(resolved.requires_approval)}\nFORBIDDEN: ${JSON.stringify(resolved.forbidden)}\n\nUSER'S ACTUAL MESSAGE:\n"${userMessage}"\n\nEvaluate ONLY this user message. Questions about past discussions = SAFE. Their own project = SAFE. Only block actual violations.`;
 
   try {
+    const t0 = Date.now();
     const { assessment, usage } = await runModeration(systemPrompt, userPrompt);
+    const duration_ms = Date.now() - t0;
     const allowed = assessment.riskLevel <= 6;
     const monitored = assessment.riskLevel >= 4 && assessment.riskLevel <= 6;
 
@@ -196,6 +302,7 @@ async function moderate(userMessage, resolved, meta = {}) {
       reasoning: assessment.reasoning,
       decision: allowed ? 'ALLOW' : 'BLOCK',
       monitored,
+      duration_ms,
     });
 
     return {
@@ -212,7 +319,7 @@ async function moderate(userMessage, resolved, meta = {}) {
   } catch (err) {
     console.error('[moderation] error (failing secure):', err.message);
     // Fail-secure: block + alert the owner (reuse the existing primitive).
-    adminAlert(`⚠️ asmltr moderation error - blocking request from ${resolved.display_name}`);
+    adminAlert(`⚠️ asmltr moderation error - blocking request from ${resolved.display_name}`, { cmd: 'moderation error' });
     return { allowed: false, riskLevel: 10, concerns: ['moderation_error'], reasoning: 'Moderation failure - failing secure' };
   }
 }
@@ -233,9 +340,25 @@ function parseAlertRoute(s) {
 // Deliver an admin/security alert via ANY configured sink (each set one fires):
 //   1. ASMLTR_ADMIN_ALERT_SEND — route through a connector (any that advertises `outbound`)
 //      using the manager's /send. This reuses the channels you've already configured.
-//   2. ASMLTR_ADMIN_ALERT_CMD — a shell command ({msg} = text); good for email/webhooks/etc.
+//      SEND may include inbound detail (not a shell).
+//   2. ASMLTR_ADMIN_ALERT_CMD — a shell command. {msg} (or a trailing quoted arg) is ONLY a
+//      fixed label: "moderation block" or "moderation error". Never inbound text, display_name,
+//      concerns, or reasoning.
 // No-op when neither is set.
-function adminAlert(text) {
+const CMD_LABELS = new Set(['moderation block', 'moderation error']);
+
+function cmdAlertLabel(label) {
+  const s = String(label || '').trim();
+  return CMD_LABELS.has(s) ? s : 'moderation block';
+}
+
+function buildAdminAlertCmd(tmpl, label) {
+  const safe = cmdAlertLabel(label);
+  if (String(tmpl).includes('{msg}')) return String(tmpl).replace(/\{msg\}/g, `'${safe}'`);
+  return `${tmpl} '${safe}'`;
+}
+
+function adminAlert(text, opts) {
   const route = parseAlertRoute(process.env.ASMLTR_ADMIN_ALERT_SEND);
   if (route) {
     const mgr = (process.env.ASMLTR_MANAGER_URL || 'http://127.0.0.1:3024').replace(/\/$/, '');
@@ -247,8 +370,7 @@ function adminAlert(text) {
   const tmpl = process.env.ASMLTR_ADMIN_ALERT_CMD;
   if (tmpl) {
     try {
-      const safe = String(text).replace(/'/g, "'\\''");
-      const cmd = tmpl.includes('{msg}') ? tmpl.replace(/\{msg\}/g, `'${safe}'`) : `${tmpl} '${safe}'`;
+      const cmd = buildAdminAlertCmd(tmpl, opts && opts.cmd);
       execFile('sh', ['-c', cmd], () => {});
     } catch (_) { /* best-effort */ }
   }
@@ -258,7 +380,10 @@ function adminAlert(text) {
 async function notifyBlock(resolved, userMessage, moderation, platform) {
   const platformInfo = platform ? ` via ${platform.toUpperCase()}` : '';
   const body = `🚨 BLOCKED unauthorized request from ${resolved.display_name}${platformInfo}\n\nMessage: ${String(userMessage).substring(0, 200)}\n\nRisk: ${moderation.riskLevel}/10\nConcerns: ${(moderation.concerns || []).join(', ')}\n\nReason: ${moderation.reasoning}`;
-  adminAlert(body);
+  adminAlert(body, { cmd: 'moderation block' });
 }
 
-module.exports = { moderate, notifyBlock, logModerationEvent };
+module.exports = {
+  moderate, notifyBlock, adminAlert, buildAdminAlertCmd, cmdAlertLabel, logModerationEvent, buildOpenAIParams, parseReasoningEffort,
+  classifyRaw, pictureIntentOffLog, moderationKeyPresent,
+};
