@@ -718,6 +718,128 @@ async function cmdBackup(rest, f) {
 }
 
 // asmltr vault <status|unseal|seal|init> — TRUST vault bootstrap + passphrase-unseal (shared/vault.js).
+// --- asmltr device: the machines asmltr drives (docs/DEVICE-REGISTRY.md) -------------------------
+async function cmdDevice(argv, f) {
+  // The shared flags() helper leaves flags in the positional list and always consumes the next
+  // token as a value, which mangles quoted names and makes a trailing boolean flag read as
+  // undefined. Parse locally rather than changing a helper every other command already depends on.
+  const BOOL = new Set(['forbid', 'open']);
+  const rest = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--')) { if (!BOOL.has(argv[i].slice(2))) i++; continue; }
+    rest.push(argv[i]);
+  }
+  const bool = (n) => argv.includes('--' + n);
+  const verb = rest[0] || 'ls';
+  const fmtWhen = (t) => (t ? new Date(t).toISOString().replace('T', ' ').slice(0, 16) : A.dim('never'));
+
+  if (verb === 'ls' || verb === 'list') {
+    const { devices } = await coreApi('/v2/devices');
+    if (!devices.length) return console.log(A.dim('no devices registered — add one with `asmltr device add "<name>"`'));
+    for (const d of devices) {
+      const online = d.last_seen_at && Date.now() - d.last_seen_at < 120000;
+      const wires = d.transports.map((t) => (t.enabled ? (t.enrolled ? A.grn(t.transport) : A.yel(t.transport + '?')) : A.red(t.transport))).join(' ') || A.dim('no transports');
+      console.log(`${online ? A.grn('●') : A.dim('○')} ${d.name}  ${A.dim(d.id)}`);
+      console.log(`   ${d.kind}${d.platform ? '/' + d.platform : ''} · ${wires} · seen ${fmtWhen(d.last_seen_at)}${d.owner_principal_id ? A.dim(' · owner ' + d.owner_principal_id) : ''}`);
+    }
+    console.log(A.dim('\n  ● online   green=enrolled  yellow=awaiting enrollment  red=revoked'));
+    return;
+  }
+  if (verb === 'add') {
+    const name = rest.slice(1).join(' ').trim();
+    if (!name) return console.log(A.red('usage: asmltr device add "<name>" [--kind workstation] [--platform windows] [--owner <principal_id>]'));
+    const d = await coreApi('/v2/devices', 'POST', { name, kind: f.kind || 'workstation', platform: f.platform || null, owner_principal_id: f.owner || null });
+    console.log(A.grn(`✓ ${d.name}  ${A.dim(d.id)}`));
+    if (f.owner) console.log(A.dim(`  owner ${f.owner} granted view/control/shell/file/wake (revocable like any grant)`));
+    console.log(A.dim('  next: asmltr device enroll ' + d.id));
+    return;
+  }
+  if (verb === 'enroll') {
+    const id = rest[1];
+    if (!id) return console.log(A.red('usage: asmltr device enroll <device_id> [--transport rd]'));
+    const c = await coreApi(`/v2/devices/${encodeURIComponent(id)}/enroll`, 'POST', { transport: f.transport || 'rd' });
+    console.log(`enrollment code for ${A.cyn(id)} (${c.transport}), valid until ${fmtWhen(c.expires_at)}:\n`);
+    console.log('  ' + A.grn(c.code) + '\n');
+    console.log(A.dim('  single-use. On the machine, run the host agent once with:'));
+    console.log(A.dim(`    host-remote-desktop.exe -broker <broker-url> -enroll ${c.code}`));
+    return;
+  }
+  if (verb === 'grant') {
+    const [, principal, id, capability] = rest;
+    if (!principal || !id || !capability) return console.log(A.red('usage: asmltr device grant <principal_id> <device_id> <view|control|shell|file|wake> [--transport rd] [--forbid] [--expires <ms-epoch>]'));
+    const g = await coreApi(`/v2/devices/${encodeURIComponent(id)}/grants`, 'POST', {
+      principal_id: principal, capability, transport: f.transport || null,
+      effect: bool('forbid') ? 'forbid' : 'allow', expires_at: f.expires ? Number(f.expires) : null, granted_by: 'cli',
+    });
+    console.log(A.grn(`✓ grant #${g.id}: ${principal} ${bool('forbid') ? A.red('FORBIDDEN') : 'may'} ${capability} on ${id}`));
+    return;
+  }
+  if (verb === 'grants') {
+    const id = rest[1];
+    if (!id) return console.log(A.red('usage: asmltr device grants <device_id>'));
+    const { grants } = await coreApi(`/v2/devices/${encodeURIComponent(id)}/grants`);
+    if (!grants.length) return console.log(A.dim('no grants — nobody may touch this device (default-deny)'));
+    for (const g of grants) {
+      const exp = g.expires_at ? (g.expires_at < Date.now() ? A.red(' EXPIRED') : A.dim(' until ' + fmtWhen(g.expires_at))) : '';
+      console.log(`  #${String(g.id).padEnd(4)} ${g.effect === 'forbid' ? A.red('FORBID') : A.grn('allow ')} ${g.capability.padEnd(8)} ${g.principal_id}${g.transport ? A.dim(' [' + g.transport + ']') : ''}${exp}${A.dim(' · by ' + (g.granted_by || '?'))}`);
+    }
+    return;
+  }
+  if (verb === 'ungrant') {
+    const gid = rest[1];
+    if (!gid) return console.log(A.red('usage: asmltr device ungrant <grant_id>'));
+    const r = await coreApi(`/v2/device-grants/${encodeURIComponent(gid)}`, 'DELETE');
+    console.log(r.ok ? A.grn(`✓ grant #${gid} revoked`) : A.red('no such active grant'));
+    return;
+  }
+  if (verb === 'sessions') {
+    const { sessions } = await coreApi(`/v2/device-sessions?${rest[1] ? 'device_id=' + encodeURIComponent(rest[1]) + '&' : ''}${bool('open') ? 'open=1' : ''}`);
+    if (!sessions.length) return console.log(A.dim('no sessions recorded'));
+    for (const x of sessions) {
+      const live = !x.ended_at;
+      console.log(`${live ? A.grn('▶') : A.dim('·')} ${fmtWhen(x.started_at)}  ${x.capability.padEnd(7)} ${x.device_id}  ${A.dim(x.principal_id || 'unknown')}${live ? A.grn('  LIVE ') + A.dim(x.id) : A.dim('  ' + (x.end_reason || 'closed'))}`);
+    }
+    return;
+  }
+  if (verb === 'kill') {
+    const sid = rest[1];
+    if (!sid) return console.log(A.red('usage: asmltr device kill <session_id>'));
+    const r = await coreApi(`/v2/device-sessions/${encodeURIComponent(sid)}`, 'DELETE');
+    console.log(r.ok ? A.grn(`✓ session ${sid} killed`) : A.yel('session was not open'));
+    return;
+  }
+  if (verb === 'revoke') {
+    const id = rest[1];
+    if (!id) return console.log(A.red('usage: asmltr device revoke <device_id> [--transport rd]'));
+    const r = await coreApi(`/v2/devices/${encodeURIComponent(id)}/revoke`, 'POST', { transport: f.transport || null });
+    console.log(A.grn(`✓ revoked ${id}`) + A.dim(`  (${r.transports_revoked} transport(s), ${r.grants_revoked || 0} grant(s), ${r.sessions_closed || 0} live session(s) closed)`));
+    if (r.vault_errors && r.vault_errors.length) console.log(A.yel('  vault cleanup issues: ' + r.vault_errors.join('; ')));
+    return;
+  }
+  if (verb === 'rm') {
+    const id = rest[1];
+    if (!id) return console.log(A.red('usage: asmltr device rm <device_id>'));
+    await coreApi(`/v2/devices/${encodeURIComponent(id)}/revoke`, 'POST', {}).catch(() => {});
+    const r = await coreApi(`/v2/devices/${encodeURIComponent(id)}`, 'DELETE');
+    console.log(r.ok ? A.grn(`✓ ${id} revoked and removed`) : A.red('no such device'));
+    return;
+  }
+  console.log(`asmltr device — the machines ${process.env.ASSISTANT_NAME || 'the assistant'} can reach
+
+  ls                                        every registered device, online or not
+  add "<name>" [--kind K --platform P --owner <pid>]
+  enroll <device_id> [--transport rd]       mint a single-use enrollment code
+  grant <principal> <device> <capability> [--transport T --forbid --expires <ms>]
+  grants <device_id>                        who may do what here
+  ungrant <grant_id>
+  sessions [device_id] [--open]             the audit trail
+  kill <session_id>                         tear down a live session now
+  revoke <device_id> [--transport rd]       kill the credential, grants and sessions
+  rm <device_id>                            revoke, then forget the device entirely
+
+  capabilities: view · control · shell · file · wake      (default-deny; forbid always wins)`);
+}
+
 async function cmdVault(rest, f) {
   const fs = require('fs');
   const path = require('path');
@@ -850,6 +972,7 @@ async function cmdVault(rest, f) {
       case 'update': return await cmdUpdate(rest, f);
       case 'silo': return await cmdSilo(rest, f);
       case 'backup': return await cmdBackup(rest, f);
+      case 'device': case 'devices': return await cmdDevice(rest, f);
       case 'vault': return await cmdVault(rest, f);
       case 'version': case '--version': return await cmdVersion();
       case 'help': case '--help': case '-h': return cmdHelp();

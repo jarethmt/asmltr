@@ -117,30 +117,46 @@ async function start(ctx) {
   }
   const push = (map, id, obj) => { const d = map.get(id); if (!d) return false; try { d.res.write(`data: ${JSON.stringify(obj)}\n\n`); return true; } catch (_) { return false; } };
 
-  // Trust: view + control are SEPARATE grants, resolved against the caller's trust identity (default-deny).
-  // The connector SDK exposes trust resolution as ctx.core.resolve(envelope) → POST /trust/resolve, which
-  // returns { user_key, display_name, trust_tier, permissions, bypass_moderation, is_default, revoked, ... }.
-  // We resolve the keys.json identity on THIS connector's own surface ('remote-desktop') so grants can be
-  // scoped to remote-desktop specifically. Rules (default-deny for unknown/revoked):
-  //   view    = a KNOWN, non-revoked principal at trust_tier >= 1 (or full trust).
-  //   control = FULL TRUST only (bypass_moderation) — remote keyboard/mouse is the highest-power capability.
-  async function grants(identity) {
+  // --- authorization: per (principal x device x capability), not per person --------------------
+  // Until P1 this was two booleans derived from the caller's trust tier, evaluated once for the
+  // whole surface — so "may control ANY machine" was the only expressible answer. Access is now a
+  // property of the PAIR: the registry resolves what this principal may do to THIS device over THIS
+  // transport, default-deny, forbid-wins (core/src/devices/store.js: resolveDeviceGrants).
+  //
+  // A peer still on the legacy keys.json has no device row, so it falls back to the old trust-tier
+  // check — otherwise a mid-migration install would lock itself out of its own machines.
+  async function deviceGrants(principalId, deviceId) {
+    if (!principalId || !deviceId) return { view: false, control: false };
+    try {
+      const r = await ctx.core._post('/v2/devices/grants/resolve', { principal_id: principalId, device_id: deviceId, transport: 'rd' });
+      return { view: !!(r && r.allow && r.allow.view), control: !!(r && r.allow && r.allow.control) };
+    } catch (_) { return { view: false, control: false }; } // fail closed
+  }
+
+  async function legacyGrants(identity) {
     try {
       const r = await ctx.core.resolve({ channel: 'remote-desktop', sender: { raw_id: identity } });
       const tier = Number(r && r.trust_tier) || 0;
       const bypass = !!(r && r.bypass_moderation);
-      const known = !!(r && !r.is_default && !r.revoked); // is_default = no matching principal
-      return {
-        view: known && (bypass || tier >= 1),
-        control: bypass, // full-trust identity ONLY
-        tier,
-        user_key: (r && r.user_key) || identity,
-        display_name: (r && r.display_name) || identity,
-      };
-    } catch (_) {
-      return { view: false, control: false, tier: 0, user_key: identity, display_name: identity }; // fail closed
-    }
+      const known = !!(r && !r.is_default && !r.revoked);
+      return { view: known && (bypass || tier >= 1), control: bypass };
+    } catch (_) { return { view: false, control: false }; }
   }
+
+  // `who` is the authenticated peer (the viewer); `hostDeviceId` is the machine it wants.
+  async function grantsFor(who, hostDeviceId) {
+    if (who && who.device_id && hostDeviceId) return deviceGrants(who.identity, hostDeviceId);
+    return legacyGrants(who && who.identity);
+  }
+
+  // Audit: the broker owns the truth about who connected to what, so it writes the record.
+  // Best-effort — a failed audit write must never block or break a legitimate session.
+  const openSession = (sid, hostDeviceId, who, capability) => {
+    ctx.core._post('/v2/device-sessions', {
+      id: sid, device_id: hostDeviceId, principal_id: who.identity, transport: 'rd', capability, surface: 'remote-desktop',
+    }).catch(() => {});
+  };
+  const closeSession = (sid, reason) => { ctx.core._post(`/v2/device-sessions/${sid}/close`, { reason }).catch(() => {}); };
 
   // Where to reach the android connector's device gateway for cast-to-device pushes (its /out path).
   const ANDROID_GW = (cfg.android_gw_url || process.env.ASMLTR_ANDROID_GW_URL || 'http://127.0.0.1:3027').replace(/\/+$/, '');
@@ -195,23 +211,30 @@ async function start(ctx) {
     const type = String(b.type || '');
     try {
       if (type === 'list') {
-        const g = await grants(who.identity);
-        if (!g.view) return res.json({ ok: true, hosts: [] });
-        return res.json({ ok: true, hosts: [...hosts.entries()].map(([id, h]) => ({ host_id: id, name: h.name, caps: h.caps, online: true })) });
+        // Filtered per host: a caller sees exactly the machines they hold a view grant on, so an
+        // unauthorized machine is not merely un-connectable, it is invisible.
+        const out = [];
+        for (const [id, h] of hosts.entries()) {
+          const g = await grantsFor(who, h.device_id || id);
+          if (!g.view) continue;
+          out.push({ host_id: id, name: h.name, caps: h.caps, online: true, can_control: g.control });
+        }
+        return res.json({ ok: true, hosts: out });
       }
       if (type === 'connect') {
         const hostId = String(b.host_id || '');
         const host = hosts.get(hostId);
         if (!host) return res.status(404).json({ ok: false, error: 'host offline' });
-        const g = await grants(who.identity);
-        if (!g.view) return res.status(403).json({ ok: false, error: 'no view grant for remote desktop (default-deny)' });
+        const g = await grantsFor(who, host.device_id || hostId);
+        if (!g.view) return res.status(403).json({ ok: false, error: `no view grant for ${host.name || hostId} (default-deny)` });
         const wantControl = !!(b.want && b.want.control);
-        if (wantControl && !g.control) return res.status(403).json({ ok: false, error: 'no control grant (view-only)' });
+        if (wantControl && !g.control) return res.status(403).json({ ok: false, error: `no control grant for ${host.name || hostId} (view-only)` });
         const sessionId = crypto.randomBytes(9).toString('base64url');
         const clientId = String(b.client_id || who.identity);
         sessions.set(sessionId, { host_id: hostId, client_id: clientId, control: wantControl && g.control, identity: who.identity, device_id: who.device_id || null, since: Date.now() });
         // Ask the host to make an offer for this session (control flag stamped by the broker → agent re-checks it).
         push(hosts, hostId, { type: 'offer_request', session_id: sessionId, control: wantControl && g.control });
+        openSession(sessionId, host.device_id || hostId, who, wantControl && g.control ? 'control' : 'view');
         ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:sess:${sessionId}`, identity: who.identity, payload: { action: 'session-open', host_id: hostId, control: wantControl && g.control } });
         return res.json({ ok: true, session_id: sessionId, control: wantControl && g.control });
       }
@@ -246,6 +269,7 @@ async function start(ctx) {
           push(hosts, s.host_id, { type: 'bye', session_id: b.session_id });
           push(viewers, s.client_id, { type: 'bye', session_id: b.session_id });
           sessions.delete(String(b.session_id));
+          closeSession(String(b.session_id), 'closed');
           ctx.emit({ surface: 'assistant-native', event_type: 'control', session_id: `rd:sess:${b.session_id}`, identity: who.identity, payload: { action: 'session-close' } });
         }
         return res.json({ ok: true });
@@ -266,8 +290,11 @@ async function start(ctx) {
     const b = req.body || {};
     const who = await auth(b.token);
     if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
-    const g = await grants(who.identity);
-    if (!g.control) return res.status(403).json({ ok: false, error: 'cast requires full trust (control grant)' });
+    // Casting projects a machine's screen onto someone's device, so it is gated on CONTROL of that
+    // machine — not on a global trust tier.
+    const castHost = hosts.get(String(b.host_id || ''));
+    const g = await grantsFor(who, (castHost && castHost.device_id) || String(b.host_id || ''));
+    if (!g.control) return res.status(403).json({ ok: false, error: 'cast requires a control grant on that machine' });
     const hostId = String(b.host_id || '');
     if (!hostId) return res.status(400).json({ ok: false, error: 'host_id required' });
     const control = !!b.control && g.control;
@@ -289,7 +316,7 @@ async function start(ctx) {
   app.get('/rd/devices', async (req, res) => {
     const who = await auth(req.query.token);
     if (requireToken && !who) return res.status(401).json({ ok: false, error: 'invalid token' });
-    const g = await grants(who.identity);
+    const g = await legacyGrants(who.identity); // the target-device picker, not a per-machine decision
     if (!g.view) return res.json({ ok: true, devices: [], can_cast: false });
     try {
       const r = await fetch(ANDROID_GW + '/gw/devices');
@@ -336,7 +363,17 @@ async function start(ctx) {
   app.post('/rd/invalidate', (req, res) => {
     const b = req.body || {};
     const deviceId = String(b.device_id || '');
+    const killSid = String(b.session_id || '');
     if (b.token) authCache.delete(String(b.token));
+    if (killSid) {
+      const sess = sessions.get(killSid);
+      if (sess) {
+        push(hosts, sess.host_id, { type: 'bye', session_id: killSid, reason: 'killed' });
+        push(viewers, sess.client_id, { type: 'bye', session_id: killSid, reason: 'killed' });
+        sessions.delete(killSid);
+      }
+      return res.json({ ok: true, sessions_killed: sess ? 1 : 0 });
+    }
     let cleared = 0;
     for (const [tok, v] of authCache.entries()) {
       if (!deviceId || (v.who && v.who.device_id === deviceId)) { authCache.delete(tok); cleared++; }

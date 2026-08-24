@@ -1983,12 +1983,73 @@ app.post('/v2/devices/redeem', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/v2/devices/:id/revoke', async (req, res) => {
-  try { res.json(await deviceEnroll.revoke(req.params.id, (req.body || {}).transport || null)); }
+  try {
+    const out = await deviceEnroll.revoke(req.params.id, (req.body || {}).transport || null);
+    // Don't make revocation wait out the broker's auth-cache TTL.
+    try { out.broker = await pokeRdBroker({ device_id: req.params.id }); } catch (e) { out.broker = { error: e.message }; }
+    res.json(out);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// --- P1: per-device authorization + session audit ----------------------------------------------
+app.get('/v2/devices/:id/grants', (req, res) => res.json({ grants: deviceStore.grants.list({ device_id: req.params.id }) }));
+app.post('/v2/devices/:id/grants', (req, res) => {
+  try { res.status(201).json(deviceStore.grants.create({ ...(req.body || {}), device_id: req.params.id })); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/v2/device-grants/:gid', (req, res) => res.json({ ok: deviceStore.grants.revoke(Number(req.params.gid)) }));
+
+// What may a principal actually do here? The preview the dashboard shows before you trust a grant.
+app.post('/v2/devices/:id/resolve', (req, res) => {
+  const b = req.body || {};
+  res.json(deviceStore.resolveDeviceGrants(b.principal_id, req.params.id, b.transport || null));
+});
+
+app.get('/v2/device-sessions', (req, res) => res.json({
+  sessions: deviceStore.deviceSessions.list({ device_id: req.query.device_id, open_only: req.query.open === '1', limit: req.query.limit }),
+}));
+// Opened/closed BY THE BROKER as peers connect — the audit trail is written where the truth is,
+// not inferred from telemetry after the fact.
+app.post('/v2/device-sessions', (req, res) => {
+  const b = req.body || {};
+  try { res.status(201).json({ id: deviceStore.deviceSessions.open(b) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/v2/device-sessions/:sid/close', (req, res) => res.json({ ok: deviceStore.deviceSessions.close(req.params.sid, (req.body || {}).reason || 'closed') }));
+
+// Kill a live session. Closing the audit row is only half of it — the broker holds the actual
+// peer connections, so it is poked to tear them down as well.
+app.delete('/v2/device-sessions/:sid', async (req, res) => {
+  const closed = deviceStore.deviceSessions.close(req.params.sid, 'killed');
+  let broker = null;
+  try { broker = await pokeRdBroker({ session_id: req.params.sid }); } catch (e) { broker = { error: e.message }; }
+  res.json({ ok: closed, broker });
 });
 
 // THE HOT PATH. The remote-desktop broker calls this on every signaling message, so it stays a
 // single indexed hash lookup — no vault round-trip — and the caller caches it briefly.
+// Reach the remote-desktop broker to invalidate a cached decision or tear down live sessions.
+// Best-effort by design: the registry is the authority, so a revoke has already taken effect at the
+// next uncached check even if this poke fails — it only makes it immediate.
+const RD_BROKER_URL = (process.env.ASMLTR_RD_BROKER_URL || 'http://172.18.0.1:3028').replace(/\/+$/, '');
+async function pokeRdBroker(body) {
+  const r = await fetch(RD_BROKER_URL + '/rd/invalidate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  });
+  return await r.json().catch(() => ({ ok: r.ok }));
+}
+
+// Per-device authorization for the broker: (principal x device x transport) -> capabilities.
+app.post('/v2/devices/grants/resolve', (req, res) => {
+  const b = req.body || {};
+  res.json(deviceStore.resolveDeviceGrants(b.principal_id, b.device_id, b.transport || null));
+});
+// Which devices may this principal see? Drives the broker's filtered `list` (and the P2 client feed).
+app.post('/v2/devices/for-principal', (req, res) => {
+  const b = req.body || {};
+  res.json({ devices: deviceStore.devicesForPrincipal(b.principal_id, { transport: b.transport || null, capability: b.capability || 'view' }) });
+});
+
 app.post('/v2/devices/auth', (req, res) => {
   const b = req.body || {};
   const who = deviceStore.authenticate(b.token, b.transport || null);

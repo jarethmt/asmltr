@@ -6,7 +6,9 @@ const routes = [
   { path: '/timeline', name: 'timeline', component: () => import('@/views/Timeline.vue'), meta: { title: 'Timeline', icon: '≣' } },
   { path: '/recordings', name: 'recordings', component: () => import('@/views/Recordings.vue'), meta: { title: 'Recordings', icon: '🎙' } },
   { path: '/streams', name: 'streams', component: () => import('@/views/Streams.vue'), meta: { title: 'Streams', icon: '🌊' } },
-  { path: '/remote-desktop', name: 'remote-desktop', component: () => import('@/views/RemoteDesktop.vue'), meta: { title: 'Remote Desktop', icon: '🖥' } },
+  { path: '/fleet', name: 'fleet', component: () => import('@/views/Fleet.vue'), meta: { title: 'Fleet', icon: '🖥' } },
+  // Superseded by Fleet; kept so existing links/bookmarks still land somewhere sensible.
+  { path: '/remote-desktop', redirect: '/fleet' },
   { path: '/usage', name: 'usage', component: () => import('@/views/Usage.vue'), meta: { title: 'Usage', icon: '▤' } },
   { path: '/system', name: 'system', component: () => import('@/views/System.vue'), meta: { title: 'System', icon: '▦' } },
   { path: '/schedules', name: 'schedules', component: () => import('@/views/Schedules.vue'), meta: { title: 'Schedules', icon: '⏱' } },

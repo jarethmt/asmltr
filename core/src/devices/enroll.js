@@ -19,7 +19,7 @@
  */
 const crypto = require('crypto');
 const vault = require('../../../shared/vault');
-const { devices, transports, enrollments } = require('./store');
+const { devices, transports, grants, deviceSessions, enrollments } = require('./store');
 
 const credentialRef = (deviceId, transport) => `device:${deviceId}:${transport}`;
 
@@ -71,13 +71,20 @@ async function redeem(code) {
  */
 async function revoke(deviceId, transport = null) {
   const affected = transports.revoke(deviceId, transport);
+  // Revoking a whole device pulls its grants and closes its open sessions too; revoking a single
+  // transport only cuts that wire, leaving the device and anyone's access to its other transports.
+  let grantsRevoked = 0, sessionsClosed = 0;
+  if (!transport) {
+    grantsRevoked = grants.revokeForDevice(deviceId);
+    for (const s of deviceSessions.openForDevice(deviceId)) { deviceSessions.close(s.id, 'revoked'); sessionsClosed++; }
+  }
   const list = transport ? [transport] : (devices.get(deviceId)?.transports || []).map((t) => t.transport);
   const vaultErrors = [];
   for (const t of list) {
     try { await vault.deleteSecret(credentialRef(deviceId, transport || t)); }
     catch (e) { vaultErrors.push(`${t}: ${e.message}`); }
   }
-  return { ok: true, transports_revoked: affected, vault_errors: vaultErrors };
+  return { ok: true, transports_revoked: affected, grants_revoked: grantsRevoked, sessions_closed: sessionsClosed, vault_errors: vaultErrors };
 }
 
 module.exports = { issue, mintCode, redeem, revoke, credentialRef };

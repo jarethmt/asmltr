@@ -435,6 +435,33 @@ export const stt = {
 // `cast` needs full trust (control). Unlike the collector/manager, the token isn't injected by nginx —
 // the broker's clients are agents/phones presenting a token, so we keep it DEVICE-LOCAL (localStorage,
 // like the mobile RD viewer) and send it in the message body.
+// --- device registry (docs/DEVICE-REGISTRY.md) --------------------------------------------------
+// The machines the assistant can reach. Unlike the /rd/* signaling surface, this goes through the
+// core API behind the dashboard's own session auth — no device token involved, because the registry
+// is operator-facing (who may touch what) rather than peer-facing (proving you are a device).
+export const devices = {
+  list: () => getCore('/v2/devices'),
+  get: (id) => getCore(`/v2/devices/${encodeURIComponent(id)}`),
+  create: (body) => postCore('/v2/devices', body),
+  update: (id, body) => reqCore('PATCH', `/v2/devices/${encodeURIComponent(id)}`, body),
+  remove: (id) => reqCore('DELETE', `/v2/devices/${encodeURIComponent(id)}`),
+  enroll: (id, transport = 'rd') => postCore(`/v2/devices/${encodeURIComponent(id)}/enroll`, { transport }),
+  revoke: (id, transport = null) => postCore(`/v2/devices/${encodeURIComponent(id)}/revoke`, { transport }),
+  grants: (id) => getCore(`/v2/devices/${encodeURIComponent(id)}/grants`),
+  grant: (id, body) => postCore(`/v2/devices/${encodeURIComponent(id)}/grants`, body),
+  ungrant: (gid) => reqCore('DELETE', `/v2/device-grants/${encodeURIComponent(gid)}`),
+  // Preview what a principal may actually do here BEFORE trusting a grant — the same question the
+  // broker asks at connect time, answered by the same resolver.
+  resolve: (id, principal_id, transport = null) => postCore(`/v2/devices/${encodeURIComponent(id)}/resolve`, { principal_id, transport }),
+  sessions: (params = {}) => {
+    const qs = new URLSearchParams()
+    if (params.device_id) qs.set('device_id', params.device_id)
+    if (params.open) qs.set('open', '1')
+    return getCore('/v2/device-sessions' + (qs.toString() ? '?' + qs : ''))
+  },
+  kill: (sid) => reqCore('DELETE', `/v2/device-sessions/${encodeURIComponent(sid)}`),
+}
+
 const RD_TOKEN_KEY = 'asmltr.rd.token'
 export const rd = {
   // Prefer a device-local token the owner set; otherwise fall back to the token injected by nginx into

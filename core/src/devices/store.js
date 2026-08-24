@@ -56,6 +56,36 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_dt_token ON device_transports(token_hash) WHERE token_hash IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_dt_device ON device_transports(device_id);
+  -- P1: authorization + audit. Grants are per (principal x device x transport x capability) — the
+  -- shape real device access actually has, and the thing a trust tier alone cannot express.
+  CREATE TABLE IF NOT EXISTS device_grants (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    principal_id TEXT NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+    device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    transport    TEXT,                                   -- NULL = every transport of the device
+    capability   TEXT NOT NULL,                          -- view|control|shell|file|wake
+    effect       TEXT NOT NULL DEFAULT 'allow',          -- allow|forbid  (forbid ALWAYS wins)
+    expires_at   INTEGER,
+    granted_by   TEXT,
+    revoked_at   INTEGER,
+    created_at   INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_dg_lookup ON device_grants(principal_id, device_id);
+  CREATE INDEX IF NOT EXISTS idx_dg_device ON device_grants(device_id);
+  -- Append-only: what actually happened, as opposed to what was permitted.
+  CREATE TABLE IF NOT EXISTS device_sessions (
+    id           TEXT PRIMARY KEY,
+    device_id    TEXT NOT NULL,
+    principal_id TEXT,
+    transport    TEXT NOT NULL,
+    capability   TEXT NOT NULL,
+    surface      TEXT,
+    started_at   INTEGER NOT NULL,
+    ended_at     INTEGER,
+    end_reason   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_ds_device ON device_sessions(device_id, started_at);
+  CREATE INDEX IF NOT EXISTS idx_ds_open ON device_sessions(ended_at) WHERE ended_at IS NULL;
   CREATE TABLE IF NOT EXISTS device_enrollments (
     code_hash   TEXT PRIMARY KEY,
     device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
@@ -72,6 +102,7 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 const TRANSPORTS = ['rd', 'ssh', 'adb', 'device-gw', 'serial', 'http'];
 const KINDS = ['workstation', 'phone', 'sbc', 'appliance', 'printer', 'other'];
+const CAPABILITIES = ['view', 'control', 'shell', 'file', 'wake'];
 
 function slug(name) {
   return String(name || 'device').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'device';
@@ -111,6 +142,7 @@ const devices = {
     db.prepare(`INSERT INTO devices (id,name,kind,platform,owner_principal_id,tags,notes,status,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?, 'active', ?,?)`)
       .run(did, name, kind, platform, owner_principal_id, JSON.stringify(tags || []), notes || '', now(), now());
+    if (owner_principal_id) ensureOwnerGrants(did);
     return devices.get(did);
   },
   update: (id, f = {}) => {
@@ -121,6 +153,7 @@ const devices = {
       .run(f.name ?? d.name, f.kind ?? d.kind, f.platform ?? d.platform,
         f.owner_principal_id !== undefined ? f.owner_principal_id : d.owner_principal_id,
         JSON.stringify(f.tags ?? J(d.tags, [])), f.notes ?? d.notes, f.status ?? d.status, now(), id);
+    if (f.owner_principal_id) ensureOwnerGrants(id);
     return devices.get(id);
   },
   remove: (id) => db.prepare('DELETE FROM devices WHERE id=?').run(id).changes > 0,
@@ -163,6 +196,107 @@ const transports = {
     db.prepare('UPDATE device_transports SET last_seen_at=? WHERE device_id=? AND transport=?').run(now(), deviceId, transport);
     devices.touch(deviceId);
   },
+};
+
+const grants = {
+  list: ({ device_id, principal_id } = {}) => {
+    let sql = 'SELECT * FROM device_grants WHERE revoked_at IS NULL';
+    const args = [];
+    if (device_id) { sql += ' AND device_id=?'; args.push(device_id); }
+    if (principal_id) { sql += ' AND principal_id=?'; args.push(principal_id); }
+    return db.prepare(sql + ' ORDER BY created_at DESC').all(...args);
+  },
+  create: ({ principal_id, device_id, transport = null, capability, effect = 'allow', expires_at = null, granted_by = null }) => {
+    if (!principal_id || !device_id) throw new Error('principal_id and device_id are required');
+    if (!CAPABILITIES.includes(capability)) throw new Error(`capability must be one of: ${CAPABILITIES.join(', ')}`);
+    if (!['allow', 'forbid'].includes(effect)) throw new Error("effect must be 'allow' or 'forbid'");
+    if (transport && !TRANSPORTS.includes(transport)) throw new Error(`transport must be one of: ${TRANSPORTS.join(', ')}`);
+    if (!devices.get(device_id)) throw new Error(`unknown device: ${device_id}`);
+    db.prepare(`INSERT INTO device_grants (principal_id,device_id,transport,capability,effect,expires_at,granted_by,created_at)
+                VALUES (?,?,?,?,?,?,?,?)`)
+      .run(principal_id, device_id, transport, capability, effect, expires_at, granted_by, now());
+    return db.prepare('SELECT * FROM device_grants WHERE id=?').get(db.prepare('SELECT last_insert_rowid() AS id').get().id);
+  },
+  revoke: (id) => db.prepare('UPDATE device_grants SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(now(), id).changes > 0,
+  revokeForDevice: (deviceId) => db.prepare('UPDATE device_grants SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL').run(now(), deviceId).changes,
+};
+
+/**
+ * Give a device's owner their access as REAL grant rows rather than a special case in the resolver.
+ * Idempotent. The distinction matters: an owner's access is then visible in the UI, listed in an
+ * audit, and revocable with the same verb as anyone else's.
+ */
+function ensureOwnerGrants(deviceId, grantedBy = 'owner-implicit') {
+  const d = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!d || !d.owner_principal_id) return 0;
+  const have = new Set(db.prepare(`SELECT capability FROM device_grants
+      WHERE principal_id=? AND device_id=? AND transport IS NULL AND effect='allow' AND revoked_at IS NULL`)
+    .all(d.owner_principal_id, deviceId).map((r) => r.capability));
+  let added = 0;
+  for (const c of CAPABILITIES) {
+    if (have.has(c)) continue;
+    grants.create({ principal_id: d.owner_principal_id, device_id: deviceId, capability: c, granted_by: grantedBy });
+    added++;
+  }
+  return added;
+}
+
+/**
+ * Resolve what `principalId` may do to `deviceId` over `transport`.
+ *
+ * Same semantics the trust store already uses, deliberately: DEFAULT-DENY (no matching grant → no
+ * capability) and FORBID ALWAYS WINS (an explicit forbid cannot be out-voted by any allow). A grant
+ * with transport NULL applies to every transport; expired and revoked grants are simply not there.
+ *
+ * The owner of a device is NOT special-cased here. Owner access is written as a real grant row at
+ * enrollment (`granted_by='owner-implicit'`), so it shows up in the UI and can be revoked like any
+ * other — invisible policy in code is exactly what this table exists to replace.
+ */
+function resolveDeviceGrants(principalId, deviceId, transport = null) {
+  const out = { capabilities: [], allow: {}, principal_id: principalId || null, device_id: deviceId, transport };
+  if (!principalId || !deviceId) return out;
+  const d = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
+  if (!d || d.status !== 'active') return out;
+
+  const rows = db.prepare(`SELECT * FROM device_grants
+     WHERE principal_id=? AND device_id=? AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > ?)`).all(principalId, deviceId, now());
+
+  const allowed = new Set(), forbidden = new Set();
+  for (const g of rows) {
+    if (g.transport && transport && g.transport !== transport) continue;
+    (g.effect === 'forbid' ? forbidden : allowed).add(g.capability);
+  }
+  for (const c of forbidden) allowed.delete(c);
+  out.capabilities = [...allowed].sort();
+  for (const c of CAPABILITIES) out.allow[c] = allowed.has(c);
+  return out;
+}
+
+/** Which devices may this principal see at all? Drives the app + dashboard device list (P2). */
+function devicesForPrincipal(principalId, { transport = null, capability = 'view' } = {}) {
+  return devices.list({ transport })
+    .map((d) => ({ device: d, grants: resolveDeviceGrants(principalId, d.id, transport) }))
+    .filter((x) => x.grants.allow[capability])
+    .map((x) => ({ ...x.device, capabilities: x.grants.capabilities }));
+}
+
+const deviceSessions = {
+  open: ({ id, device_id, principal_id, transport, capability, surface }) => {
+    db.prepare(`INSERT INTO device_sessions (id,device_id,principal_id,transport,capability,surface,started_at)
+                VALUES (?,?,?,?,?,?,?)`).run(id, device_id, principal_id || null, transport, capability, surface || null, now());
+    return id;
+  },
+  close: (id, reason = 'closed') => db.prepare('UPDATE device_sessions SET ended_at=?, end_reason=? WHERE id=? AND ended_at IS NULL').run(now(), reason, id).changes > 0,
+  list: ({ device_id, open_only, limit = 100 } = {}) => {
+    let sql = 'SELECT * FROM device_sessions WHERE 1=1';
+    const args = [];
+    if (device_id) { sql += ' AND device_id=?'; args.push(device_id); }
+    if (open_only) sql += ' AND ended_at IS NULL';
+    sql += ' ORDER BY started_at DESC LIMIT ?'; args.push(Math.min(Number(limit) || 100, 1000));
+    return db.prepare(sql).all(...args);
+  },
+  openForDevice: (deviceId) => db.prepare('SELECT * FROM device_sessions WHERE device_id=? AND ended_at IS NULL').all(deviceId),
 };
 
 /**
@@ -208,4 +342,5 @@ const enrollments = {
   purgeExpired: () => db.prepare('DELETE FROM device_enrollments WHERE expires_at < ? AND redeemed_at IS NULL').run(now()).changes,
 };
 
-module.exports = { devices, transports, enrollments, authenticate, TRANSPORTS, KINDS, sha, db };
+module.exports = { devices, transports, grants, enrollments, deviceSessions, authenticate,
+  resolveDeviceGrants, devicesForPrincipal, ensureOwnerGrants, TRANSPORTS, KINDS, CAPABILITIES, sha, db };

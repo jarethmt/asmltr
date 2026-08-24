@@ -25,6 +25,7 @@ const manifest = {
     { id: 'self', label: 'Self', icon: '🧠', desc: 'Proprioception — live parts + the deduced goal' },
     { id: 'schedules', label: 'Schedules', icon: '⏱', desc: 'Cron with a GUI — prompt jobs + shell jobs (powers the morning brief + notify)' },
     { id: 'drafts', label: 'Drafts', icon: '✎', desc: 'Replies held for human approval' },
+    { id: 'fleet', label: 'Fleet', icon: '🖥', desc: 'Machines the assistant can reach — transports, grants, live sessions, revocation' },
     { id: 'settings', label: 'Settings', icon: '⚙', desc: 'Identity, runtime, updates, voice' },
   ],
 

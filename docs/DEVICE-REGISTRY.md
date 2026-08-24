@@ -1,8 +1,9 @@
 # Device registry & canvas — design
 
-> **Status:** design / not built. This is the scoping document for the arc that turns the shipped
-> remote-desktop capability (v0.13.0) into a general **device control plane**, and adds a **canvas**
-> render surface on top of it.
+> **Status:** **P0 SHIPPED** (registry + vault-backed credentials). P1–P3 planned below; P4–P5 are
+> roadmap only. This is the scoping document for the arc that turns the shipped remote-desktop
+> capability (v0.13.0) into a general **device control plane**, and adds a **canvas** render surface
+> on top of it.
 
 ## The distinction this arc is built on
 
@@ -124,7 +125,7 @@ that already exist.
 
 ### Credentials move into the vault
 
-Every `credential_ref` resolves through `shared/vault.js`. Three wins that the current file cannot
+Every `credential_ref` resolves through `shared/vault.js`. Four wins that the current file cannot
 give us:
 
 1. **Issuance instead of hand-editing.** `asmltr device enroll` mints a one-time enrollment code;
@@ -135,6 +136,12 @@ give us:
 3. **Use-but-never-see for shell credentials.** SSH keys go in as vault credentials the runtime
    proxies — the model never holds a private key in its context. This is a hard prerequisite for
    the SSH transport, not a nice-to-have.
+4. **A registry read cannot leak a working credential.** *(Refined while building P0.)* The vault
+   holds the value; the registry row stores only a **SHA-256** of it, next to the `credential_ref`.
+   That is enough to VERIFY a presented token and not enough to reproduce one — so the hot path is a
+   single indexed hash lookup with **no vault round-trip**, which is also what makes it fast enough
+   to sit in front of every signaling message. Enrollment codes are stored hashed for the same
+   reason.
 
 ### Per-device authorization
 
@@ -227,7 +234,7 @@ Ordered so that nothing dangerous ships before the thing that can revoke it.
 
 | Phase | Scope | Why here |
 |---|---|---|
-| **P0** | `devices` + `device_transports` tables; enrollment; RD credentials migrated off `keys.json` into the vault | The foundation. Nothing else is safe or DRY without it. |
+| **P0** ✅ | `devices` + `device_transports` tables; enrollment; RD credentials migrated off `keys.json` into the vault | The foundation. Nothing else is safe or DRY without it. |
 | **P1** | `device_grants` + `device_sessions`; revocation and session kill; `Fleet.vue`; `asmltr device` CLI | Per-device authorization and the one-click revoke that was explicitly asked for. |
 | **P2** | Server-driven device list + short-lived session credentials to the app and dashboard | Removes hand-pasted config from every client. |
 | **P3** | Canvas frame kind + app rendering + delivery ladder | First consumer of the registry beyond RD. |
@@ -236,9 +243,9 @@ Ordered so that nothing dangerous ships before the thing that can revoke it.
 
 ## Open questions
 
-- Does a device's *owner* get implicit full grants, or must every capability be granted explicitly
-  even to the owner? (Explicit is safer; implicit is what a single-operator install will actually
-  want.)
+- ~~Does a device's *owner* get implicit full grants?~~ **Settled:** implicit, but written as a real
+  grant row (`granted_by='owner-implicit'`) so it is visible and revocable rather than invisible
+  policy in code.
 - Should offline machines be probe-able (wake-on-LAN, ping, agent heartbeat), or is `last_seen_at`
   from the transports enough?
 - Canvas payload ceiling — inline data for small images, upload-surface reference for anything
@@ -269,7 +276,16 @@ scope here by design: a shell transport must not ship before P1's revocation exi
    implicit for the owner, recorded as a real grant row with `granted_by='owner-implicit'`, so it is
    visible and revocable rather than invisible policy in code.
 
-## P0 — registry + vault-backed credentials
+## P0 — registry + vault-backed credentials — **SHIPPED**
+
+Two things came out different from the sketch below, both improvements found while building:
+
+- **Token verification is a hash comparison, not a vault lookup.** `device_transports.token_hash`
+  holds a SHA-256; the vault holds the value. This removed the performance risk flagged below *and*
+  made a registry read incapable of leaking a credential.
+- **Enrollment proxies through the broker** (`POST /rd/enroll`). The host agent can only reach the
+  broker — core is not publicly exposed — so the broker forwards the redemption to core. It is the
+  only `/rd` route reachable without a credential, necessarily, and is per-IP throttled.
 
 **Done means:** a machine has a durable row whether or not it is powered on; its remote-desktop
 credential is issued by asmltr into the vault; `keys.json` is gone.
