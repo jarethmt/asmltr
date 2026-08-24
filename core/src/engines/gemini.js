@@ -6,6 +6,11 @@
  * (`-p <prompt> -o stream-json`), parses its JSON line stream defensively, and normalizes to the
  * engine contract. The API key (api_key mode) is pulled from the TRUST vault → GEMINI_API_KEY.
  *
+ * Vision is NOT serialized here. Core already forwards `images` / `mediaFiles` on runTurn
+ * (same envelope as Grok/Claude). A Gemini-or-Codex implementer should wire those fields
+ * into this CLI's own image payload in runTurn — do not copy Grok `--prompt-file` or the
+ * Claude SDK image blocks into this adapter. See docs/REASONING-ENGINES.md "Vision today".
+ *
  * Notes / current limits:
  *  - Headless runs require workspace trust — we pass `--skip-trust` + GEMINI_CLI_TRUST_WORKSPACE=1.
  *  - Google deprecated the free "Code Assist for individuals" OAuth tier, so the practical auth path
@@ -48,7 +53,14 @@ function extractText(obj) {
 }
 
 let _mcpSynced = false;
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
+/**
+ * VISION (not wired): core already passes `images` (base64 stills) and `mediaFiles`
+ * (gen-ref paths) on runTurn — same envelope Grok/Claude get. If you are adding
+ * Gemini vision, serialize those fields HERE into this CLI's image payload.
+ * Do not copy Grok `--prompt-file` / `--prompt-json` or Claude SDK image blocks
+ * into this adapter. See docs/REASONING-ENGINES.md "Vision today".
+ */
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent /* images, mediaFiles: not serialized yet */ }) {
   const mdl = model || engines.modelFor('gemini');
   // MCP: gemini persists servers in its own config → reconcile the shared registry once per process.
   if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGemini(bin()); } catch (_) {} }
