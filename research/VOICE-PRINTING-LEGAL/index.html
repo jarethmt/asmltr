@@ -1,0 +1,2777 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="One channel-agnostic AI-assistant backend behind every chat surface — with a live insights dashboard.">
+      
+      
+      
+        <link rel="canonical" href="https://jarethmt.github.io/asmltr/research/VOICE-PRINTING-LEGAL/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Voice Printing (Voice Biometrics) for a Personal AI Meeting Recorder — Legal & Practical Deep-Dive - asmltr</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="pink">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#voice-printing-voice-biometrics-for-a-personal-ai-meeting-recorder-legal-practical-deep-dive" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="asmltr" class="md-header__button md-logo" aria-label="asmltr" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            asmltr
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Voice Printing (Voice Biometrics) for a Personal AI Meeting Recorder — Legal &amp; Practical Deep-Dive
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="pink"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="pink"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jarethmt/asmltr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jarethmt/asmltr
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="asmltr" class="md-nav__button md-logo" aria-label="asmltr" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    asmltr
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jarethmt/asmltr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jarethmt/asmltr
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What is asmltr?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning engines
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reasoning engines
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview & setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engines-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../REASONING-ENGINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The design (deep-dive)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../connectors/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/discord/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discord
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/openai/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAI-compatible
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/android/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android (device gateway)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/device/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device (generic gateway)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../integrations/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../silos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data silos & the Self silo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../backups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The asmltr CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage & cost accounting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SCHEDULES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules (cron with a GUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../NOTIFY-READ-ALOUD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notify & read-aloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../UPDATER-DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning & updates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../testing-the-updater/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing the updater
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coordination
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Coordination
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/injection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Steering & injection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/cross-channel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-channel send
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/announcements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Announcements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Identity, auth & trust
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Identity, auth & trust
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CAST/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The cast — identity & trust
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../AUTH/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth & identity provider
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ACCESS-EVOLUTION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Access evolution (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vision & roadmap
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Vision & roadmap
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEVICE-REGISTRY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device registry & canvas (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FEDERATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Federation (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP-VAULT-SILOS-BACKUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault · silos · backups (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/trust-vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TRUST vault (credentials & KMS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/trust/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trust & permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/moderation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Moderation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets & config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP endpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_14" id="__nav_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-is-a-voiceprint-legally-distinct-from-a-recording" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Is a voiceprint legally distinct from a recording?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-us-biometric-privacy-statutes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. US biometric privacy statutes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. US biometric privacy statutes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-illinois-bipa-740-ilcs-14-the-one-that-actually-bites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Illinois BIPA — 740 ILCS 14 (the one that actually bites)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-texas-cubi-capture-or-use-of-biometric-identifiers-act" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Texas CUBI — Capture or Use of Biometric Identifiers Act
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-washington-hb-1493-rcw-19375" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Washington HB 1493 (RCW 19.375)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-comprehensive-privacy-laws-20242026-the-broader-sensitive-data-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Comprehensive privacy laws (2024–2026) — the broader "sensitive data" layer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-wiretap-recording-consent-law-and-why-it-is-not-enough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Wiretap / recording-consent law — and why it is NOT enough
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-gdpr-eu-and-uk-gdpr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. GDPR / EU (and UK GDPR)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-owners-analogy-google-photos-face-scans-photos-i-took-without-the-subjects-separate-consent-how-is-voiceprinting-different" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The owner's analogy: "Google Photos face-scans photos I took without the subject's separate consent — how is voiceprinting different?"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-practical-design-a-defensible-actually-buildable-feature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Practical design — a defensible, actually-buildable feature
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Practical design — a defensible, actually-buildable feature">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Do
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dont" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Don't
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-concrete-defensible-default-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A concrete, defensible default configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-bottom-line-the-owner-can-act-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Bottom line the owner can act on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="voice-printing-voice-biometrics-for-a-personal-ai-meeting-recorder-legal-practical-deep-dive">Voice Printing (Voice Biometrics) for a Personal AI Meeting Recorder — Legal &amp; Practical Deep-Dive<a class="headerlink" href="#voice-printing-voice-biometrics-for-a-personal-ai-meeting-recorder-legal-practical-deep-dive" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> Research / design input — <strong>NOT legal advice.</strong> Written for a build decision on the asmltr meeting-recorder feature. Verify with a licensed attorney before relying on any of this in production, especially before enabling third-party voiceprinting in a commercial product. Law here is fast-moving and varies sharply by state.</p>
+<p><strong>Date:</strong> 2026-08-05
+<strong>Owner question:</strong> <em>"Do you need explicit SEPARATE consent for voice printing beyond consent to record? Where are the lines, and what would make for a reasonable, actually-buildable tool?"</em></p>
+<p><strong>Short answer up front:</strong> <strong>Yes.</strong> In the jurisdictions that matter most (Illinois above all, plus the EU/UK and a growing set of US states), a <em>voiceprint</em> is a legally distinct thing from a <em>recording</em>, and consent-to-record does <strong>not</strong> cover it. The feature you described — build a persistent voiceprint to recognize a recurring speaker across recordings — is exactly the conduct currently being sued over (Otter.ai, Fireflies). It is buildable and defensible, but only with a <strong>separate, plain-language, opt-in biometric consent</strong>, a <strong>published retention/destruction policy</strong>, encrypted per-person storage, no sale/sharing, and jurisdiction-aware gating. See §6 for the concrete design.</p>
+<hr />
+<h2 id="1-is-a-voiceprint-legally-distinct-from-a-recording">1. Is a voiceprint legally distinct from a recording?<a class="headerlink" href="#1-is-a-voiceprint-legally-distinct-from-a-recording" title="Permanent link">&para;</a></h2>
+<p><strong>Yes, in most relevant jurisdictions.</strong> A recording is <em>audio content</em>. A <strong>voiceprint</strong> is a <em>biometric identifier</em> — data produced by technical processing of a person's unique vocal characteristics for the purpose of identifying that specific individual. Two different legal regimes attach to them, with two different consent standards:</p>
+<ul>
+<li><strong>Recording</strong> → governed by <strong>wiretap / eavesdropping statutes</strong> (federal ECPA + state one-party/all-party consent laws). Consent is often satisfiable by a spoken announcement.</li>
+<li><strong>Voiceprint</strong> → governed by <strong>biometric privacy statutes</strong> (Illinois BIPA, Texas CUBI, Washington HB 1493) and <strong>comprehensive privacy laws' "sensitive data" rules</strong> (CCPA/CPRA, Colorado, etc.), and in the EU/UK by <strong>GDPR Art. 9 special-category data</strong>. Consent here is a <em>higher bar</em> — typically written/explicit, with notice, retention limits, and no-sale rules.</li>
+</ul>
+<p>The critical modern point: <strong>speaker diarization is the trigger.</strong> Plain transcription (audio → text) is generally <em>not</em> biometric processing. But the moment your system analyzes vocal-tract characteristics to say "this is Speaker 1" and — especially — to <strong>link that voice to a person record and recognize them in future recordings</strong>, courts and plaintiffs treat that as <em>generating and storing a voiceprint</em>. As one practitioner guide puts it: <em>"Speaker ID (Diarization) is the exact moment the software creates a biometric identifier."</em> (<a href="https://www.umevo.ai/blogs/ume-all-posts/how-biometric-privacy-laws-like-illinois-bipa-apply-to-ai-voice-recorders">UMEVO / BIPA &amp; AI voice recorders</a>; <a href="https://basilai.app/articles/2026-05-02-ai-meeting-bots-voiceprint-harvesting-bipa-lawsuits-biometric-privacy.html">Basil AI, 2026</a>)</p>
+<blockquote>
+<p><strong>Design consequence:</strong> <em>Cross-recording speaker recognition is the exact feature that crosses the line.</em> One-shot, disposable "Speaker 1/2" labels that are discarded after the session are far lower-risk than a persistent voiceprint linked to a durable person record. That distinction should drive the build.</p>
+</blockquote>
+<hr />
+<h2 id="2-us-biometric-privacy-statutes">2. US biometric privacy statutes<a class="headerlink" href="#2-us-biometric-privacy-statutes" title="Permanent link">&para;</a></h2>
+<h3 id="21-illinois-bipa-740-ilcs-14-the-one-that-actually-bites">2.1 Illinois BIPA — 740 ILCS 14 (the one that actually bites)<a class="headerlink" href="#21-illinois-bipa-740-ilcs-14-the-one-that-actually-bites" title="Permanent link">&para;</a></h3>
+<p>BIPA is the highest-risk statute in the US because it has a <strong>private right of action</strong> and does <strong>not require proof of actual harm</strong> beyond the statutory violation (<em>Rosenbach v. Six Flags</em>, 2019). Plaintiffs' firms have built an industry around it.</p>
+<p><strong>Voiceprints are explicitly enumerated.</strong> BIPA's "biometric identifiers" = <em>retina/iris scan, fingerprint, </em><em>voiceprint</em><em>, or scan of hand or face geometry.</em> (<a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/bipa/">Recording Law – BIPA</a>; <a href="https://law.justia.com/codes/illinois/chapter-740/act-740-ilcs-14/">740 ILCS 14 on Justia</a>)</p>
+<p><strong>Section 15 requirements (all apply to collecting a voiceprint):</strong></p>
+<table>
+<thead>
+<tr>
+<th>§</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>15(a)</strong></td>
+<td><strong>Publish and follow a written retention &amp; destruction schedule.</strong> Destroy biometric data when the purpose is satisfied <strong>or within 3 years of the person's last interaction, whichever is first.</strong></td>
+</tr>
+<tr>
+<td><strong>15(b)</strong></td>
+<td><strong>Before collection</strong>, provide <strong>written notice</strong> of (i) <em>what</em> is collected, (ii) the <em>specific purpose</em>, and (iii) the <em>length of term</em> of collection/storage/use — <strong>and obtain a written release.</strong> A 2024 amendment (SB 2979) confirms an <strong>electronic signature</strong> counts as the written release.</td>
+</tr>
+<tr>
+<td><strong>15(c)</strong></td>
+<td><strong>No sale, lease, trade, or profit</strong> from biometric data. Full stop.</td>
+</tr>
+<tr>
+<td><strong>15(d)</strong></td>
+<td><strong>No disclosure</strong> without consent, except narrow exceptions (completing a transaction the person requested; valid warrant/subpoena).</td>
+</tr>
+<tr>
+<td><strong>15(e)</strong></td>
+<td><strong>Store securely</strong> using at least the reasonable standard of care for the industry, and the same or more protective manner as other confidential data.</td>
+</tr>
+</tbody>
+</table>
+<p>(<a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/bipa/">Recording Law – BIPA</a>; <a href="https://www.kslaw.com/news-and-insights/illinois-bipa-reform-takes-effect">King &amp; Spalding – BIPA reform</a>; <a href="https://www.gtlaw.com/en/insights/2024/8/bipa-update-illinois-limits-liability-and-clarifies-electronic-consent-for-biometric-data-collection">Greenberg Traurig – 2024 amendment</a>)</p>
+<p><strong>Statutory damages (§20):</strong> <strong>$1,000 per negligent violation; $5,000 per intentional/reckless violation</strong>, plus attorneys' fees and injunctive relief. The <strong>2024 amendment (SB 2979)</strong> limited liability by clarifying that repeated collection of the <em>same</em> identifier from the <em>same</em> person by the <em>same</em> method is a <strong>single</strong> violation (curbing the old per-scan multiplication), and the Seventh Circuit held that limit applies retroactively. (<a href="https://www.wilmerhale.com/en/insights/blogs/wilmerhale-privacy-and-cybersecurity-law/20250219-year-in-review-2024-bipa-litigation-takeaways">WilmerHale 2024 review</a>; <a href="https://www.dwt.com/blogs/privacy--security-law-blog/2024/08/illinois-bipa-biometrics-law-amended-for-damages">Davis Wright Tremaine</a>) Even post-amendment, exposure across a user base is large.</p>
+<p><strong>This is not hypothetical for meeting recorders.</strong> In 2025 four class actions (<em>Brewer, Walker, Theus, Winston</em>) were filed against <strong>Otter.ai</strong> and consolidated as <strong>In re Otter.AI Privacy Litigation (5:25-cv-06911)</strong>, N.D. Cal., before Judge Eumi K. Lee — alleging Otter extracts and stores participants' voiceprints via diarization <em>without written consent</em> and uses them to identify speakers in later meetings. A May 2026 motion-to-dismiss hearing was the first federal test of whether AI bots are "third-party eavesdroppers." Similar suits target <strong>Fireflies.ai</strong>. (<a href="https://news.bloomberglaw.com/artificial-intelligence/otter-ai-hit-with-bipa-class-suit-over-voice-print-collection">Bloomberg Law</a>; <a href="https://natlawreview.com/article/take-note-new-wave-privacy-litigation-targets-ai-notetaker-otterai">National Law Review</a>; <a href="https://basilai.app/articles/2026-06-21-in-re-otter-ai-privacy-litigation-may-2026-hearing-explained.html">Basil AI – Otter litigation</a>) <strong>The feature you're describing is the thing being litigated.</strong></p>
+<h3 id="22-texas-cubi-capture-or-use-of-biometric-identifiers-act">2.2 Texas CUBI — Capture or Use of Biometric Identifiers Act<a class="headerlink" href="#22-texas-cubi-capture-or-use-of-biometric-identifiers-act" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Covers <strong>voiceprints</strong> among biometric identifiers.</li>
+<li><strong>Notice + consent required before capture</strong> for a commercial purpose; restricted disclosure; reasonable-care storage; <strong>destroy within a reasonable time, no later than 1 year</strong> after the purpose expires.</li>
+<li><strong>No private right of action</strong> — enforced only by the <strong>Texas Attorney General</strong>, civil penalties up to <strong>$25,000 per violation.</strong> But the AG is aggressive: a <strong>$1.4 billion</strong> settlement with Meta over face-geometry "Tag Suggestions" (July 2024), and CUBI theories have been asserted against <strong>Google Photos (face geometry), Google Assistant (voiceprints), and Nest</strong> for capturing biometrics without consent.</li>
+</ul>
+<p>(<a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/texas-data-privacy-laws/biometric-privacy/">Recording Law – Texas</a>; <a href="https://itecsonline.com/post/texas-biometric-identifier-act-cubi-a-compliance-guide-for-businesses-capturing-fingerprints-faces-or-voices">ITECS CUBI guide 2026</a>; <a href="https://www.securityindustry.org/2025/06/24/groundbreaking-texas-ai-law-also-brings-needed-clarity-on-use-of-biometric-technologies-for-security/">SIA – Texas 2024/2025</a>)</p>
+<h3 id="23-washington-hb-1493-rcw-19375">2.3 Washington HB 1493 (RCW 19.375)<a class="headerlink" href="#23-washington-hb-1493-rcw-19375" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Prohibits <strong>enrolling a biometric identifier (incl. voiceprint) in a database for a commercial purpose</strong> without first <strong>giving notice, obtaining consent, OR providing a mechanism to prevent</strong> subsequent commercial use.</li>
+<li>Explicitly treats <strong>notice and consent as separate things</strong>, with the exact form being <strong>"context-dependent."</strong></li>
+<li>Bars using/disclosing the identifier in a way <strong>materially inconsistent</strong> with the original terms without fresh consent.</li>
+<li><strong>No private right of action</strong> — AG enforcement only.</li>
+</ul>
+<p>(<a href="https://www.hunton.com/privacy-and-cybersecurity-law-blog/washington-becomes-third-state-enact-biometric-privacy-law">Hunton</a>; <a href="https://www.termsfeed.com/blog/washington-biometric-privacy-law-hb-1493/">TermsFeed HB 1493</a>; <a href="https://www.insideprivacy.com/united-states/state-legislatures/washington-becomes-the-third-state-with-a-biometric-law/">Inside Privacy</a>)</p>
+<h3 id="24-comprehensive-privacy-laws-20242026-the-broader-sensitive-data-layer">2.4 Comprehensive privacy laws (2024–2026) — the broader "sensitive data" layer<a class="headerlink" href="#24-comprehensive-privacy-laws-20242026-the-broader-sensitive-data-layer" title="Permanent link">&para;</a></h3>
+<p>As of early–mid 2026, <strong>~20 US states</strong> have comprehensive consumer privacy laws, and <strong>nearly all classify biometric data as "sensitive data"</strong> requiring heightened treatment. (<a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/us-state-privacy-laws-comparison/">Recording Law – state comparison</a>; <a href="https://www.consenteo.com/knowledge-hub/legal/us_state_privacy_law_tracker_2026">Consenteo 2026 tracker</a>; <a href="https://www.privacyworld.blog/2025/12/2025-state-privacy-roundup-key-trends-and-california-developments-to-watch-in-2026/">Privacy World 2025 roundup</a>)</p>
+<ul>
+<li><strong>California (CCPA/CPRA):</strong> A "voiceprint" is <strong>sensitive personal information (SPI).</strong> California uses a <em>different mechanism</em> than opt-in — a consumer's <strong>right to "Limit the Use of Sensitive Personal Information"</strong> — plus notice-at-collection, purpose limitation, and no-sale/no-share rights. (SB 1223, eff. Jan 1 2025, even added <em>neural data</em> to SPI, showing the trend toward more biometric-style protection.) (<a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/california-data-privacy-laws/biometric-privacy/">Recording Law – California</a>)</li>
+<li><strong>Colorado, Virginia, Connecticut, Oregon, Montana, and most other comprehensive-law states:</strong> biometric data is sensitive → generally require <strong>opt-in consent before processing</strong>, plus access/deletion rights. Colorado <strong>amended its Privacy Act in 2024</strong> to add specific biometric provisions.</li>
+</ul>
+<p><strong>Net:</strong> Even outside Illinois/Texas/Washington, a voiceprint is "sensitive data" almost everywhere with a modern privacy law → opt-in consent (or CA's limit-use right), purpose limitation, deletion rights, and no-sale are the default expectations.</p>
+<hr />
+<h2 id="3-wiretap-recording-consent-law-and-why-it-is-not-enough">3. Wiretap / recording-consent law — and why it is NOT enough<a class="headerlink" href="#3-wiretap-recording-consent-law-and-why-it-is-not-enough" title="Permanent link">&para;</a></h2>
+<p>Recording is governed separately:</p>
+<ul>
+<li><strong>Federal ECPA</strong> + <strong>one-party consent</strong> states: one participant (you) consenting is enough to record.</li>
+<li><strong>All-party / "two-party" consent</strong> states (CA, IL, FL, PA, WA, MA, MD, MI, MT, NH, CT, and others) require <strong>every</strong> participant to consent to the <em>recording</em>. For these, a clear <strong>audible announcement</strong> at the top ("this call is being recorded") that everyone stays on for is usually treated as consent to record. (<a href="https://ktslaw.com/en/Insights/Alert/2024/7/Wiretap-Laws-in-the-United-States">KTS Law – wiretap map</a>; <a href="https://www.employmentlawwatch.com/post/102ls2n/the-legality-of-ai-powered-recording-and-transcription">Reed Smith – AI recording/transcription</a>)</li>
+</ul>
+<p><strong>The key interaction:</strong> <em>Recording consent ≠ biometric consent.</em> They are two distinct legal obligations. A spoken "this is being recorded" disclaimer that satisfies a wiretap statute <strong>does not</strong> satisfy BIPA's §15(b), which requires <strong>written notice and a written release before the voiceprint is extracted.</strong> (<a href="https://www.umevo.ai/blogs/ume-all-posts/how-biometric-privacy-laws-like-illinois-bipa-apply-to-ai-voice-recorders">UMEVO</a>; <a href="https://basilai.app/articles/2026-07-07-recording-meetings-two-party-consent-states-ai-notetaker-compliance-guide-2026.html">Basil AI – two-party guide</a>) Presence in a recorded meeting — even a visible bot in the participant list — is <strong>not</strong> consent to biometric processing.</p>
+<p>So the app can have <strong>three</strong> distinct consent conditions layered on one recording:
+1. Wiretap consent to <strong>record</strong> (announcement / all-party).
+2. Biometric consent to <strong>create/store a voiceprint</strong> (written, separate).
+3. Sensitive-data handling under comprehensive laws (notice, no-sale, deletion).</p>
+<hr />
+<h2 id="4-gdpr-eu-and-uk-gdpr">4. GDPR / EU (and UK GDPR)<a class="headerlink" href="#4-gdpr-eu-and-uk-gdpr" title="Permanent link">&para;</a></h2>
+<p>Under <strong>GDPR Art. 4(14)</strong>, a <strong>voiceprint produced by "specific technical processing" to uniquely identify a person is biometric data</strong>, and when used <em>for identification</em> it is <strong>special-category data under Art. 9</strong>. Processing special-category data is <strong>prohibited</strong> unless an Art. 9(2) condition applies — and for a consumer app the realistic one is <strong>Art. 9(2)(a): explicit consent.</strong> (<a href="https://gdpr-info.eu/art-9-gdpr/">Art. 9 GDPR</a>; <a href="https://secureprivacy.ai/blog/gdpr-article-9-special-categories-lawful-processing-and-compliance-guide-2026">Secure Privacy – Art. 9 guide 2026</a>)</p>
+<p>Practical EU/UK requirements for the voiceprint feature:
+- <strong>Two-layer lawful basis:</strong> an <strong>Art. 6</strong> basis <em>and</em> an <strong>Art. 9(2)</strong> condition (explicit consent).
+- <strong>Explicit consent</strong> is a <em>higher bar</em> than ordinary consent: specific, informed, unambiguous, affirmative, and <strong>freely given</strong> (note: it is often invalid in employer/employee contexts because it isn't "free" — relevant if this app is ever used at work).
+- A <strong>Data Protection Impact Assessment (DPIA)</strong> is effectively <strong>mandatory</strong> for biometric identification.
+- Plus the usual GDPR rights: access, erasure ("right to be forgotten"), data minimization, storage limitation, purpose limitation.
+- The <strong>ICO (UK)</strong> has already found that voiceprints are Art. 9 special-category data and that the <em>only</em> available basis (explicit consent) had not been obtained in an enforcement matter.</p>
+<p>(<a href="https://gdprlocal.com/biometric-data-gdpr-compliance-made-simple/">GDPRLocal – biometric compliance</a>; <a href="https://www.dilr.ai/blog/ai-voice-biometric-data-security-enterprise">DILR.ai – voice biometric GDPR</a>)</p>
+<hr />
+<h2 id="5-the-owners-analogy-google-photos-face-scans-photos-i-took-without-the-subjects-separate-consent-how-is-voiceprinting-different">5. The owner's analogy: "Google Photos face-scans photos I took without the subject's separate consent — how is voiceprinting different?"<a class="headerlink" href="#5-the-owners-analogy-google-photos-face-scans-photos-i-took-without-the-subjects-separate-consent-how-is-voiceprinting-different" title="Permanent link">&para;</a></h2>
+<p>Honest answer: <strong>the analogy partly holds — and where it breaks, it breaks <em>against</em> voiceprinting, not for it.</strong></p>
+<p><strong>Where it holds:</strong> Google Photos' Face Grouping <em>did</em> extract face-geometry biometrics from photos of people who never separately consented — and Google <strong>got sued and paid for it.</strong> <em>Rivera v. Google</em> settled for <strong>$100M</strong> in Illinois over exactly this BIPA theory, and Texas asserted CUBI against Google Photos too. So the intuition "this is a real legal exposure" is <em>correct</em>; it's just that Google's behavior is the <strong>cautionary tale, not the safe precedent.</strong> Meta paid <strong>$650M</strong> (Illinois) and <strong>$1.4B</strong> (Texas) for the analogous face-tagging. (<a href="https://topclassactions.com/lawsuit-settlements/closed-settlements/google-photos-face-recognition-privacy-100m-class-action-settlement/">Top Class Actions – Rivera/Google $100M</a>; <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/texas-data-privacy-laws/biometric-privacy/">Recording Law – Texas/Meta $1.4B</a>)</p>
+<p><strong>Where it breaks — and why voice is <em>worse</em>, not better:</strong></p>
+<ol>
+<li><strong>BIPA has a "photographs" carve-out; it has NO audio/voice carve-out.</strong> BIPA's definition <strong>excludes photographs and information derived from photographs</strong> (and writing samples, demographics, physical descriptions). That carve-out is precisely what let Google <em>litigate</em> the face-from-photos question (defendants argued face templates came from exempt "photographs"). <strong>There is no equivalent exemption for voice.</strong> A <strong>voiceprint is expressly enumerated</strong> as a covered identifier with no escape hatch. So voiceprinting is a <strong>cleaner, more clearly-covered</strong> BIPA violation than face-scanning-from-photos ever was. (<a href="https://www.mofo.com/resources/insights/240503-getting-bipa-right-biometric-identifiers-must-identify">MoFo – "identifiers must identify"</a>; <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/bipa/">Recording Law – BIPA</a>)</li>
+<li><strong>"I took the photo" ≠ "I own the biometric."</strong> Owning/creating the medium (photo or recording) does not grant rights to extract and store a third party's <em>biometric identifier</em>. The biometric belongs, legally, to the <em>subject</em>, whose separate consent BIPA/CUBI/GDPR require.</li>
+<li><strong>Personal-use ambiguity.</strong> Some of these statutes are aimed at commercial/"private entity" processing. A purely personal, on-device, never-shared voiceprint of <em>yourself</em> is low-risk. Voiceprinting <em>other people</em> and building a durable identity database — even "just for me" — starts to look like the enrolling-a-database conduct the statutes target, and BIPA's private right of action doesn't require you to be a giant company.</li>
+</ol>
+<p><strong>Bottom line on the analogy:</strong> "Google did it" is true but is an argument <em>for caution</em> — Google paid nine figures. And voice is on <strong>weaker</strong> legal footing than the photo case because the photo exemption that gave Google an argument <strong>does not exist for voice.</strong></p>
+<hr />
+<h2 id="6-practical-design-a-defensible-actually-buildable-feature">6. Practical design — a defensible, actually-buildable feature<a class="headerlink" href="#6-practical-design-a-defensible-actually-buildable-feature" title="Permanent link">&para;</a></h2>
+<p>The goal: keep the genuinely useful "recognize recurring speakers" capability while staying on the right side of the line. The design principle is <strong>owner-first, opt-in-for-others, local-and-deletable, never-sold.</strong></p>
+<h3 id="do">Do<a class="headerlink" href="#do" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Voiceprint the OWNER by default; require explicit opt-in for everyone else.</strong> The owner consenting to their <em>own</em> voiceprint is clean. Third-party voiceprints are the risk — gate them behind an explicit toggle.</li>
+<li><strong>Separate the two consents in the UI.</strong> Keep "record this meeting" and "build a voiceprint to recognize you next time" as <strong>distinct</strong> acknowledgements. Never bundle biometric consent into the recording consent or a blanket ToS click.</li>
+<li><strong>Surface a plain-language, record-time opt-in</strong> for third parties, e.g.:<blockquote>
+<p><em>"I can also turn on voice recognition so this app remembers your voice and labels you in future recordings. That means storing a voiceprint (biometric data). Want me to? [Yes] [No, just this recording]."</em>
+  Capture the answer as a <strong>written/recorded release</strong> and store proof (who, when, scope). BIPA's 2024 amendment confirms <strong>electronic signature</strong> suffices.</p>
+</blockquote>
+</li>
+<li><strong>State purpose + retention at consent time</strong> (BIPA §15(b) requires purpose <em>and duration</em>). e.g. "Used only to recognize you in your recordings; deleted after 12 months of no new recordings, or on request."</li>
+<li><strong>Publish a retention &amp; destruction policy and auto-enforce it.</strong> Default a conservative retention (e.g. destroy on request and after N months of inactivity — well inside BIPA's 3-yr and CUBI's 1-yr backstops). Make deletion actually delete the voiceprint template, not just hide it.</li>
+<li><strong>Store voiceprints encrypted, per-person, locally / on-device where possible.</strong> Local-first processing (e.g. on-device diarization / local models) dramatically shrinks exposure vs. cloud extraction — it's the design Otter is being punished for <em>not</em> using. Encrypt at rest; treat the template as your most sensitive data class (BIPA §15(e)).</li>
+<li><strong>Give one-tap per-person deletion + "delete all voiceprints"</strong>, and honor it as a GDPR/CCPA erasure right.</li>
+<li><strong>Jurisdiction-aware gating.</strong> Let the owner set locale; in <strong>Illinois/EU/UK</strong> default third-party voiceprinting <strong>OFF</strong> and require the explicit written flow before it can be enabled. Consider disabling automatic third-party enrollment entirely in the strictest jurisdictions.</li>
+<li><strong>Keep raw recording consent separate and layered</strong> on top of wiretap needs (all-party announcement in two-party states).</li>
+<li><strong>Separate the disposable label from the durable identity.</strong> Ephemeral "Speaker 1/2" diarization for a single transcript (discarded after) is far lower risk than a persistent cross-recording voiceprint. Make persistence the <em>opt-in</em> upgrade.</li>
+<li><strong>Run a DPIA</strong> if the EU/UK is in scope, and log it.</li>
+</ul>
+<h3 id="dont">Don't<a class="headerlink" href="#dont" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Don't</strong> treat "they were in the meeting / a bot was visible" as consent to voiceprint. It isn't.</li>
+<li><strong>Don't</strong> rely on a spoken "this is being recorded" line to authorize biometric extraction — wiretap consent ≠ biometric consent.</li>
+<li><strong>Don't</strong> auto-enroll third parties' voiceprints silently in the background. That is the Otter/Fireflies fact pattern.</li>
+<li><strong>Don't</strong> ever <strong>sell, share, license, or use voiceprints to train models</strong> — BIPA §15(c) flatly bars profiting from them; comprehensive laws bar sale of sensitive data. Kill any "improve our models with your audio" default.</li>
+<li><strong>Don't</strong> bundle biometric consent inside the general Terms of Service or a single "I agree."</li>
+<li><strong>Don't</strong> retain voiceprints indefinitely or with no published schedule (BIPA §15(a) / CUBI 1-yr / GDPR storage limitation).</li>
+<li><strong>Don't</strong> disclose voiceprints to third parties/subprocessors without separate consent (BIPA §15(d)).</li>
+<li><strong>Don't</strong> assume "personal / just for me" exempts you when you're printing <em>other people's</em> voices — the private right of action reaches individuals and small operators.</li>
+</ul>
+<h3 id="a-concrete-defensible-default-configuration">A concrete, defensible default configuration<a class="headerlink" href="#a-concrete-defensible-default-configuration" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Owner voiceprint:</strong> ON by default (self-consent), stored encrypted locally.</li>
+<li><strong>Third-party voiceprint:</strong> OFF by default. Enabling it, per person, requires the record-time explicit opt-in flow + stored proof + stated purpose/retention.</li>
+<li><strong>Ephemeral diarization</strong> (Speaker 1/2 for the current transcript only, discarded): allowed without voiceprint persistence.</li>
+<li><strong>Storage:</strong> encrypted, per-person templates, local-first; no cloud unless the user opts in.</li>
+<li><strong>Retention:</strong> auto-delete on request and after inactivity; published schedule; hard backstops &lt; CUBI 1yr / BIPA 3yr.</li>
+<li><strong>No sale, no sharing, no model-training</strong> on voiceprints — hard-coded, not a toggle.</li>
+<li><strong>Jurisdiction gate:</strong> IL / EU / UK → third-party voiceprinting locked behind explicit written consent (or off).</li>
+</ol>
+<p>This configuration maps cleanly onto §15(a)–(e) of BIPA, CUBI's notice/consent/destruction, Washington's separate notice+consent, the comprehensive laws' sensitive-data/opt-in/no-sale/deletion expectations, and GDPR Art. 9 explicit consent + DPIA + erasure.</p>
+<hr />
+<h2 id="7-bottom-line-the-owner-can-act-on">7. Bottom line the owner can act on<a class="headerlink" href="#7-bottom-line-the-owner-can-act-on" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Consent-to-record does NOT cover voiceprinting.</strong> They are legally distinct, with distinct (and higher) consent standards. Build them as separate steps.</li>
+<li><strong>The persistent, cross-recording speaker-recognition feature is the exact conduct being sued over right now</strong> (Otter.ai, Fireflies) under Illinois BIPA — a statute with a <strong>private right of action, no-harm-required, and $1k–$5k/violation</strong> damages. This is the single biggest risk vector.</li>
+<li><strong>Voiceprinting yourself is fine. Voiceprinting other people needs an explicit, separate, plain-language opt-in</strong>, a stated purpose + retention, encrypted per-person storage, easy deletion, no sale/sharing/training, and jurisdiction-aware gating (default OFF in IL/EU/UK).</li>
+<li><strong>The "Google Photos does it" analogy cuts the wrong way:</strong> Google <em>lost</em> and paid $100M (and Meta far more), and voice is on <strong>weaker</strong> footing than photos because BIPA's photo carve-out has <strong>no voice equivalent.</strong></li>
+<li><strong>A reasonable, buildable tool</strong> = owner-first + explicit opt-in for others + local/encrypted + deletable + never-sold + published retention + locale gating. That's defensible, genuinely useful, and materially different from the products getting sued — which auto-enrolled everyone silently in the cloud.</li>
+</ul>
+<p><em>Reminder: not legal advice. Get sign-off from a privacy attorney before shipping third-party voiceprinting, and treat Illinois, the EU, and the UK as the binding constraints for the design.</em></p>
+<hr />
+<h2 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h2>
+<p><strong>BIPA (Illinois):</strong>
+- <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/bipa/">Recording Law – BIPA Explained (740 ILCS 14)</a>
+- <a href="https://law.justia.com/codes/illinois/chapter-740/act-740-ilcs-14/">740 ILCS 14 full text (Justia, 2025)</a>
+- <a href="https://www.kslaw.com/news-and-insights/illinois-bipa-reform-takes-effect">King &amp; Spalding – Illinois BIPA Reform Takes Effect</a>
+- <a href="https://www.gtlaw.com/en/insights/2024/8/bipa-update-illinois-limits-liability-and-clarifies-electronic-consent-for-biometric-data-collection">Greenberg Traurig – 2024 amendment (electronic consent, single violation)</a>
+- <a href="https://www.dwt.com/blogs/privacy--security-law-blog/2024/08/illinois-bipa-biometrics-law-amended-for-damages">Davis Wright Tremaine – 7th Cir. damages limit retroactive</a>
+- <a href="https://www.wilmerhale.com/en/insights/blogs/wilmerhale-privacy-and-cybersecurity-law/20250219-year-in-review-2024-bipa-litigation-takeaways">WilmerHale – 2024 BIPA litigation year in review</a>
+- <a href="https://www.mofo.com/resources/insights/240503-getting-bipa-right-biometric-identifiers-must-identify">Morrison Foerster – "Biometric identifiers must identify" (photo carve-out)</a></p>
+<p><strong>AI note-taker / voiceprint litigation:</strong>
+- <a href="https://news.bloomberglaw.com/artificial-intelligence/otter-ai-hit-with-bipa-class-suit-over-voice-print-collection">Bloomberg Law – Otter.ai BIPA class suit</a>
+- <a href="https://natlawreview.com/article/take-note-new-wave-privacy-litigation-targets-ai-notetaker-otterai">National Law Review – privacy litigation targets Otter.ai</a>
+- <a href="https://basilai.app/articles/2026-06-21-in-re-otter-ai-privacy-litigation-may-2026-hearing-explained.html">Basil AI – In re Otter.AI Privacy Litigation (May 2026 hearing)</a>
+- <a href="https://basilai.app/articles/2026-05-02-ai-meeting-bots-voiceprint-harvesting-bipa-lawsuits-biometric-privacy.html">Basil AI – BIPA lawsuit wave hitting AI meeting bots (2026)</a>
+- <a href="https://www.umevo.ai/blogs/ume-all-posts/how-biometric-privacy-laws-like-illinois-bipa-apply-to-ai-voice-recorders">UMEVO – How BIPA applies to AI voice recorders (diarization = voiceprint)</a></p>
+<p><strong>Texas CUBI:</strong>
+- <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/texas-data-privacy-laws/biometric-privacy/">Recording Law – Texas biometric privacy</a>
+- <a href="https://itecsonline.com/post/texas-biometric-identifier-act-cubi-a-compliance-guide-for-businesses-capturing-fingerprints-faces-or-voices">ITECS – Texas CUBI compliance guide 2026</a>
+- <a href="https://www.securityindustry.org/2025/06/24/groundbreaking-texas-ai-law-also-brings-needed-clarity-on-use-of-biometric-technologies-for-security/">Security Industry Association – Texas AI law &amp; biometrics (2025)</a></p>
+<p><strong>Washington HB 1493:</strong>
+- <a href="https://www.hunton.com/privacy-and-cybersecurity-law-blog/washington-becomes-third-state-enact-biometric-privacy-law">Hunton – Washington becomes third state with biometric law</a>
+- <a href="https://www.termsfeed.com/blog/washington-biometric-privacy-law-hb-1493/">TermsFeed – Washington HB 1493</a>
+- <a href="https://www.insideprivacy.com/united-states/state-legislatures/washington-becomes-the-third-state-with-a-biometric-law/">Inside Privacy – Washington third state</a></p>
+<p><strong>Comprehensive state privacy (CA/CO/etc., 2025–2026):</strong>
+- <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/california-data-privacy-laws/biometric-privacy/">Recording Law – California biometric privacy</a>
+- <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/us-state-privacy-laws-comparison/">Recording Law – US state privacy comparison (2026)</a>
+- <a href="https://www.consenteo.com/knowledge-hub/legal/us_state_privacy_law_tracker_2026">Consenteo – US state privacy law tracker 2026</a>
+- <a href="https://www.privacyworld.blog/2025/12/2025-state-privacy-roundup-key-trends-and-california-developments-to-watch-in-2026/">Privacy World – 2025 state privacy roundup / 2026 outlook</a></p>
+<p><strong>Wiretap / recording consent:</strong>
+- <a href="https://ktslaw.com/en/Insights/Alert/2024/7/Wiretap-Laws-in-the-United-States">KTS Law – Wiretap laws in the United States (2024)</a>
+- <a href="https://www.employmentlawwatch.com/post/102ls2n/the-legality-of-ai-powered-recording-and-transcription">Reed Smith – Legality of AI-powered recording &amp; transcription</a>
+- <a href="https://basilai.app/articles/2026-07-07-recording-meetings-two-party-consent-states-ai-notetaker-compliance-guide-2026.html">Basil AI – Recording in two-party consent states (2026)</a></p>
+<p><strong>GDPR / EU / UK:</strong>
+- <a href="https://gdpr-info.eu/art-9-gdpr/">Art. 9 GDPR – special categories (gdpr-info.eu)</a>
+- <a href="https://secureprivacy.ai/blog/gdpr-article-9-special-categories-lawful-processing-and-compliance-guide-2026">Secure Privacy – GDPR Art. 9 guide 2026</a>
+- <a href="https://gdprlocal.com/biometric-data-gdpr-compliance-made-simple/">GDPRLocal – biometric data compliance</a>
+- <a href="https://www.dilr.ai/blog/ai-voice-biometric-data-security-enterprise">DILR.ai – voice biometric data security &amp; GDPR</a></p>
+<p><strong>Google Photos / Meta biometric settlements (the analogy):</strong>
+- <a href="https://topclassactions.com/lawsuit-settlements/closed-settlements/google-photos-face-recognition-privacy-100m-class-action-settlement/">Top Class Actions – Google Photos $100M (Rivera)</a>
+- <a href="https://www.recordinglaw.com/us-laws/data-privacy-laws/texas-data-privacy-laws/biometric-privacy/">Recording Law – Texas/Meta $1.4B, Google CUBI theories</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.tracking", "navigation.footer", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

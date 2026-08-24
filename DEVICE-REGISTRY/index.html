@@ -1,0 +1,3409 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="One channel-agnostic AI-assistant backend behind every chat surface — with a live insights dashboard.">
+      
+      
+      
+        <link rel="canonical" href="https://jarethmt.github.io/asmltr/DEVICE-REGISTRY/">
+      
+      
+        <link rel="prev" href="../ACCESS-EVOLUTION/">
+      
+      
+        <link rel="next" href="../FEDERATION/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Device registry & canvas (roadmap) - asmltr</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="pink">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#device-registry-canvas-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="asmltr" class="md-header__button md-logo" aria-label="asmltr" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            asmltr
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Device registry & canvas (roadmap)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="pink"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="pink"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jarethmt/asmltr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jarethmt/asmltr
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="asmltr" class="md-nav__button md-logo" aria-label="asmltr" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    asmltr
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jarethmt/asmltr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jarethmt/asmltr
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What is asmltr?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning engines
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reasoning engines
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview & setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engines-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../REASONING-ENGINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The design (deep-dive)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../connectors/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/discord/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discord
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/openai/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAI-compatible
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/android/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android (device gateway)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/device/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device (generic gateway)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../integrations/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../silos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data silos & the Self silo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The asmltr CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage & cost accounting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SCHEDULES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules (cron with a GUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../NOTIFY-READ-ALOUD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notify & read-aloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../UPDATER-DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning & updates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing-the-updater/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing the updater
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coordination
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Coordination
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coordination/injection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Steering & injection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coordination/cross-channel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-channel send
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coordination/announcements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Announcements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coordination/awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Identity, auth & trust
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Identity, auth & trust
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CAST/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The cast — identity & trust
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../AUTH/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth & identity provider
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ACCESS-EVOLUTION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Access evolution (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vision & roadmap
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Vision & roadmap
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device registry & canvas (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device registry & canvas (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-distinction-this-arc-is-built-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The distinction this arc is built on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-shipped-remote-desktop-actually-stands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the shipped remote desktop actually stands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where the shipped remote desktop actually stands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-the-registry-is-a-presence-map-not-a-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The "registry" is a presence map, not a registry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-credentials-live-in-a-file-not-the-vault" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Credentials live in a file, not the vault
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-grants-are-per-identity-not-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Grants are per-identity, not per-device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-nothing-exists-below-the-screen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Nothing exists below the screen
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-client-config-is-device-local-and-manual" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Client config is device-local and manual
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-sessions-are-events-not-an-audit-trail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Sessions are events, not an audit trail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-the-device-side-gateways-have-the-same-gap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. The device-side gateways have the same gap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proposal-endpoints-as-a-first-class-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposal — endpoints as a first-class registry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Proposal — endpoints as a first-class registry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#credentials-move-into-the-vault" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Credentials move into the vault
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-device-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-device authorization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-driven-pass-through-to-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-driven pass-through to clients
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#canvas-a-render-surface-owned-by-the-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canvas — a render surface owned by the device
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#desktop-assistant-one-binary-three-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Desktop assistant — one binary, three roles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phasing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEDERATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Federation (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP-VAULT-SILOS-BACKUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault · silos · backups (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/trust-vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TRUST vault (credentials & KMS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/trust/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trust & permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/moderation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Moderation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets & config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP endpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_14" id="__nav_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-distinction-this-arc-is-built-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The distinction this arc is built on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-shipped-remote-desktop-actually-stands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the shipped remote desktop actually stands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where the shipped remote desktop actually stands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-the-registry-is-a-presence-map-not-a-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The "registry" is a presence map, not a registry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-credentials-live-in-a-file-not-the-vault" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Credentials live in a file, not the vault
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-grants-are-per-identity-not-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Grants are per-identity, not per-device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-nothing-exists-below-the-screen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Nothing exists below the screen
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-client-config-is-device-local-and-manual" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Client config is device-local and manual
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-sessions-are-events-not-an-audit-trail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Sessions are events, not an audit trail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-the-device-side-gateways-have-the-same-gap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. The device-side gateways have the same gap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proposal-endpoints-as-a-first-class-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposal — endpoints as a first-class registry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Proposal — endpoints as a first-class registry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#credentials-move-into-the-vault" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Credentials move into the vault
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-device-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-device authorization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server-driven-pass-through-to-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-driven pass-through to clients
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#canvas-a-render-surface-owned-by-the-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canvas — a render surface owned by the device
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#desktop-assistant-one-binary-three-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Desktop assistant — one binary, three roles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phasing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="device-registry-canvas-design">Device registry &amp; canvas — design<a class="headerlink" href="#device-registry-canvas-design" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Status:</strong> design / not built. This is the scoping document for the arc that turns the shipped
+remote-desktop capability (v0.13.0) into a general <strong>device control plane</strong>, and adds a <strong>canvas</strong>
+render surface on top of it.</p>
+</blockquote>
+<h2 id="the-distinction-this-arc-is-built-on">The distinction this arc is built on<a class="headerlink" href="#the-distinction-this-arc-is-built-on" title="Permanent link">&para;</a></h2>
+<p>asmltr already has registries for <strong>services</strong> — things it talks to over an API:</p>
+<table>
+<thead>
+<tr>
+<th>Registry</th>
+<th>What it holds</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Connector instances</td>
+<td>Discord/Telegram/GitHub/MCP/email channels</td>
+<td>manager SQLite + supervisor</td>
+</tr>
+<tr>
+<td>Integrations</td>
+<td>storage backends, API credentials</td>
+<td>integrations registry + GUI</td>
+</tr>
+<tr>
+<td>MCP registry</td>
+<td>MCP servers the engine can call</td>
+<td><code>shared/mcp-registry.js</code></td>
+</tr>
+<tr>
+<td>Trust store</td>
+<td>principals, identifiers, relationships, grants</td>
+<td><code>core/src/trust/store.js</code></td>
+</tr>
+<tr>
+<td>Vault</td>
+<td>the secrets behind all of the above</td>
+<td>TRUST Protocol vault</td>
+</tr>
+</tbody>
+</table>
+<p>There is <strong>no registry for machines</strong> — the things asmltr <em>drives</em> rather than <em>calls</em>. That is a
+different category with different properties:</p>
+<ul>
+<li><strong>Service control</strong> = an API call. Stateless, idempotent-ish, credential = one API key, blast
+  radius = one vendor account.</li>
+<li><strong>Device control</strong> = a session on somebody's actual computer. Stateful, long-lived, credential =
+  a key that opens a shell or a mouse, blast radius = <em>everything on that machine</em>.</li>
+</ul>
+<p>Remote desktop was the first device-control transport we shipped. SSH, ADB, serial and
+wake-on-LAN are the same category. They all need the same thing underneath: a durable record of
+<strong>which machines exist</strong>, <strong>how to reach each one</strong>, <strong>whose credential opens it</strong>, <strong>who is
+allowed to do what on it</strong>, and <strong>one place to take that away again</strong>.</p>
+<h2 id="where-the-shipped-remote-desktop-actually-stands">Where the shipped remote desktop actually stands<a class="headerlink" href="#where-the-shipped-remote-desktop-actually-stands" title="Permanent link">&para;</a></h2>
+<p>What works today (proven end-to-end, <code>docs/REMOTE-DESKTOP.md</code>):</p>
+<ul>
+<li>Signaling broker (<code>connectors/types/remote-desktop/</code>) — SSE + POST signaling, own STUN, optional
+  TURN, <code>/rd/{stream,msg,ice-config,cast,devices,health}</code>.</li>
+<li>Native Go host agent (<code>agents/host-remote-desktop/</code>) — screen capture, H.264, Pion WebRTC,
+  <code>SendInput</code> injection, single self-contained binary.</li>
+<li>Mobile viewer + controller, dashboard host list, and <strong>cast-to-device</strong> (push a host's stream onto
+  a connected phone via the android gateway's <code>open-remote-desktop</code> frame).</li>
+<li>Media flows <strong>direct peer-to-peer</strong> via ICE hole punching. The server never sees it.</li>
+</ul>
+<p>That transport layer is sound and is not what this document changes. What it is missing is
+everything <em>around</em> the transport:</p>
+<h3 id="1-the-registry-is-a-presence-map-not-a-registry">1. The "registry" is a presence map, not a registry<a class="headerlink" href="#1-the-registry-is-a-presence-map-not-a-registry" title="Permanent link">&para;</a></h3>
+<p>The broker's host list is an in-process <code>Map</code>, populated only while an agent's SSE stream is open:</p>
+<div class="language-js highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">hosts</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nb">Map</span><span class="p">();</span><span class="w">   </span><span class="c1">// host_id → { res, name, identity, caps, since }</span>
+</code></pre></div>
+<p>Consequences: a machine that is powered off simply <strong>does not exist</strong>; restarting the broker
+forgets every machine; you cannot name, tag, annotate, pre-authorize, or audit a machine before it
+connects; and the dashboard's "registry" can only ever show what is online this second.</p>
+<h3 id="2-credentials-live-in-a-file-not-the-vault">2. Credentials live in a file, not the vault<a class="headerlink" href="#2-credentials-live-in-a-file-not-the-vault" title="Permanent link">&para;</a></h3>
+<p>Peer auth is a flat gitignored <code>keys.json</code> — <code>{ key, identity }</code> pairs, hand-edited, long-lived,
+no expiry, no rotation, no issuance record. asmltr has had a hard dependency on the TRUST vault
+since v0.5.0 and this bypasses it entirely. <strong>Revoking a device today means editing a JSON file on
+disk and restarting a connector.</strong></p>
+<h3 id="3-grants-are-per-identity-not-per-device">3. Grants are per-identity, not per-device<a class="headerlink" href="#3-grants-are-per-identity-not-per-device" title="Permanent link">&para;</a></h3>
+<div class="language-js highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nx">view</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="nx">known</span><span class="w"> </span><span class="nx">principal</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nx">trust_tier</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mf">1</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nx">control</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">bypass_moderation</span><span class="w">          </span><span class="c1">// full trust, globally</span>
+</code></pre></div>
+<p>Both are properties of <em>the person</em>, evaluated once for the whole surface. There is no way to
+express "this principal may control the workshop machine, view the lab machine, and not see the
+client machine at all" — which is the normal shape of real device access, and the shape that makes
+adding SSH safe.</p>
+<h3 id="4-nothing-exists-below-the-screen">4. Nothing exists below the screen<a class="headerlink" href="#4-nothing-exists-below-the-screen" title="Permanent link">&para;</a></h3>
+<p>No SSH, no ADB, no serial, no wake-on-LAN — a repo-wide search finds no such transport anywhere.
+Screen sharing is the <em>only</em> way asmltr can reach a machine, which means the only way to fix a
+machine is to look at it and move its mouse.</p>
+<h3 id="5-client-config-is-device-local-and-manual">5. Client config is device-local and manual<a class="headerlink" href="#5-client-config-is-device-local-and-manual" title="Permanent link">&para;</a></h3>
+<p>The app and the dashboard each hold a broker URL and a pasted token in <code>localStorage</code>. The phone
+falls back to its device token; the dashboard is fed a token by an environment variable through a
+gitignored compose file. Nothing about the fleet is <em>served</em> to a client — a client only knows what
+it was configured with by hand.</p>
+<h3 id="6-sessions-are-events-not-an-audit-trail">6. Sessions are events, not an audit trail<a class="headerlink" href="#6-sessions-are-events-not-an-audit-trail" title="Permanent link">&para;</a></h3>
+<p>Session open/close emit control events into the stream, but they are not anchored to a durable
+device row, there is no per-device session history view, and there is no kill switch for a session
+in flight.</p>
+<h3 id="7-the-device-side-gateways-have-the-same-gap">7. The device-side gateways have the same gap<a class="headerlink" href="#7-the-device-side-gateways-have-the-same-gap" title="Permanent link">&para;</a></h3>
+<p>The android connector's device list is <em>also</em> an in-memory <code>Map</code> (<code>devices</code> + <code>controlDevices</code>).
+So both directions — devices that talk to asmltr, and machines asmltr talks to — are ephemeral,
+separately modelled, and unauditable. <strong>They should be one table.</strong></p>
+<h2 id="proposal-endpoints-as-a-first-class-registry">Proposal — endpoints as a first-class registry<a class="headerlink" href="#proposal-endpoints-as-a-first-class-registry" title="Permanent link">&para;</a></h2>
+<h3 id="data-model">Data model<a class="headerlink" href="#data-model" title="Permanent link">&para;</a></h3>
+<p>New tables, added to the existing trust database and keyed off <code>principals.id</code>. As with the cast,
+<strong>no second identity store</strong> — a device's owner, and everyone granted access to it, are principals
+that already exist.</p>
+<ul>
+<li><strong><code>devices</code></strong> — <code>id</code>, <code>name</code>, <code>kind</code> (workstation · phone · sbc · appliance · printer),
+  <code>platform</code>, <code>owner_principal_id</code>, <code>tags</code>, <code>notes</code>, <code>created_at</code>, <code>last_seen_at</code>, <code>status</code>.
+  One row per machine, whether or not it is online, whether asmltr drives it or it drives asmltr.</li>
+<li><strong><code>device_transports</code></strong> — <code>device_id</code>, <code>transport</code> (<code>rd</code> · <code>ssh</code> · <code>adb</code> · <code>device-gw</code> · <code>serial</code>
+  · <code>http</code>), <code>address</code>, <code>params</code> (JSON), <code>credential_ref</code> (a <strong>vault key</strong>, never a value),
+  <code>enabled</code>, <code>verified_at</code>. A machine can carry several: the same workstation is reachable by
+  screen <em>and</em> shell.</li>
+<li><strong><code>device_grants</code></strong> — <code>principal_id</code>, <code>device_id</code>, <code>transport</code>, <code>capability</code>
+  (<code>view</code> · <code>control</code> · <code>shell</code> · <code>file</code> · <code>wake</code>), <code>expires_at</code>, <code>granted_by</code>, <code>revoked_at</code>.
+  Same resolution semantics the trust store already uses: <strong>default-deny, forbidden-wins</strong>, union
+  of matching grants.</li>
+<li><strong><code>device_sessions</code></strong> — append-only: who, which device, which transport, which capability,
+  start/end, originating surface. This is the audit trail <em>and</em> the thing a kill switch acts on.</li>
+</ul>
+<h3 id="credentials-move-into-the-vault">Credentials move into the vault<a class="headerlink" href="#credentials-move-into-the-vault" title="Permanent link">&para;</a></h3>
+<p>Every <code>credential_ref</code> resolves through <code>shared/vault.js</code>. Three wins that the current file cannot
+give us:</p>
+<ol>
+<li><strong>Issuance instead of hand-editing.</strong> <code>asmltr device enroll</code> mints a one-time enrollment code;
+   the agent (or phone, or desktop assistant) redeems it once for a per-device credential written
+   to the vault. <code>keys.json</code> disappears.</li>
+<li><strong>Revocation as one action.</strong> Set <code>revoked_at</code> → the broker rejects the token, live sessions get
+   <code>bye</code>, the SSH credential is rotated out. One click in the dashboard, one CLI verb.</li>
+<li><strong>Use-but-never-see for shell credentials.</strong> SSH keys go in as vault credentials the runtime
+   proxies — the model never holds a private key in its context. This is a hard prerequisite for
+   the SSH transport, not a nice-to-have.</li>
+</ol>
+<h3 id="per-device-authorization">Per-device authorization<a class="headerlink" href="#per-device-authorization" title="Permanent link">&para;</a></h3>
+<p><code>resolveDeviceGrants(principal, device, transport)</code> replaces the two global booleans. The broker
+keeps its defense-in-depth re-check on the agent side; the agent additionally refuses input
+injection for a session the broker did not stamp. A principal with full trust is still not
+automatically a controller of a machine that was never granted to them.</p>
+<h3 id="server-driven-pass-through-to-clients">Server-driven pass-through to clients<a class="headerlink" href="#server-driven-pass-through-to-clients" title="Permanent link">&para;</a></h3>
+<p>This is the piece that makes the phone robust rather than hand-configured. The app already holds
+an authenticated link to its device gateway, so it should learn the fleet from the server:</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>GET /v2/devices?capability=rd
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  → [{ id, name, kind, online, transports:[…], caps:{view,control} }, …]
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>     + a short-lived, single-session RD credential
+</code></pre></div>
+<p>No broker URL in <code>localStorage</code>, no pasted token, no stale config after a rotation, and a device
+list that reflects <em>this principal's</em> actual grants. The same endpoint serves the dashboard, so the
+gitignored-token injection currently propping up the dashboard view can retire too.</p>
+<h3 id="surfaces">Surfaces<a class="headerlink" href="#surfaces" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Dashboard <code>Fleet.vue</code></strong> — absorbs <code>RemoteDesktop.vue</code>. Every machine (online <em>and</em> offline),
+  its transports, who holds which grant, live sessions, per-session kill, per-device revoke,
+  enrollment flow.</li>
+<li><strong>CLI</strong> — <code>asmltr device ls | add | enroll | grant | revoke | sessions | cast | shell</code>.</li>
+<li><strong>MCP</strong> — a <code>device_shell</code> tool alongside the existing phone-actuation tools, gated by the same
+  grants, so the assistant's access is exactly the access the registry describes.</li>
+</ul>
+<h2 id="canvas-a-render-surface-owned-by-the-device">Canvas — a render surface owned by the device<a class="headerlink" href="#canvas-a-render-surface-owned-by-the-device" title="Permanent link">&para;</a></h2>
+<p>The second half of the ask. The goal is <em>not</em> an editor pane bolted onto a terminal: it is that
+<strong>any asmltr surface can be handed something visual to display</strong>, and the surface decides how.</p>
+<p>asmltr has already built this primitive twice without naming it:</p>
+<ul>
+<li><code>kind:'file'</code> → a <code>media</code> frame the app renders <strong>inline in the chat</strong> (this is how screenshots
+  already appear).</li>
+<li><code>open-remote-desktop</code> → a frame that makes the app <strong>navigate to a different surface</strong> (the RD
+  viewer, full-screen with its own controls).</li>
+</ul>
+<p><strong>Canvas is the generalization of those two.</strong> One frame kind, <code>canvas</code>, carrying a payload
+(image · html · markdown · model preview · a live RD stream · a diff) plus a hint (<code>inline</code> ·
+<code>window</code> · <code>fullscreen</code>). Each client honors it in its own idiom:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Renders as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mobile app</td>
+<td>inline in the conversation, or its own activity for <code>fullscreen</code></td>
+</tr>
+<tr>
+<td>Desktop assistant</td>
+<td>a borderless preview window beside the work</td>
+</tr>
+<tr>
+<td>Dashboard</td>
+<td>a canvas panel</td>
+</tr>
+<tr>
+<td>Terminal/TUI</td>
+<td>a link plus a one-line description (graceful degradation)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Targeting is a registry query, and that is the point.</strong> "Open this on whichever device I'm
+actually using" resolves as: the device with a live session → else the most recently active device
+of this principal → else the dashboard → else a link. That is the same delivery-ladder shape
+<code>asmltr notify</code> already uses for audio and text, applied to visual payloads — and it only works
+because a device registry exists to rank against. Canvas is the feature that proves the registry is
+modelled correctly.</p>
+<h2 id="desktop-assistant-one-binary-three-roles">Desktop assistant — one binary, three roles<a class="headerlink" href="#desktop-assistant-one-binary-three-roles" title="Permanent link">&para;</a></h2>
+<p>The existing desktop assistant predates asmltr entirely: a tray app with a global hotkey that posts
+audio to an older voice endpoint. It should not be extended; it should be rebuilt against
+<code>connectors/types/device</code>, which was written for exactly this ("a Pi kiosk, an ESP32, a desk buddy,
+a custom appliance") and already carries turns, speech proxying, capability reporting, steer and
+read-aloud.</p>
+<p>The convergence worth noticing: on a workstation, <strong>the assistant client, the remote-desktop host
+agent, and the canvas window are the same program</strong>. Today the first two would be two separate
+binaries installed two different ways. One tray app that (a) is a device asmltr can converse with,
+(b) is a host asmltr can view and drive, and (c) is a canvas sink asmltr can paint on, is both less
+software and a better story. macOS is the same build target with a different capture and injection
+backend.</p>
+<p>Two carried-forward constraints for that build:</p>
+<ul>
+<li><strong>Screen capture must run in the interactive console session.</strong> Launched from a service or an SSH
+  session it captures an isolated blank desktop. The proven recipe is a scheduled task with an
+  interactive principal.</li>
+<li><strong>Default the capture backend to the one that emits frames on a static screen.</strong> GPU duplication
+  only produces output when the screen <em>changes</em>, which reads as "connected but no video" on an idle
+  desktop.</li>
+</ul>
+<h2 id="phasing">Phasing<a class="headerlink" href="#phasing" title="Permanent link">&para;</a></h2>
+<p>Ordered so that nothing dangerous ships before the thing that can revoke it.</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Scope</th>
+<th>Why here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P0</strong></td>
+<td><code>devices</code> + <code>device_transports</code> tables; enrollment; RD credentials migrated off <code>keys.json</code> into the vault</td>
+<td>The foundation. Nothing else is safe or DRY without it.</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td><code>device_grants</code> + <code>device_sessions</code>; revocation and session kill; <code>Fleet.vue</code>; <code>asmltr device</code> CLI</td>
+<td>Per-device authorization and the one-click revoke that was explicitly asked for.</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>Server-driven device list + short-lived session credentials to the app and dashboard</td>
+<td>Removes hand-pasted config from every client.</td>
+</tr>
+<tr>
+<td><strong>P3</strong></td>
+<td>Canvas frame kind + app rendering + delivery ladder</td>
+<td>First consumer of the registry beyond RD.</td>
+</tr>
+<tr>
+<td><strong>P4</strong></td>
+<td>SSH transport (vault use-but-never-see) + <code>device_shell</code></td>
+<td>Deliberately after P1 — a shell transport must never ship onto a system whose revocation story is "edit a file".</td>
+</tr>
+<tr>
+<td><strong>P5</strong></td>
+<td>Desktop assistant (device client + RD host + canvas window in one binary); ADB transport; wake-on-LAN; presence probing</td>
+<td>The payoff surface.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Does a device's <em>owner</em> get implicit full grants, or must every capability be granted explicitly
+  even to the owner? (Explicit is safer; implicit is what a single-operator install will actually
+  want.)</li>
+<li>Should offline machines be probe-able (wake-on-LAN, ping, agent heartbeat), or is <code>last_seen_at</code>
+  from the transports enough?</li>
+<li>Canvas payload ceiling — inline data for small images, upload-surface reference for anything
+  larger. The upload surface already exists and should be reused rather than parallelled.</li>
+<li>Whether <code>device-gw</code> (the phone/kiosk direction) folds into the same table on day one or in P2.
+  It should — one table is the whole DRY argument — but it touches a live channel.</li>
+</ul>
+<hr />
+<h1 id="implementation-plan-p0-through-p3">Implementation plan — P0 through P3<a class="headerlink" href="#implementation-plan-p0-through-p3" title="Permanent link">&para;</a></h1>
+<p>Concrete build plan for the first four phases. P4 (SSH) and P5 (desktop assistant, ADB) are out of
+scope here by design: a shell transport must not ship before P1's revocation exists.</p>
+<h2 id="decisions-to-lock-before-any-code">Decisions to lock before any code<a class="headerlink" href="#decisions-to-lock-before-any-code" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>One database, one identity store.</strong> The device tables live in the existing trust database and
+   reuse its handle (<code>require('../trust/store').db</code>). A device's owner and everyone granted access
+   are <code>principals</code> rows that already exist. Same argument as the cast: no second identity store.</li>
+<li><strong>One <code>devices</code> table for both directions.</strong> A machine asmltr drives (screen, shell) and a device
+   that drives asmltr (phone, kiosk, desk appliance) are the same row; <code>device_transports</code>
+   distinguishes them. This is the whole DRY argument — but the <em>live</em> device gateway is not
+   migrated until P2, because it touches a channel in active use.</li>
+<li><strong>Vault key naming:</strong> <code>device:&lt;device_id&gt;:&lt;transport&gt;</code>. The registry stores the reference; the
+   value only ever lives in the vault.</li>
+<li><strong>Owner grants — decide explicitly.</strong> Either the owner of a device gets implicit full
+   capabilities, or every capability is granted explicitly even to the owner. Recommendation:
+   implicit for the owner, recorded as a real grant row with <code>granted_by='owner-implicit'</code>, so it is
+   visible and revocable rather than invisible policy in code.</li>
+</ol>
+<h2 id="p0-registry-vault-backed-credentials">P0 — registry + vault-backed credentials<a class="headerlink" href="#p0-registry-vault-backed-credentials" title="Permanent link">&para;</a></h2>
+<p><strong>Done means:</strong> a machine has a durable row whether or not it is powered on; its remote-desktop
+credential is issued by asmltr into the vault; <code>keys.json</code> is gone.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>File</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>new</td>
+<td><code>core/src/devices/store.js</code> — <code>devices</code> + <code>device_transports</code>, CRUD, additive-migration guard (mirrors <code>core/src/trust/store.js</code> structure exactly)</td>
+</tr>
+<tr>
+<td>new</td>
+<td><code>core/src/devices/enroll.js</code> — mint a one-time enrollment code; redeem → per-device credential written via <code>vault.storeSecret()</code></td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>core/src/server.js</code> — <code>/v2/devices</code> CRUD, <code>/v2/devices/:id/enroll</code>, <code>/v2/devices/redeem</code> (code-authenticated, single use, short TTL)</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>connectors/types/remote-desktop/index.js</code> — replace <code>loadKeys()</code>/<code>keyEntry()</code> with a core-backed token lookup</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>agents/host-remote-desktop/config.go</code> — accept <code>--enroll &lt;code&gt;</code>, redeem once, persist the issued token; existing static <code>token</code> config keeps working</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The one real engineering risk is the broker's auth hot path.</strong> Today <code>auth()</code> reads a local file on
+every SSE connect and every signaling POST. Replacing that with a network call to core would put a
+round-trip in front of every ICE candidate. Mitigation: in-process cache keyed by a hash of the
+token, ~60s TTL, negative results cached too, plus a <code>POST /rd/invalidate</code> that core pokes on revoke
+so a revocation is not delayed by the TTL.</p>
+<p><strong>Migration safety:</strong> keep <code>keys.json</code> as a fallback that logs loudly when hit. Remove it only after
+the enrolled path is proven.</p>
+<p><strong>Verify:</strong> create a row → enroll → redeem from the workstation → agent connects on the issued
+credential → move <code>keys.json</code> aside → agent still connects → restart the broker → the row survives
+and the host reappears on reconnect.</p>
+<h2 id="p1-grants-audit-revocation-surfaces">P1 — grants, audit, revocation, surfaces<a class="headerlink" href="#p1-grants-audit-revocation-surfaces" title="Permanent link">&para;</a></h2>
+<p><strong>Done means:</strong> access is expressed per (principal × device × capability), one action revokes it,
+and every session is on the record.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>File</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>edit</td>
+<td><code>core/src/devices/store.js</code> — <code>device_grants</code>, <code>device_sessions</code>, and <code>resolveDeviceGrants(principal, device, transport)</code>: default-deny, forbidden-wins, expiry-aware — same semantics as <code>trust.resolve()</code></td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>core/src/server.js</code> — <code>/v2/devices/:id/grants</code> CRUD, <code>/v2/devices/:id/revoke</code>, <code>/v2/device-sessions</code> list + <code>DELETE /:sid</code> (kill)</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>connectors/types/remote-desktop/index.js</code> — the global <code>grants(identity)</code> becomes per-device; <code>list</code> returns only granted devices; <code>connect</code> checks the triple; open/close write <code>device_sessions</code>; <code>/rd/invalidate</code> drops live sessions with <code>bye</code> to both peers</td>
+</tr>
+<tr>
+<td>new</td>
+<td><code>insights/dashboard/src/views/Fleet.vue</code> (+ router entry, redirect from <code>/remote-desktop</code>) — absorbs the existing cast UI, adds offline machines, grants, live sessions, revoke</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>insights/dashboard/src/services/api.js</code> — <code>devices.*</code></td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>cli/asmltr.js</code> — <code>asmltr device ls\|add\|enroll\|grant\|revoke\|sessions\|cast</code></td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>shared/console-manifest.js</code> — so the TUI and GUI settings both learn the new command from the one manifest</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Verify by exercising the whole surface, not one happy path:</strong> grant view-only on machine A to a
+test principal → they can list and view A, control is refused, machine B is invisible; revoke mid-
+session → the live session tears down; the audit rows exist and name the right principal.</p>
+<h2 id="p2-server-driven-pass-through-to-clients">P2 — server-driven pass-through to clients<a class="headerlink" href="#p2-server-driven-pass-through-to-clients" title="Permanent link">&para;</a></h2>
+<p><strong>Done means:</strong> no client holds a hand-pasted broker URL or token, and the phone's own row is in the
+same registry as everything else.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>File</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>edit</td>
+<td><code>core/src/server.js</code> — <code>GET /v2/devices/for-me?capability=rd</code> → this principal's visible devices + a short-lived single-session credential (~5 min)</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>connectors/types/android/index.js</code> — expose it as <code>/gw/fleet</code> (the phone reuses its existing device token, so no new secret ships to the handset); register the device itself as a <code>devices</code> row with a <code>device-gw</code> transport</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>mobile/www/remote-desktop.js</code> — <code>loadCfg()</code> no longer requires a pasted token; fetch the fleet, use the ephemeral credential; keep manual entry only as out-of-band recovery</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>insights/dashboard/nginx.conf.template</code>, <code>gui-config.js</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Verify:</strong> wipe the phone's RD localStorage entirely → open the surface → hosts appear with nothing
+pasted. Rotate a credential → the phone recovers on its own.</p>
+<p><strong>Operational note:</strong> this phase touches the live app channel. Every connector restart batches to the
+very end of the working session.</p>
+<h2 id="p3-canvas">P3 — canvas<a class="headerlink" href="#p3-canvas" title="Permanent link">&para;</a></h2>
+<p><strong>Done means:</strong> any surface can be handed something visual, and targeting resolves through the
+registry.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>File</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>new</td>
+<td><code>shared/canvas.js</code> — <code>canvas({ payload, hint, target })</code>; ladder = device with a live session → most-recently-active device of that principal → dashboard → link fallback. Structured like <code>shared/notify.js</code>, which already does exactly this for audio and text</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>connectors/types/android/index.js</code> — <code>/out</code> gains <code>kind:'canvas'</code> → pushes <code>{ type:'canvas', payload, hint }</code>, reusing the existing <code>registerMedia()</code> + <code>/gw/file</code> path for anything over the inline threshold</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>connectors/types/device/index.js</code> — same frame, so generic clients (and later the desktop assistant) get canvas for free</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>mobile/www/app.js</code> — handle <code>m.type === 'canvas'</code> beside <code>device_rpc</code> and <code>open-remote-desktop</code>; <code>inline</code> reuses <code>mediaBubble()</code>, <code>fullscreen</code> opens the new surface</td>
+</tr>
+<tr>
+<td>new</td>
+<td><code>mobile/www/canvas.{html,js}</code> — the standalone renderer, same shape as <code>remote-desktop.html</code></td>
+</tr>
+<tr>
+<td>new</td>
+<td>dashboard canvas panel</td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>cli/asmltr.js</code> — <code>asmltr canvas &lt;path\|-&gt; [--hint inline\|window\|fullscreen] [--device &lt;id&gt;]</code></td>
+</tr>
+<tr>
+<td>edit</td>
+<td><code>mcp/toolbelt-server.js</code> — a <code>canvas_show</code> tool, so the capability is engine-agnostic</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Reuse, don't parallel:</strong> large payloads go through <code>shared/uploads.js</code>, which already exists, is
+already token-scoped, and is already path-guarded. Canvas must not grow a second file path.</p>
+<p><strong>Security — the one genuinely new exposure in this arc.</strong> An <code>html</code> payload renders authored markup
+on a trusted surface that holds device credentials. It must run in a sandboxed iframe
+(<code>allow-scripts</code> <strong>without</strong> <code>allow-same-origin</code>), under a strict CSP, with no reach into the host
+page's token or storage. Without that, canvas is an XSS vector straight into the assistant app.</p>
+<p><strong>Verify:</strong> phone in pocket, dashboard closed → lands on the phone inline. Phone idle, dashboard open
+→ lands on the dashboard. Nothing reachable → returns a link rather than failing silently.</p>
+<h2 id="sequencing">Sequencing<a class="headerlink" href="#sequencing" title="Permanent link">&para;</a></h2>
+<p>P0 (~1 session) → P1 (1–2; this is the security core, do not compress it) → P2 (~1) → P3 (1–2).
+Checkpoint before P1 and P2 — both rewrite live authentication paths.</p>
+<p>Two things explicitly <strong>not</strong> done in this arc: no SSH transport until P1 has landed, and no
+migration of the live device gateway's in-memory map until P2.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../ACCESS-EVOLUTION/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Access evolution (roadmap)">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Access evolution (roadmap)
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../FEDERATION/" class="md-footer__link md-footer__link--next" aria-label="Next: Federation (roadmap)">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Federation (roadmap)
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.tracking", "navigation.footer", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
