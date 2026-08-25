@@ -9,6 +9,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
+import RemoteScreen from '@/components/RemoteScreen.vue'
 import { devices as api, rd } from '@/services/api'
 
 const devices = ref([])
@@ -21,7 +22,18 @@ const grants = ref([])
 const enrollCode = ref(null)      // { device_id, code, expires_at } — shown once
 const busy = ref('')
 const castTargets = ref([])
+// The live screen panel. `control:false` is the WATCH case — joining a host someone else, usually
+// the agent, is already driving. The host serves each viewer its own peer connection, so watching
+// never interrupts the driver.
+const viewing = ref(null)   // { hostId, name, control }
 let timer = null
+
+function openScreen(d, control) { viewing.value = { hostId: d.id, name: d.name, control: !!control } }
+function watchSession(s) {
+  const d = devices.value.find((x) => x.id === s.device_id)
+  viewing.value = { hostId: s.device_id, name: (d && d.name) || s.device_id, control: false }
+}
+function canReachScreen(d) { return isOnline(d) && d.transports.some((t) => t.transport === 'rd' && t.enabled) }
 
 // Add-device form
 const adding = ref(false)
@@ -156,6 +168,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       <button :disabled="!draft.name.trim() || busy === 'add'" class="rounded-lg bg-brand-gradient px-4 py-2 text-xs font-semibold text-white disabled:opacity-40" @click="addDevice">Add</button>
     </div>
 
+    <div v-if="viewing" class="mb-4">
+      <RemoteScreen
+        :key="viewing.hostId + ':' + viewing.control"
+        :host-id="viewing.hostId" :host-name="viewing.name" :want-control="viewing.control"
+        @closed="viewing = null"
+      />
+    </div>
+
     <p v-if="notice" class="glass mb-3 px-4 py-2 text-[13px] text-violet-200">{{ notice }}</p>
     <p v-if="error" class="mb-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-[13px] text-rose-300">{{ error }}</p>
 
@@ -186,6 +206,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300" @click="toggleAccess(d.id)">
               {{ expanded === d.id ? 'Hide access' : 'Access' }}
             </button>
+            <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="!canReachScreen(d)" @click="openScreen(d, false)">View</button>
+            <button class="glass glass-hover px-2.5 py-1 text-xs text-violet-300 disabled:opacity-40" :disabled="!canReachScreen(d)" @click="openScreen(d, true)">Control</button>
             <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="busy === 'enroll:' + d.id" @click="enroll(d)">Enroll</button>
             <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="!isOnline(d) || busy === 'cast:' + d.id" @click="cast(d)">Cast</button>
             <button class="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 disabled:opacity-40" :disabled="busy === 'revoke:' + d.id" @click="revoke(d)">Revoke</button>
@@ -197,7 +219,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             <span class="pill border border-violet-400/30 bg-violet-400/10 text-[10px] text-violet-300">LIVE {{ s.capability }}</span>
             <span class="text-slate-400">{{ s.principal_id || 'unknown' }}</span>
             <span class="text-slate-600">since {{ when(s.started_at) }}</span>
-            <button class="ml-auto text-xs text-rose-400 hover:text-rose-300" :disabled="busy === 'kill:' + s.id" @click="kill(s)">Kill</button>
+            <button class="ml-auto text-xs text-violet-300 hover:text-violet-200" @click="watchSession(s)">Watch</button>
+            <button class="text-xs text-rose-400 hover:text-rose-300" :disabled="busy === 'kill:' + s.id" @click="kill(s)">Kill</button>
           </div>
         </div>
 

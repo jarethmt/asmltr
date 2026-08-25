@@ -11,7 +11,10 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // The repo's shared tree — one implementation of things every surface needs (the WebRTC
+      // viewer lives here so the dashboard and the mobile app cannot drift apart).
+      '@shared': fileURLToPath(new URL('../../shared', import.meta.url))
     }
   },
   server: {
