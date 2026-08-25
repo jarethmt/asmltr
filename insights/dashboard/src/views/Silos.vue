@@ -126,13 +126,8 @@ async function onUpload(ev) {
   const file = ev.target.files && ev.target.files[0]
   if (!file) return
   try {
-    const data_base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(String(r.result).split(',')[1])
-      r.onerror = reject
-      r.readAsDataURL(file)
-    })
-    await silosApi.putFile(selectedId.value, { path: cwd.value ? `${cwd.value}/${file.name}` : file.name, data_base64 })
+    // Raw bytes, not base64 in a JSON body: the JSON route caps near 7.5 MiB of file.
+    await silosApi.putFileRaw(selectedId.value, cwd.value ? `${cwd.value}/${file.name}` : file.name, file)
     ev.target.value = ''
     await loadDir(cwd.value)
   } catch (e) { browseError.value = e.message }

@@ -16,6 +16,23 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Bounds ONE request body. nginx's 1m default silently capped every upload: the file uploader
+    # spends a third of the body on base64, so the effective ceiling was 767.9 KiB (a phone photo did
+    # not fit), and /v2/backups/import was held to 1 MiB even though the core accepts 1024mb.
+    #
+    # Chunked uploads bound a CHUNK here, not a file, so 64m would be plenty for them. This is set to
+    # 1024m because /v2/backups/import is NOT chunked: the dashboard posts the archive as one body
+    # (insights/dashboard/src/services/api.js, `body: file`), so anything lower re-caps backup import
+    # at exactly the value chosen here. Match the core's own limit for that route
+    # (core/src/server.js, express.raw limit '1024mb') and keep this at or above the core's
+    # ASMLTR_UPLOAD_MAX_CHUNK (default 64mb).
+    #
+    # This MUST be at server level, not inside `location /v2/`. auth_request runs the authz check as a
+    # subrequest against `location = /_asmltr_authz`, which applies its OWN limit; with the directive
+    # scoped to /v2/ the subrequest still inherited 1m, returned 413, and nginx turned that unexpected
+    # auth status into a 500 for every chunk.
+    client_max_body_size 1024m;
+
     # Forward-auth subrequest target (internal — only reachable from auth_request).
     location = /_asmltr_authz {
         internal;
@@ -86,6 +103,7 @@ server {
 
     # Core control plane (/v2/inject, /v2/abort, silos, backups, vault, …). Served at root
     # on the core; keep the prefix. /v2/auth/ above is carved out (unauthenticated).
+    # Upload bodies are bounded by the server-level client_max_body_size above.
     location /v2/ {
         auth_request /_asmltr_authz;
         auth_request_set $asmltr_user $upstream_http_remote_user;
@@ -111,6 +129,13 @@ server {
     }
 
     location /rd/ {
+        # Pinned back to nginx's own default rather than inheriting the server-level 1024m above. That
+        # ceiling exists for chunk PUTs and backup import, both behind the session auth_request; this
+        # location is deliberately not, so inheriting it would hand an unauthenticated route a 1 GiB
+        # body budget as a side effect of an upload change. Signaling frames are SDP + ICE candidates,
+        # kilobytes; 1m is the limit /rd/ already ran under before that directive existed.
+        client_max_body_size 1m;
+
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3028;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

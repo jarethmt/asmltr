@@ -19,6 +19,7 @@ const path = require('path');
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { isImage } = require('../../../shared/mimeguess');
+const { MediaGroupCoalescer } = require('./media-group'); // batch album photos into one turn
 
 const meta = {
   type: 'telegram',
@@ -39,6 +40,8 @@ const meta = {
         description: 'Empty = learn the first chat that messages (single-user bots)' },
       http_port: { type: 'integer', title: 'Outbound HTTP port', default: 3008 },
       photo_dir: { type: 'string', title: 'Photo save dir', default: '', description: 'Where incoming photos are saved. Empty = ~/.asmltr/telegram-photos' },
+      media_group_window_ms: { type: 'integer', title: 'Album coalesce window (ms)', default: 1500, description: 'Photos of one album (shared media_group_id) are batched into a single vision turn once no new photo arrives for this long.' },
+      max_vision_images: { type: 'integer', title: 'Max images per album turn', default: 10, description: 'Images past this are still saved but left out of the vision payload, so a large album can\'t balloon one turn.' },
     },
   },
 };
@@ -58,6 +61,55 @@ async function start(ctx) {
     return allowed.has(chatId);
   }
 
+  // Album coalescing: Telegram delivers a multi-photo album as separate messages sharing a
+  // media_group_id, and running one vision turn per photo pins the box (the 2026-08-18 24-photo
+  // thrash). Buffer a group until it goes quiet, then dispatch it as ONE turn. GROUP_WINDOW_MS is the
+  // debounce; MAX_VISION_IMAGES caps how many images ride the vision payload (the rest are still saved).
+  const GROUP_WINDOW_MS = Number(cfg.media_group_window_ms) || 1500;
+  const MAX_VISION_IMAGES = Number.isFinite(cfg.max_vision_images) ? cfg.max_vision_images : 10;
+  const albums = new MediaGroupCoalescer({
+    windowMs: GROUP_WINDOW_MS,
+    maxImages: MAX_VISION_IMAGES,
+    onFlush: (grp) => {
+      let text = grp.caption || '';
+      if (grp.dropped > 0) {
+        text += `\n\n[${grp.count} photos received as one album; ${grp.attachments.length} attached to this turn, ${grp.dropped} saved only (read them from the paths below if needed).]`;
+      }
+      dispatch({ ...grp.route, text, attachments: grp.attachments, savedNotes: grp.savedNotes });
+    },
+  });
+
+  // Run one normalized envelope through the core and deliver its actions. Shared by the single-message
+  // path and the album-flush path so both build the ctx.core.handle call identically.
+  async function dispatch({ chatId, userId, from, message_id, text, attachments, savedNotes }) {
+    if (savedNotes.length) {
+      text += `\n\n[Files received on Telegram, saved to the shared asmltr upload area (findable from any channel via \`asmltr uploads\`):\n${savedNotes.join('\n')}\nRead a file at its path if the user wants you to work with it.]`;
+    }
+    if (!text.trim() && !attachments.length) return;
+    try {
+      bot.sendChatAction(chatId, 'typing').catch(() => {});
+      const actions = await ctx.core.handle({
+        channel: 'telegram',
+        conversation_key: `telegram:${ctx.instanceId}:user:${userId}`,
+        message_id: String(message_id),
+        sender: { raw_id: String(userId), raw_username: from && from.username },
+        content: { text, attachments },
+        delivery: 'sync',
+        capabilities: meta.capabilities,
+        public: false, // 1:1 DM with the authorized user; redaction still applies if they're not full-trust
+        channel_context: { chatId },
+      });
+      for (const a of actions) {
+        if (a.type === 'reply') await sendChunked(bot, chatId, a.text);
+        else if (a.type === 'status') await bot.sendMessage(chatId, `_${a.text}_`, { parse_mode: 'Markdown' }).catch(() => {});
+        // notify/suppress: not surfaced to the user
+      }
+    } catch (e) {
+      ctx.log(`handle failed: ${e.message}`);
+      bot.sendMessage(chatId, `⚠️ ${e.message}`).catch(() => {});
+    }
+  }
+
   bot.on('message', async (msg) => {
     ctx.heartbeat(); // an inbound update proves the poll loop delivered I/O
     if (msg.from && msg.from.is_bot) return;
@@ -66,7 +118,7 @@ async function start(ctx) {
     if (!authorized(chatId)) { bot.sendMessage(chatId, '🔒 Access denied.'); return; }
 
     const attachments = [];
-    let text = msg.text || msg.caption || '';
+    const caption = msg.text || msg.caption || '';
     const savedNotes = []; // "saved at <path>" lines handed to the model for any non-inline file
 
     // Download a Telegram file by file_id → Buffer. (Bot API can only fetch files up to ~20MB.)
@@ -113,33 +165,14 @@ async function start(ctx) {
       savedNotes.push(`- ⚠️ an attachment couldn't be downloaded: ${e.message}${big ? ' (Telegram bots can only fetch files up to 20MB)' : ''}`);
     }
 
-    if (savedNotes.length) {
-      text += `\n\n[Files received on Telegram, saved to the shared asmltr upload area (findable from any channel via \`asmltr uploads\`):\n${savedNotes.join('\n')}\nRead a file at its path if the user wants you to work with it.]`;
+    const route = { chatId, userId, from: msg.from, message_id: msg.message_id };
+    // An album (media_group_id) is buffered and dispatched as one turn once the group goes quiet; a
+    // standalone message dispatches immediately.
+    if (msg.media_group_id) {
+      albums.add(String(msg.media_group_id), { attachments, savedNotes, caption, route });
+      return;
     }
-    if (!text.trim() && !attachments.length) return;
-
-    try {
-      bot.sendChatAction(chatId, 'typing').catch(() => {});
-      const actions = await ctx.core.handle({
-        channel: 'telegram',
-        conversation_key: `telegram:${ctx.instanceId}:user:${userId}`,
-        message_id: String(msg.message_id),
-        sender: { raw_id: String(userId), raw_username: msg.from && msg.from.username },
-        content: { text, attachments },
-        delivery: 'sync',
-        capabilities: meta.capabilities,
-        public: false, // 1:1 DM with the authorized user; redaction still applies if they're not full-trust
-        channel_context: { chatId },
-      });
-      for (const a of actions) {
-        if (a.type === 'reply') await sendChunked(bot, chatId, a.text);
-        else if (a.type === 'status') await bot.sendMessage(chatId, `_${a.text}_`, { parse_mode: 'Markdown' }).catch(() => {});
-        // notify/suppress: not surfaced to the user
-      }
-    } catch (e) {
-      ctx.log(`handle failed: ${e.message}`);
-      bot.sendMessage(chatId, `⚠️ ${e.message}`).catch(() => {});
-    }
+    await dispatch({ ...route, text: caption, attachments, savedNotes });
   });
 
   bot.on('polling_error', (e) => {
@@ -207,7 +240,7 @@ async function start(ctx) {
 
   ctx.log('telegram connector started (polling)');
   return {
-    async stop() { clearInterval(hbTimer); try { await bot.stopPolling(); } catch (_) {} try { httpServer.close(); } catch (_) {} },
+    async stop() { clearInterval(hbTimer); albums.stop(); try { await bot.stopPolling(); } catch (_) {} try { httpServer.close(); } catch (_) {} },
     health() { return { polling: true, http_port: cfg.http_port || 3008 }; },
   };
 }

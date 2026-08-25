@@ -214,20 +214,38 @@ const draft = ref('')
 const busy = ref(false)
 const notice = ref(null)
 const attached = ref([])
-const uploading = ref(false)
+const uploading = ref([])   // [{ id, name, pct }]: one row per file in flight
+let uploadSeq = 0
 const fileInput = ref(null)
 let streamCtrl = null
 
 function pickFile() { fileInput.value?.click() }
+// Each file gets its own progress row, so one failure in a multi-file pick no longer overwrites the
+// outcome of the others (the old single `notice` write left you with only the last error).
 async function onFile(ev) {
   const files = Array.from(ev.target.files || [])
   ev.target.value = ''
+  const failed = []
+  // Drop a stale banner from a PREVIOUS upload only. `notice` is shared with send/inject/stop/voice,
+  // and an upload now runs long enough that clearing it wholesale would wipe a message the user is
+  // still reading (stop a turn mid-upload and the upload's success would erase the confirmation).
+  if (notice.value?.upload) notice.value = null
   for (const f of files) {
-    uploading.value = true
-    try { const r = await webChat.upload(f, key.value); if (r.ok) attached.value = [...attached.value, r.file] }
-    catch (e) { notice.value = { ok: false, text: `upload failed: ${e.message}` } }
-    finally { uploading.value = false }
+    const id = ++uploadSeq                     // stable key: progress updates replace the row object
+    uploading.value = [...uploading.value, { id, name: f.name, pct: 0 }]
+    try {
+      const r = await webChat.upload(f, key.value, {
+        onProgress: (p) => { uploading.value = uploading.value.map((u) => (u.id === id ? { ...u, pct: Math.round(p * 100) } : u)) }
+      })
+      if (r.ok) attached.value = [...attached.value, r.file]
+      else failed.push(`${f.name}: the server did not confirm the upload`)   // never drop it silently
+    } catch (e) {
+      failed.push(`${f.name}: ${e.message}`)
+    } finally {
+      uploading.value = uploading.value.filter((u) => u.id !== id)
+    }
   }
+  if (failed.length) notice.value = { ok: false, upload: true, text: `upload failed: ${failed.join('; ')}` }
 }
 function removeAttachment(i) { attached.value = attached.value.filter((_, j) => j !== i) }
 
@@ -442,12 +460,19 @@ const placeholder = computed(() => {
           <code class="rounded bg-black/40 px-1.5 py-0.5 font-mono text-brand-violet/90">{{ attachCmd }}</code>
         </div>
         <div v-if="notice" class="mb-2 text-xs" :class="notice.ok ? 'text-emerald-300' : 'text-rose-300'">{{ notice.text }}</div>
-        <div v-if="attached.length || uploading" class="mb-2 flex flex-wrap items-center gap-1.5">
+        <div v-if="attached.length || uploading.length" class="mb-2 flex flex-wrap items-center gap-1.5">
           <span v-for="(a, i) in attached" :key="a.path" class="pill flex items-center gap-1 border border-white/10 bg-white/5 text-slate-300">
             <AppIcon glyph="📎" /> {{ truncate(a.name, 26) }}
             <button type="button" class="text-slate-500 hover:text-rose-300" title="remove" @click="removeAttachment(i)"><AppIcon glyph="✕" /></button>
           </span>
-          <span v-if="uploading" class="text-[11px] text-slate-500">uploading…</span>
+          <!-- one row per in-flight file, with the real byte-level percentage -->
+          <span v-for="u in uploading" :key="u.id" class="pill flex items-center gap-1.5 border border-white/10 bg-white/5 text-slate-400">
+            <span class="text-[11px]">{{ truncate(u.name, 22) }}</span>
+            <span class="h-1 w-16 overflow-hidden rounded-full bg-white/10">
+              <span class="block h-full bg-brand-violet/80 transition-[width] duration-150" :style="{ width: u.pct + '%' }" />
+            </span>
+            <span class="w-8 text-right font-mono text-[10px] text-slate-500">{{ u.pct }}%</span>
+          </span>
         </div>
         <div class="flex items-end gap-2">
           <button
@@ -460,7 +485,7 @@ const placeholder = computed(() => {
           <button
             v-if="isWeb"
             type="button"
-            :disabled="uploading"
+            :disabled="uploading.length > 0"
             title="Attach a file — saved to the shared upload area and referenced so the agent can read it"
             class="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/10 disabled:opacity-40"
             @click="pickFile"

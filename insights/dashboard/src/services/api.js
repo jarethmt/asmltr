@@ -97,6 +97,18 @@ export const silosApi = {
   find: (id = 'self', opts = {}) => getCore(`/v2/silos/${encodeURIComponent(id)}/find${q(opts)}`),
   file: (id = 'self', path) => getCore(`/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`),
   putFile: (id = 'self', payload) => postCore(`/v2/silos/${encodeURIComponent(id)}/file`, payload),
+  // Raw-bytes write for an actual file. putFile() base64s into a JSON body, which the core's
+  // express.json 10mb limit caps near 7.5 MiB of file; the bytes go up as the body instead.
+  async putFileRaw(id = 'self', path, file) {
+    const res = await fetch(`/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', Accept: 'application/json' },
+      body: file
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `upload -> ${res.status} ${res.statusText}`)
+    return json
+  },
   mkdir: (id = 'self', path) => postCore(`/v2/silos/${encodeURIComponent(id)}/mkdir`, { path }),
   rm: (id = 'self', path) => reqCore('DELETE', `/v2/silos/${encodeURIComponent(id)}/file${q({ path })}`)
 }
@@ -318,17 +330,117 @@ export const webChat = {
     return ac
   },
 
-  // Attach a file: base64 it and POST to the core, which stores it in the shared upload area and
-  // returns the on-disk path. The next message references that path so the agent can Read it.
-  async upload(file, conversation_key) {
-    const data_base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(String(r.result).split(',')[1] || '')
-      r.onerror = () => reject(new Error('read failed'))
-      r.readAsDataURL(file)
+  // Attach a file: send it as fixed-size raw chunks and let the core assemble it. The old path
+  // base64'd the whole file into one JSON body, which capped uploads at whatever the smallest body
+  // limit on the route allowed (767.9 KiB in practice) and held the file in memory three times over.
+  // Chunking makes file size irrelevant, gives real byte-level progress, and retries a failed chunk
+  // instead of the whole file. Returns the same { ok, file } shape as before.
+  // opts: { onProgress(fraction 0..1), signal }
+  async upload(file, conversation_key, opts = {}) {
+    if (!file.size) throw new Error('empty file')
+    const init = await postCore('/v2/upload/init', {
+      filename: file.name, mime: file.type, size: file.size, conversation_key
     })
-    return postCore('/v2/upload', { filename: file.name, mime: file.type, conversation_key, data_base64 })
+    const { upload_id, chunk_size, chunks } = init
+    const done = new Set(init.received || [])
+
+    let sent = 0
+    const report = (inFlight = 0) => opts.onProgress?.(Math.min(1, (sent + inFlight) / file.size))
+    report()
+
+    try {
+      for (let i = 0; i < chunks; i++) {
+        const blob = file.slice(i * chunk_size, Math.min(file.size, (i + 1) * chunk_size))
+        // Count a chunk the server already has toward progress, otherwise a resumed upload finishes
+        // reporting less than 100%.
+        if (done.has(i)) { sent += blob.size; report(); continue }
+        const sha256 = await digestOf(blob)          // once per chunk, not once per retry
+        await withRetry(() => putChunk(upload_id, i, blob, { onProgress: report, signal: opts.signal, sha256 }))
+        sent += blob.size
+        report()
+      }
+      return await postCore(`/v2/upload/${upload_id}/finish`, {})
+    } catch (e) {
+      // Give the staged chunks back rather than leaving them for the 24h sweeper. Three failed
+      // attempts at a 2 GB file would otherwise strand 6 GB, which is how the next upload hits ENOSPC.
+      // This is right only while the client cannot resume: `upload_id` lives in this closure, so a
+      // reload loses it and the staging could never be reclaimed by a retry. Whoever persists
+      // upload_id (sessionStorage) to enable real resume must drop this discard at the same time.
+      try { await reqCore('DELETE', `/v2/upload/${upload_id}`) } catch { /* best effort */ }
+      throw e
+    }
   }
+}
+
+// Digest of ONE chunk, so integrity is verified without ever hashing the whole file (which would mean
+// holding all of it, the exact thing chunking avoids). crypto.subtle needs a secure context: on
+// localhost and https it is there, over plain http on a LAN address it is not, so this degrades to
+// "no per-chunk check" rather than breaking the upload.
+async function digestOf(blob) {
+  if (!globalThis.crypto?.subtle) return null
+  try {
+    const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  } catch { return null }
+}
+
+// One chunk, over XHR rather than fetch: fetch exposes no upload progress event, so a large chunk on
+// a slow link would otherwise sit at zero with nothing to show the user.
+function putChunk(uploadId, index, blob, { onProgress, signal, sha256 } = {}) {
+  return new Promise((resolve, reject) => {
+    // abort() on an XHR that was opened but never sent is a no-op: it fires no event, so returning
+    // here without rejecting would leave this promise pending forever and wedge the whole upload.
+    if (signal?.aborted) return reject(Object.assign(new Error('aborted'), { aborted: true }))
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', `/v2/upload/${uploadId}/${index}`)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    if (sha256) xhr.setRequestHeader('X-Chunk-Sha256', sha256)
+    // Without a timeout a half-open connection (closed lid, dropped VPN, expired NAT entry) fires
+    // neither load nor error, and the transfer hangs until the OS gives up, which can be hours.
+    xhr.timeout = Number(import.meta.env?.VITE_UPLOAD_CHUNK_TIMEOUT_MS) || 120000
+
+    const onAbort = () => xhr.abort()
+    const settle = (fn) => (...args) => { signal?.removeEventListener('abort', onAbort); fn(...args) }
+    const ok = settle(resolve)
+    const no = settle(reject)
+
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded) }
+    xhr.onload = () => {
+      // Parse before branching: a 2xx carrying a non-JSON body (a proxy interstitial, a truncated
+      // response) used to throw inside this handler, which rejects nothing and settles nothing.
+      let body = null
+      try { body = JSON.parse(xhr.responseText || '{}') } catch { body = null }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (body) return ok(body)
+        return no(Object.assign(new Error(`chunk ${index}: ${xhr.status} with a non-JSON body, something is rewriting the response`), { status: xhr.status }))
+      }
+      let msg = body?.error || `chunk ${index} -> ${xhr.status}`
+      // The likeliest deployment failure for this feature, so name the cause rather than the number.
+      if (xhr.status === 413 && !body?.error) msg = `chunk ${index} rejected as too large (413): the reverse proxy's client_max_body_size is below the chunk size`
+      no(Object.assign(new Error(msg), { status: xhr.status }))
+    }
+    xhr.onerror = () => no(new Error('network error'))
+    xhr.ontimeout = () => no(Object.assign(new Error(`chunk ${index} timed out`), { status: 408 }))
+    xhr.onabort = () => no(Object.assign(new Error('aborted'), { aborted: true }))
+    signal?.addEventListener('abort', onAbort, { once: true })
+    xhr.send(blob)
+  })
+}
+
+// Retry a chunk through transient failures (dropped connection, 5xx, rate limit). A 4xx other than
+// 408/429 means the request itself is wrong, so retrying it unchanged can only fail the same way.
+async function withRetry(fn, { attempts = 4, baseMs = 400 } = {}) {
+  let last
+  for (let a = 0; a < attempts; a++) {
+    try { return await fn() } catch (e) {
+      last = e
+      if (e.aborted) throw e
+      if (e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) throw e
+      if (a < attempts - 1) await new Promise((r) => setTimeout(r, baseMs * 2 ** a))
+    }
+  }
+  throw last
 }
 
 // Voice — the core speech layer. `speak()` streams a turn as interleaved transcript + audio-clip
@@ -419,14 +531,18 @@ export const stt = {
   // Mint an ephemeral token for a streaming realtime transcription session (server VAD). The browser
   // then connects to OpenAI directly over WebRTC with this token — the real key stays server-side.
   realtimeToken: () => postCore('/v2/realtime/transcribe-token', {}),
+  // The clip goes up as raw bytes. As base64 in a JSON body it was bounded by the core's 10mb JSON
+  // limit, which is roughly 40 minutes of webm opus and a hard stop rather than a graceful one.
   async transcribe(blob, { model, language } = {}) {
-    const data_base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(String(r.result).split(',')[1] || '')
-      r.onerror = () => reject(new Error('read failed'))
-      r.readAsDataURL(blob)
+    const mime = blob.type || 'audio/webm'
+    const res = await fetch(`/v2/transcribe${q({ mime, model, language })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': mime, Accept: 'application/json' },
+      body: blob
     })
-    return postCore('/v2/transcribe', { data_base64, mime: blob.type || 'audio/webm', model, language })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.error || `transcribe -> ${res.status} ${res.statusText}`)
+    return json
   }
 }
 

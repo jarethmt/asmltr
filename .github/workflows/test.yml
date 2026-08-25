@@ -10,11 +10,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Pinned to 24.18.0: Node 24.19.0 has a teardown regression that trips
-          # `Assertion failed: (env) != nullptr` in RemoveEnvironmentCleanupHook when better-sqlite3's
-          # native Statement finalizers run on process exit, crashing session-resume-recovery.test.js
-          # (every assertion passes — only the exit crashes). Bump deliberately once upstream fixes it.
-          node-version: '24.18.0'
+          # Unpinned from 24.18.0 now that better-sqlite3 is on 13.x (N-API, PR #120). The pin worked
+          # around Node 24.19.0's ObjectWrap cleanup-hook regression, which only reaches NAN-style
+          # addons; an N-API build never calls RemoveEnvironmentCleanupHook, so the assert cannot fire.
+          # Keeping the pin would have left the host's own 24.19 exposure untested, which is the case
+          # #120 was actually about — the core loads better-sqlite3 under pm2, not just CI.
+          node-version: '24'
 
       - name: Install dependencies
         run: |

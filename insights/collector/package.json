@@ -10,7 +10,7 @@
     "check": "node --check server.js && node --check db.js && node --check reconcile.js && node --check sampler.js && node --check tailer.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "express": "^4.22.2",
     "socket.io": "^4.7.0"
   }

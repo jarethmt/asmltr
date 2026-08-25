@@ -31,6 +31,33 @@ The pipeline entrypoint plus session takeover/steer primitives and the trust fra
 redact) under a global concurrency slot and a per-`conversation_key` lock. It returns an empty
 `actions` array (connector posts nothing) when the turn is aborted or ends with `[[NO_REPLY]]`.
 
+### Sending a file to the core
+
+Three routes take a file: `POST /v2/upload` (the shared upload surface), `POST /v2/silos/:id/file`
+(write into a silo), and `POST /v2/transcribe` (an audio clip). Each accepts two shapes.
+
+**Raw bytes.** The body IS the file, `Content-Type` is whatever the file is, and the metadata that
+would have sat beside it in a JSON object moves to the query string.
+
+```
+POST /v2/upload?filename=photo.jpg&mime=image/jpeg
+POST /v2/silos/self/file?path=notes/photo.jpg
+POST /v2/transcribe?mime=audio/webm&model=…&language=…
+```
+
+**JSON with base64.** `{ data_base64, … }` with the metadata alongside it, unchanged and still
+supported, so no existing client has to move.
+
+Use raw for anything that is actually a file. The JSON shape is bounded by the core's
+`express.json({ limit: '10mb' })`, and base64 spends 4 bytes per 3, so it caps near 7.5 MiB of file:
+measured against that parser, 7,864,000 bytes is accepted and 7,900,000 is not. It also means the
+browser holds the file as a string while the body holds a second copy and the server a third. A raw
+body is bounded by `ASMLTR_RAW_BODY_LIMIT` (default `1024mb`) and answers a 413 as JSON naming that
+limit. `POST /v2/recordings` and `POST /v2/backups/import` were already raw-only and are unchanged.
+
+Whatever the shape, a reverse proxy in front needs a `client_max_body_size` at least as large, at
+**server** level so an `auth_request` subrequest inherits it too.
+
 ### Titles & announcements
 
 | Method & path | Body | Returns |
@@ -55,6 +82,67 @@ at the start of its next turn (`target` = `*`, a `conversation_key`, `surface:<c
 
 `/v2/inject` bypasses moderation (the operator is trusted) and redacts on the way out like any
 public reply. See the [injection guide](../coordination/injection.md).
+
+### File uploads
+
+Every inbound file lands in one shared, channel-agnostic area (`ASMLTR_UPLOADS_DIR`, default the
+`uploads/` folder of the Self silo) and gets a line in `manifest.jsonl`, so a file sent on Telegram is
+findable from a session running anywhere. Connectors call `shared/uploads` directly; the browser uses
+these routes.
+
+**Chunked (what the dashboard uses).** The wire unit is a fixed-size chunk, so file size is not
+bounded by any body limit, an interrupted transfer resumes from what already landed, and the server
+holds one chunk in memory rather than the file.
+
+| Endpoint | Body | Returns |
+|---|---|---|
+| `POST /v2/upload/init` | `{ filename, mime, size, sha256?, conversation_key? }` | `{ ok, upload_id, chunk_size, chunks, received }` |
+| `PUT /v2/upload/:id/:index` | raw `application/octet-stream` chunk bytes, optional `X-Chunk-Sha256` | `{ ok, received_count, chunks }` |
+| `GET /v2/upload/:id` | (none) | `{ upload_id, size, chunk_size, chunks, received }` for resume, 404 if unknown |
+| `POST /v2/upload/:id/finish` | `{ sha256? }` | `{ ok, file: { path, name, mime, kind, bytes, sha256 } }` |
+| `DELETE /v2/upload/:id` | (none) | `{ ok }`, discards a partial upload |
+
+Status codes carry the retry decision: **409** means chunks are still missing (send them), **422**
+means the bytes failed an integrity check (start over), **404** means the upload is gone, **400**
+means the request itself is malformed, **413** means one chunk exceeded the server or proxy body
+limit. Nothing reaches the manifest until `finish` succeeds, so `list()` never returns a path to a
+half-written file. Staging dirs left by uploads that were never finished are swept hourly once they
+pass 24 hours old.
+
+**Where chunks stage.** In `ASMLTR_UPLOAD_STAGING_DIR`, default `~/.asmltr/uploads-partial` — outside
+the upload area on purpose. The upload area is the Self silo, which is what a user browses in the
+Silos GUI and what `scripts/backup.js` copies into every snapshot; a partial is neither an artifact
+nor state worth restoring, and one abandoned mid-transfer would otherwise ride into every backup taken
+during the 24 hour sweep window at full size. Backups skip the staging directory outright. Keep
+staging on the same filesystem as the upload area: `finish` renames the assembled file into place, and
+across a mount boundary that rename falls back to a full copy. Correct either way, free only on one.
+
+**Storage-driver constraint.** `shared/silo.js` notes that on an encrypted or remote-driver silo,
+writers should go through `Silo.put` rather than the raw filesystem path. Chunked uploads are one of
+the callers still writing raw. That is deliberate and unresolved here: the conversion is the tracked
+artifacts-via-driver follow-up. What this path does do is keep the surface to a single call site —
+because staging is outside the silo, the only raw write that touches it is `saveFrom()` moving the
+finished file in, not one write per chunk.
+
+**Integrity.** `finish` always checks the assembled length against the declared `size`, and against
+what actually reached the disk. Content is verified per chunk via `X-Chunk-Sha256`, which is how the
+guarantee holds without hashing the whole file: computing a whole-file digest means holding the whole
+file, the exact thing chunking avoids. The dashboard sends it whenever `crypto.subtle` is available
+(any secure context, which includes localhost). The whole-file `sha256` at `init` or `finish` stays
+supported for clients that already know it.
+
+`chunk_size` is chosen by the server (`ASMLTR_UPLOAD_CHUNK_SIZE`, default 8 MiB). A single chunk body
+is bounded by `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb), and the declared file size by
+`ASMLTR_UPLOAD_MAX_SIZE` (default 128 GiB, which stops a client from claiming a size whose chunk
+count would itself be expensive to walk). Any reverse proxy in front needs a `client_max_body_size`
+at least as large as one chunk, at **server** level so the `auth_request` subrequest gets it too.
+Note that `/v2/backups/import` is not chunked and posts its archive as one body, so that same
+directive is what caps a backup import.
+
+**One-shot (kept for compatibility).** `POST /v2/upload` takes
+`{ filename, mime, conversation_key?, data_base64 }` and returns the same `file` object. It carries
+the whole file as base64 inside the JSON body, so its ceiling is the smallest body limit on the path
+minus base64's 33% overhead. Prefer the chunked routes for anything a person picked from a file dialog.
 
 ### Trust framework
 

@@ -27,6 +27,17 @@ const REPO = path.resolve(__dirname, '..');
 const HOME = os.homedir();
 const ASMLTR = path.join(HOME, '.asmltr');
 const BACKUP_DIR = process.env.ASMLTR_BACKUP_DIR || path.join(ASMLTR, 'backups');
+// Staging for in-flight chunked uploads. Asked of the uploads module rather than spelled out here, so
+// one definition moves if the path ever does. Excluded below: a partial is transient, not state worth
+// restoring, and at up to ASMLTR_UPLOAD_MAX_SIZE it would dominate the archive it rode into.
+const UPLOAD_STAGING = (() => {
+  try { return require('../shared/uploads').stagingDir(); } catch (_) { return null; }
+})();
+
+/** True when `p` is a path we deliberately keep out of the home-store snapshot. */
+function excludedFromHome(p) {
+  return [BACKUP_DIR, UPLOAD_STAGING].some((dir) => dir && (p === dir || p.startsWith(dir + path.sep)));
+}
 const SCHEDULE_FILE = process.env.ASMLTR_BACKUP_SCHEDULE_FILE || path.join(ASMLTR, 'backup-schedule.json');
 const REMOTE_PREFIX = 'asmltr-backups'; // subfolder within a destination integration's root
 function registry() { return require('../integrations/registry'); } // lazy — pulls in storage drivers only when a remote is used
@@ -190,9 +201,10 @@ async function createBackup(opts = {}) {
     }
 
     // 3) ~/.asmltr home store (identity, integrations, silos, context.d) — minus backups/ (no recursion)
+    //    and minus in-flight upload staging (see UPLOAD_STAGING).
     if (fs.existsSync(ASMLTR)) {
       const dest = path.join(stage, 'home');
-      fs.cpSync(ASMLTR, dest, { recursive: true, filter: (s) => s !== BACKUP_DIR && !s.startsWith(BACKUP_DIR + path.sep) });
+      fs.cpSync(ASMLTR, dest, { recursive: true, filter: (s) => !excludedFromHome(s) });
       let files = 0, bytes = 0;
       const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { files++; bytes += fs.statSync(p).size; } } };
       walk(dest);
@@ -368,7 +380,7 @@ function startScheduler({ log = () => {}, intervalMs = 10 * 60 * 1000 } = {}) {
   return t;
 }
 
-module.exports = { createBackup, verifyBackup, restoreBackup, verifyChecksums, activate, healthCheck, listBackups, listRemoteBackups, pruneBackups, getSchedule, setSchedule, runScheduled, startScheduler, BACKUP_DIR };
+module.exports = { createBackup, verifyBackup, restoreBackup, verifyChecksums, activate, healthCheck, listBackups, listRemoteBackups, pruneBackups, getSchedule, setSchedule, runScheduled, startScheduler, BACKUP_DIR, UPLOAD_STAGING, excludedFromHome };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 if (require.main === module) {

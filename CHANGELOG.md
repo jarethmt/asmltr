@@ -10,7 +10,59 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Chunked file uploads.** `POST /v2/upload/init`, `PUT /v2/upload/:id/:index` (raw
+  `application/octet-stream`), `GET /v2/upload/:id`, `POST /v2/upload/:id/finish`, and
+  `DELETE /v2/upload/:id`, backed by `beginChunked` / `putChunk` / `chunkStatus` / `finishChunked` /
+  `abortChunked` / `sweepPartials` in `shared/uploads.js`. The wire unit is a chunk instead of the
+  file, so upload size is no longer bounded by a body limit anywhere on the path. Chunks stage under
+  `<staging>/<id>/` and are assembled one at a time, so the server holds one chunk rather
+  than the whole file; nothing is written to the manifest until `finish` verifies the assembled
+  length against both the declared size and the bytes that actually reached the disk, so `list()` can
+  never hand the agent a path to a half-written file. Content is verified per chunk via
+  `X-Chunk-Sha256`, which keeps the integrity check honest without hashing the whole file (hashing
+  the whole file would mean holding it, the thing chunking exists to avoid); a whole-file `sha256` is
+  still accepted from clients that know it. Retried chunks are idempotent, a chunk index that is not
+  a plain integer is rejected before it reaches a path, and staging left by abandoned uploads is
+  swept hourly past a 24 hour TTL. Tuning: `ASMLTR_UPLOAD_CHUNK_SIZE` (default 8 MiB),
+  `ASMLTR_UPLOAD_MAX_CHUNK` (default 64mb), `ASMLTR_UPLOAD_MAX_SIZE` (default 128 GiB).
+- **`uploads.saveFrom({ tempPath, … })`.** Registers a file already on disk by moving it into the
+  shared area, so a file no longer has to fit in a Buffer to be registered. `save()` is unchanged for
+  connectors, which already hold Buffers.
+
+- **File routes take raw bytes, not only base64 in a JSON body.** `POST /v2/upload`,
+  `POST /v2/silos/:id/file` and `POST /v2/transcribe` now accept the file as the request body with
+  its metadata in the query string, the shape `POST /v2/recordings` and `POST /v2/backups/import`
+  already used. The JSON `data_base64` form still works, so no existing client breaks. New knob
+  `ASMLTR_RAW_BODY_LIMIT` (default `1024mb`) bounds a raw body, and a body over it returns JSON
+  naming the limit instead of an HTML stack trace.
+
 ### Changed
+
+- **The composer uploads in chunks, with real progress.** `webChat.upload(file, key, { onProgress })`
+  sends `file.slice()` chunks over XHR (fetch exposes no upload progress event) and retries a failed
+  chunk with backoff instead of failing the whole file. Each file in a multi-file pick gets its own
+  progress row; previously one shared `notice` meant five files with three failures showed a single
+  message about the last one.
+- **Chunks stage outside the Self silo.** `ASMLTR_UPLOAD_STAGING_DIR`, default
+  `~/.asmltr/uploads-partial`, replaces the old `<uploads>/.partial`. Since uploads moved into the Self
+  silo, staging under the upload area put in-flight partials inside the tree `scripts/backup.js` copies
+  wholesale, so an upload abandoned mid-transfer rode into every snapshot taken before the 24 hour
+  sweep reaped it, at full file size, and showed up in the Silos GUI as a half-written blob. Backups
+  now skip the staging directory as well as `backups/`. Staging belongs on the same filesystem as the
+  upload area: `finish` renames the assembled file into place, and across a mount boundary `saveFrom()`
+  falls back to copy-then-unlink. Second effect: the silo now sees exactly one raw-path write per
+  upload (the move-in) rather than one per chunk, which is the whole surface the artifacts-via-driver
+  follow-up has to convert to `Silo.put`.
+- **`/rd/` keeps its own 1 MiB body limit.** The remote-desktop signaling broker is deliberately not
+  behind the session `auth_request`, and it would otherwise inherit the server-level `1024m` this
+  release adds, handing an unauthenticated route a 1 GiB body budget as a side effect of an upload
+  change. Pinned to the limit it already ran under. Signaling frames are SDP and ICE candidates.
+
+- **The dashboard sends files as bytes.** The Silos browser's upload button and the voice
+  transcription path both posted base64 inside a JSON body, which `express.json({ limit: '10mb' })`
+  capped near 7.5 MiB of actual file: measured against that parser, 7,864,000 bytes is accepted and
+  7,900,000 is not. Uploading a 10 MB file into a silo failed with `413 Payload Too Large` and no
+  size named anywhere the user could see it. Both now send the file itself.
 
 ### Fixed
 - **Connector telemetry no longer silently dropped (`android`, `device`, `remote-desktop`, `notify`, `recorder`).**
@@ -27,7 +79,33 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   next hole shows up in the dashboard rather than only in logs. A new test asserts every
   `connectors/types/*/meta.type` resolves to a valid surface, so the two lists cannot drift again.
 
+- **Uploads were capped at 767.9 KiB, not the 10 MB the core advertised.** `client_max_body_size` was
+  absent from `insights/dashboard/nginx.conf.template`, so nginx applied its 1 MiB default, and the
+  base64 JSON body spent a third of that on encoding: 786,327 bytes uploaded and 786,522 failed. An
+  ordinary 3 MB phone photo returned `413 Request Entity Too Large` with no size named anywhere in the
+  UI or the docs. The same default capped `POST /v2/backups/import` at 1 MiB despite its `limit:
+  '1024mb'`, making GUI backup import fail for any real archive. The directive is now set to `1024m`
+  at **server** level. Both parts matter: scoping it to `location /v2/` is not enough, because
+  `auth_request` runs its check as a subrequest against `location = /_asmltr_authz`, which applied its
+  own inherited 1 MiB limit and turned every chunk into a 500; and the value has to match the core's
+  own ceiling for `/v2/backups/import`, because that route is not chunked and posts its archive as a
+  single body, so whatever is set here is the real backup-import cap.
+  ([#91](https://github.com/jarethmt/asmltr/issues/91))
+
+- **Upload failures are no longer silent or misreported.** A manifest append that fails now logs
+  instead of being swallowed, so a file that lands on disk without an index says so. Server-side
+  faults (`ENOSPC`, `EACCES`) are logged with the upload id and answered with a generic message
+  rather than a 400 or an absolute host path in the response body. A `readdir` failure on a staging
+  dir is no longer reported as "every chunk is missing", a corrupt `meta.json` is no longer reported
+  as "unknown upload", an oversized chunk returns JSON rather than an Express stack trace, and a
+  sweep that fails on every directory no longer looks identical to a sweep with nothing to do.
+
 ## [0.16.1] - 2026-08-24
+
+- **CI is back on the Node 24 line, unpinned.** v0.14.1 pinned `node-version: 24.18.0` to dodge the
+  `(env) != nullptr` teardown abort. With better-sqlite3 on 13.x (N-API) that abort cannot fire, and
+  keeping the pin meant nothing ever exercised 24.19 — the version the host will eventually run, which
+  is the exposure the N-API move was for. CI now resolves `24` again.
 
 ### Added
 
