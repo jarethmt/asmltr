@@ -30,7 +30,9 @@ if (!type || !instanceId) {
 async function main() {
   let plugin;
   try {
-    plugin = require(path.join(__dirname, '..', 'types', type));
+    const found = require('../../shared/plugin-dirs').resolveType(type);
+    if (!found) throw new Error(`type '${type}' not found under connectors/types or integrations/types`);
+    plugin = require(found.path);
   } catch (e) {
     console.error(`run-instance: cannot load type '${type}':`, e.message);
     process.exit(2);

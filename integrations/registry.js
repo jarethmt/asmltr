@@ -1,6 +1,18 @@
 'use strict';
 /**
- * Integrations registry — configured links to third-party services (storage today; more later).
+ * Integrations registry — OPTIONAL, per-install capabilities the agent reaches outward to use.
+ * See docs/INTEGRATIONS.md for the boundary: if asmltr requires it to function, it is core, not an
+ * integration, no matter which direction it points.
+ *
+ * Two orthogonal axes (conflating them is what once forced a supervised service to masquerade as a
+ * chat connector):
+ *   kind      storage | tools | transport   — WHAT capability it yields
+ *   lifecycle passive  | supervised         — WHO runs it
+ *
+ * `passive` is the historical behaviour: config plus a driver loaded on demand, nothing running
+ * until something opens it. `supervised` entries are long-running processes and are run by the same
+ * supervisor that runs channel connectors — supervision was always the right mechanism; only the
+ * taxonomy was wrong.
  * Unlike connectors, integrations are NOT supervised processes — just config + a driver loaded on
  * demand. Config is stored as JSON; secret-bearing fields are stored as *_ref (a vault key name) and
  * resolved from the TRUST vault (via shared/secrets.js) only at open time — never persisted in the clear.
@@ -19,9 +31,24 @@ function load() { try { return JSON.parse(fs.readFileSync(file(), 'utf8')); } ca
 function save(d) { fs.mkdirSync(path.dirname(file()), { recursive: true }); fs.writeFileSync(file(), JSON.stringify(d, null, 2)); }
 function id() { return 'int_' + Math.random().toString(36).slice(2, 10); }
 
-function list() { return Object.values(load()); }               // configs only — *_ref are key names, not secrets
-function get(iid) { return load()[iid] || null; }
-function create({ type, name, config = {} }) { const d = load(); const it = { id: id(), type, name, config, created_at: Date.now() }; d[it.id] = it; save(d); return it; }
+// configs only — *_ref are key names, not secrets. Older entries predate kind/lifecycle, so they are
+// defaulted on read rather than migrated on disk: every one of them is a passive storage link.
+function shape(it) { return { kind: 'storage', lifecycle: 'passive', ...it }; }
+function list({ kind, lifecycle } = {}) {
+  return Object.values(load()).map(shape)
+    .filter((i) => (!kind || i.kind === kind) && (!lifecycle || i.lifecycle === lifecycle));
+}
+function get(iid) { const it = load()[iid]; return it ? shape(it) : null; }
+const KINDS = ['storage', 'tools', 'transport'];
+const LIFECYCLES = ['passive', 'supervised'];
+
+function create({ type, name, config = {}, kind = 'storage', lifecycle = 'passive' }) {
+  if (!KINDS.includes(kind)) throw new Error(`kind must be one of: ${KINDS.join(', ')}`);
+  if (!LIFECYCLES.includes(lifecycle)) throw new Error(`lifecycle must be one of: ${LIFECYCLES.join(', ')}`);
+  const d = load();
+  const it = { id: id(), type, name, kind, lifecycle, config, created_at: Date.now() };
+  d[it.id] = it; save(d); return it;
+}
 function update(iid, patch) { const d = load(); if (!d[iid]) return null; d[iid] = { ...d[iid], ...patch, id: iid, updated_at: Date.now() }; save(d); return d[iid]; }
 function remove(iid) { const d = load(); if (!d[iid]) return false; delete d[iid]; save(d); return true; }
 
@@ -51,4 +78,4 @@ async function test(iid) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-module.exports = { list, get, create, update, remove, openStorage, test, resolveConfig };
+module.exports = { KINDS, LIFECYCLES, list, get, create, update, remove, openStorage, test, resolveConfig };

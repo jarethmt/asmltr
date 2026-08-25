@@ -23,8 +23,13 @@ const crypto = require('crypto');
 const meta = {
   type: 'remote-desktop',
   displayName: 'Remote desktop (WebRTC signaling)',
-  // Not a send target — signaling infra. Kept minimal so the manager doesn't offer it as an outbound channel.
-  outbound: { kinds: [], target: { required: false } },
+  // An outward capability, not a conversation channel (docs/INTEGRATIONS.md). `role` is what keeps
+  // it out of the send-target list now — it no longer has to fake an empty outbound surface to
+  // avoid being offered as one.
+  role: 'service',
+  kind: 'transport',        // it yields access to a MACHINE, bound to a device row
+  lifecycle: 'supervised',  // a long-running broker, supervised by the same machinery as channels
+  optional: true,           // asmltr runs fine without remote desktop — that is what makes it an integration
   configSchema: {
     type: 'object',
     properties: {

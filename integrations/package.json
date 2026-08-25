@@ -1,0 +1,9 @@
+{
+  "name": "asmltr-integrations",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Outward-facing optional capabilities the agent reaches out to use (docs/INTEGRATIONS.md)",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

@@ -36,16 +36,11 @@ const childEnv = {
 const supervisor = makeSupervisor(childEnv);
 
 // --- discover type plugins ---------------------------------------------------
-const TYPES_DIR = path.join(__dirname, '..', 'types');
+// Types live in two trees — connectors (channels) and integrations (outward services). Same
+// plugin contract, same supervisor; only the role differs. See docs/INTEGRATIONS.md.
+const plugins = require('../../shared/plugin-dirs');
 function loadTypes() {
-  const out = {};
-  for (const t of fs.readdirSync(TYPES_DIR)) {
-    try {
-      const mod = require(path.join(TYPES_DIR, t));
-      if (mod && mod.meta) out[mod.meta.type] = mod.meta;
-    } catch (e) { console.error(`[manager] type '${t}' failed to load:`, e.message); }
-  }
-  return out;
+  return plugins.loadAllMeta((t, e) => console.error(`[manager] type '${t}' failed to load:`, e.message));
 }
 const TYPES = loadTypes();
 
@@ -180,6 +175,7 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
     : null;
   if (!inst) return { ok: false, status: 404, error: 'no connector instance for that channel/instance_id' };
   const meta = TYPES[inst.type];
+  if (meta && !plugins.isChannel(meta)) return { ok: false, status: 400, error: `type '${inst.type}' is an outward service, not a channel — it cannot be a send target` };
   if (!meta || !meta.outbound) return { ok: false, status: 400, error: `type '${inst.type}' has no outbound capability` };
   // Outbound file-attachment capability: a connector must DECLARE it supports an attachment kind
   // (file/photo/document in meta.outbound.kinds) before we route a file to it — a clean, honest
@@ -256,7 +252,7 @@ async function drainAnnouncements() {
 }
 // list outbound-capable destinations (for the skill / dashboard)
 app.get('/send/targets', requireToken, (req, res) => {
-  const dests = registry.list().filter((i) => TYPES[i.type] && TYPES[i.type].outbound)
+  const dests = registry.list().filter((i) => TYPES[i.type] && plugins.isChannel(TYPES[i.type]) && TYPES[i.type].outbound)
     .map((i) => ({ instance_id: i.id, channel: i.type, name: i.name, enabled: i.enabled, outbound: TYPES[i.type].outbound, attachments: supportsAttachments(TYPES[i.type]), readable: isReadable(TYPES[i.type]) }));
   res.json({ targets: dests });
 });

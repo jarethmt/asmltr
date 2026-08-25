@@ -1,0 +1,27 @@
+{
+ "keys": [
+  {
+   "key": "Yectoas-8D8Y27FRJ_MbatQUUlChAkx7",
+   "identity": "owner",
+   "username": "Windows host agent",
+   "note": "host; role=host publishes screen"
+  },
+  {
+   "key": "Kh43ndbzYPJmMq0RTb9iCef6qIj-z9d9",
+   "identity": "owner",
+   "username": "My phone (viewer)",
+   "note": "full trust -> view + control"
+  },
+  {
+   "key": "nLiFiEUBEtJ0DsRDXr5hZlZ_eFFqCmE_",
+   "identity": "rd-viewer-demo",
+   "username": "View-only guest",
+   "note": "tier-1 -> view only"
+  },
+  {
+   "key": "aio2ow6vsMAVYRHVFwGdN7A1B2uwx5WK",
+   "identity": "owner",
+   "note": "android device token \u2014 phone viewer default (view+control)"
+  }
+ ]
+}
