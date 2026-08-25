@@ -107,6 +107,19 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   keeping the pin meant nothing ever exercised 24.19 — the version the host will eventually run, which
   is the exposure the N-API move was for. CI now resolves `24` again.
 
+- **A stop is no longer silently dropped when it lands during moderation.** A turn only became
+  abortable at `inFlight.set(...)`, which sits *after* `moderation.moderate()` — a network call to
+  another model that takes seconds for any sender who isn't `bypass_moderation`. A stop arriving in
+  that window got `404 no in-flight turn for that conversation`, the connector answered "Couldn't stop
+  the current turn", and the turn then ran to completion anyway. Observed live: message in at
+  16:02:00, stop at 16:02:05, moderation decision at 16:02:08. Turns are now registered in
+  `dispatch()` *before* the key lock, so they are abortable from the moment they're accepted, and the
+  turn checks for an abort after moderation rather than starting the engine on work a human already
+  killed. Because registration now precedes the key lock, `inFlight` holds a Set per conversation and
+  `/v2/abort` stops the running turn **and everything queued behind it** on that key — stopping a
+  conversation stops the conversation. Background maintenance timers are `unref`'d so the core can be
+  required in a test without pinning the process.
+
 ### Added
 
 ### Changed

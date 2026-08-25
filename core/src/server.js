@@ -116,8 +116,40 @@ function withKeyLock(key, fn) {
   return run;
 }
 
-// In-flight turns by conversation_key → AbortController, for real-time kill.
+// In-flight turns by conversation_key → Set<AbortController>, for real-time kill.
+//
+// A turn is registered in `dispatch()` BEFORE it takes the key lock / concurrency slot, not after
+// moderation — otherwise a stop issued while the turn sits in moderation (seconds, on a non-bypassed
+// sender) finds nothing to abort, answers 404, and the turn then runs anyway. A human stop must never
+// be silently dropped, so the abortable window opens the moment the turn is accepted.
+//
+// It's a Set, not a single controller, because registering before the key lock means several turns
+// for one conversation can be tracked at once (one running, the rest queued behind `withKeyLock`).
+// A stop aborts ALL of them: stopping a channel stops what's queued there too, not just what happens
+// to be mid-flight.
 const inFlight = new Map();
+/** Track an abortable turn for `key`. */
+function trackTurn(key, ac) {
+  let set = inFlight.get(key);
+  if (!set) { set = new Set(); inFlight.set(key, set); }
+  set.add(ac);
+  return ac;
+}
+/** Stop tracking one turn; drop the key once nothing is left under it. */
+function untrackTurn(key, ac) {
+  const set = inFlight.get(key);
+  if (!set) return;
+  set.delete(ac);
+  if (set.size === 0) inFlight.delete(key);
+}
+/** Abort every turn tracked for `key` (running + queued). Returns how many were signalled. */
+function abortKey(key) {
+  const set = inFlight.get(key);
+  if (!set || set.size === 0) return 0;
+  let n = 0;
+  for (const ac of set) { try { ac.abort(); n++; } catch (_) {} }
+  return n;
+}
 function truncate(v, n = 400) { try { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? s.slice(0, n) + '…' : s; } catch { return ''; } }
 // Conversational text (inbound/outbound) doubles as the stored conversation record that surfaces (e.g. the
 // mobile app) replay as history — keep it effectively full, not clipped to a telemetry-sized preview.
@@ -238,6 +270,11 @@ const _lastSpeakerByConv = new Map();
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
   const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
+  // `dispatch()` already registered a controller for this turn (abortable from the moment it was
+  // accepted, so a stop during moderation isn't dropped). A direct handle() caller that bypasses
+  // dispatch still gets one, tracked here and released in the finally below.
+  const abortController = opts.abortController || trackTurn(e.conversation_key, new AbortController());
+  const ownsTracking = !opts.abortController;
 
   const _cc = e.channel_context || {};
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'inbound',
@@ -423,6 +460,16 @@ async function handle(envelope, opts = {}) {
     return [env.reply('This request has been flagged by the security system and was not processed.')];
   }
 
+  // Stopped while we were in moderation. Moderation is a network call to another model and takes
+  // seconds for any sender who isn't bypass_moderation, which is exactly the window a "stop" tends
+  // to land in. Honour it here rather than starting the engine on a turn the human already killed.
+  // (moderate() takes no signal, so the call itself still finishes; the turn does not.)
+  if (abortController.signal.aborted) {
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+      identity: resolved.user_key, source: 'core', payload: { action: 'aborted', silent: true, phase: 'pre-run' } });
+    return [];
+  }
+
   // 3) session resolution + run
   const isNew = !sessions.get(e.conversation_key)?.engine_session_id;
   const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
@@ -480,8 +527,6 @@ async function handle(envelope, opts = {}) {
   const _pushSegment = (seg) => { try { opts.onSegment(mustRedact ? redactSecrets(seg).text : seg); } catch (_) {} };
   const _pushThinking = (t) => { try { opts.onThinking(mustRedact ? redactSecrets(t).text : t); } catch (_) {} };
 
-  const abortController = new AbortController();
-  inFlight.set(e.conversation_key, abortController);
   let result;
   try {
     // image attachments → vision (runner builds SDK image content blocks)
@@ -552,7 +597,7 @@ async function handle(envelope, opts = {}) {
     }
     throw err;
   } finally {
-    inFlight.delete(e.conversation_key);
+    if (ownsTracking) untrackTurn(e.conversation_key, abortController);
   }
   _flushStream(); // ship any redacted tail held back during streaming
 
@@ -681,11 +726,18 @@ async function deliverOut({ instanceId, target, text, files, subject, ref }) {
 /** Run handle() under the concurrency slot + per-key lock. */
 function dispatch(envelope, opts) {
   const key = envelope.conversation_key || 'anon';
+  // Register BEFORE the key lock and the concurrency slot: a turn that is queued behind another turn
+  // (or waiting on a slot) is just as stoppable as one that is running, and a stop that lands while
+  // this turn is still in moderation must find a controller rather than a 404.
+  const ac = trackTurn(key, new AbortController());
   return withKeyLock(key, async () => {
     await acquireSlot();
-    try { return await handle(envelope, opts); }
-    finally { releaseSlot(); }
-  });
+    try {
+      // Aborted while queued — never start it.
+      if (ac.signal.aborted) return [];
+      return await handle(envelope, { ...opts, abortController: ac });
+    } finally { releaseSlot(); }
+  }).finally(() => untrackTurn(key, ac));
 }
 
 // --- HTTP --------------------------------------------------------------------
@@ -919,7 +971,7 @@ app.post('/v2/engines/:id/install', (req, res) => {
 // Per-engine auto-update: check npm on a cadence + upgrade in place (so the harness never goes stale).
 app.post('/v2/engines/:id/auto-update', (req, res) => { try { res.json({ ok: true, autoUpdate: engines.setAutoUpdate(req.params.id, !!(req.body && req.body.enabled)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 // Background sweep: every 6h, update installed engines that have auto-update on + a newer version.
-const _engTimer = setInterval(() => { try { const d = engines.autoUpdateAll(); if (d.length) console.log('[engines] auto-updated:', JSON.stringify(d)); } catch (_) {} }, 6 * 3600 * 1000);
+const _engTimer = setInterval(() => { try { const d = engines.autoUpdateAll(); if (d.length) console.log('[engines] auto-updated:', JSON.stringify(d)); } catch (_) {} }, 6 * 3600 * 1000); if (_engTimer.unref) _engTimer.unref(); // background maintenance must not hold the loop open (the listener does)
 if (_engTimer.unref) _engTimer.unref();
 // Connection / auth per engine — subscription (OAuth, owned by the CLI) vs API-key billing.
 // The key value is stored ONLY in the TRUST vault (SACRED); engines.json keeps a boolean flag.
@@ -1579,7 +1631,7 @@ async function checkSdkFreshness() {
   } catch (_) {}
 }
 setTimeout(checkSdkFreshness, 30000); // once shortly after boot
-setInterval(checkSdkFreshness, 6 * 3600 * 1000); // every 6h
+const _sdkTimer = setInterval(checkSdkFreshness, 6 * 3600 * 1000); if (_sdkTimer.unref) _sdkTimer.unref(); // every 6h
 
 // --- DRAFTS (hold-for-approval queue, any connector) -------------------------
 app.get('/v2/drafts', (req, res) => {
@@ -1749,7 +1801,7 @@ app.post('/v2/self-assessment', async (req, res) => {
 app.post('/v2/session/forget', (req, res) => {
   const key = req.body && req.body.conversation_key;
   if (!key) return res.status(400).json({ error: 'conversation_key required' });
-  const ac = inFlight.get(key); if (ac) { try { ac.abort(); } catch (_) {} }
+  abortKey(key); // running + queued
   observed.delete(key);
   const existed = sessions.remove(key);
   record({ surface: String(key).split(':')[0] || 'core', session_id: key, event_type: 'control',
@@ -1845,11 +1897,12 @@ app.post('/v2/abort', (req, res) => {
     record({ surface: 'core', session_id: key, event_type: 'control', identity: 'operator', source: 'core', payload: { action: 'abort-self-update' } });
     return res.json({ ok: true, aborted: key, via: 'kill-file' });
   }
-  const ctrl = inFlight.get(key);
-  if (!ctrl) return res.status(404).json({ ok: false, error: 'no in-flight turn for that conversation' });
-  ctrl.abort();
-  record({ surface: 'core', session_id: key, event_type: 'control', identity: 'operator', source: 'core', payload: { action: 'abort' } });
-  res.json({ ok: true, aborted: key });
+  // Aborts the running turn AND anything queued behind it on this key — stopping a conversation
+  // stops the whole conversation, not just the turn that happens to be mid-flight.
+  const stopped = abortKey(key);
+  if (!stopped) return res.status(404).json({ ok: false, error: 'no in-flight turn for that conversation' });
+  record({ surface: 'core', session_id: key, event_type: 'control', identity: 'operator', source: 'core', payload: { action: 'abort', turns: stopped } });
+  res.json({ ok: true, aborted: key, turns: stopped });
 });
 
 // Operator STEER: inject a message into a live session — resume it with the operator's text, then
@@ -1874,7 +1927,7 @@ app.post('/v2/inject', (req, res) => {
   // treats the text as guidance, not a fresh question. `interrupt:true` aborts the running turn
   // first (redirect immediately, abandoning the current turn).
   const wasRunning = inFlight.has(key);
-  if (interrupt && wasRunning) { try { inFlight.get(key).abort(); } catch (_) {} }
+  if (interrupt && wasRunning) abortKey(key);
 
   withKeyLock(key, async () => {
     record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
@@ -1885,7 +1938,7 @@ app.post('/v2/inject', (req, res) => {
     const prompt = (wasRunning || interrupt)
       ? `[${steerer} steering — you are mid-task. Incorporate the following guidance into the work you are ALREADY doing and continue it. Do NOT restart from scratch, and do NOT treat it as a standalone question to answer in isolation.]\n\n${text}`
       : text;
-    const ac = new AbortController(); inFlight.set(key, ac);
+    const ac = trackTurn(key, new AbortController());
     let result;
     const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
         onEvent: (sdkEvt) => {
@@ -1909,7 +1962,7 @@ app.post('/v2/inject', (req, res) => {
           payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
         result = await runTurn({ ...injectOpts, resume: null });
       }
-    } finally { inFlight.delete(key); }
+    } finally { untrackTurn(key, ac); }
     if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
     sessions.touch(key);
     const reply = redactSecrets((result.text || '').trim()).text;
