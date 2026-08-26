@@ -34,6 +34,22 @@ const tts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const identity = require('../../../shared/identity'); // for /gw/theme (signature palette + agent name)
 
+// Types the mobile webview renders inline safely. HTML, SVG, and XML documents run script, so they are
+// never on this list; /gw/file serves anything absent here as an opaque attachment with nosniff, so a
+// file that lands under an allowed base with a .html or .svg name can't execute on the gateway origin
+// the app already trusts with its device token. Security review 2026-08.
+const INLINE_SAFE = /^(?:image\/(?:png|jpe?g|gif|webp|bmp)|application\/pdf|text\/plain|audio\/[a-z0-9.+-]+|video\/[a-z0-9.+-]+)(?:\s*;.*)?$/i;
+function serveDisposition(mime) { return INLINE_SAFE.test(String(mime || '')) ? 'inline' : 'attachment'; }
+
+// /out is the control-plane push (connector-manager → connector) and carries no device token, so it is
+// trusted only from loopback. When the gateway binds a routable interface it needs a fallback check;
+// see the /out handler. req.socket.remoteAddress is the raw TCP peer (this connector sets no trust
+// proxy), so an X-Forwarded-For header can't spoof it.
+function isLoopback(req) {
+  const a = (req && req.socket && req.socket.remoteAddress) || '';
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+}
+
 const meta = {
   type: 'android',
   displayName: 'Android assistant',
@@ -398,6 +414,13 @@ async function start(ctx) {
   // to read the text ALOUD without running a turn. A '*' / empty target broadcasts to every connected
   // device — and to the background control link too, so read-aloud works even when the overlay is closed.
   app.post('/out', (req, res) => {
+    // The connector-manager posts here from loopback with no device token. Trust loopback as before;
+    // when the gateway is bound to a routable interface (bind_host other than 127.0.0.1) and tokens are
+    // on, require a valid device token so the LAN can't push media frames or register files. Default
+    // installs bind 127.0.0.1, so the manager path is unchanged. Security review 2026-08.
+    if (!isLoopback(req) && requireToken && !auth((req.body || {}).token)) {
+      return res.status(401).json({ ok: false, error: 'unauthorized' });
+    }
     const { target, text, kind, title, require_headphones, path: filePath, caption, host_id, control } = req.body || {};
     const device = String(target || '').trim();
     // kind:'file' → register the file + push a `media` frame the app renders inline / downloads via /gw/file.
@@ -621,9 +644,16 @@ async function start(ctx) {
     let real, st;
     try { real = fs.realpathSync(rec.path); st = fs.statSync(real); } catch (_) { return res.status(404).json({ ok: false, error: 'file gone' }); }
     if (!st.isFile() || !underAllowed(real)) return res.status(403).json({ ok: false, error: 'forbidden' });
-    res.setHeader('Content-Type', rec.mime || guessMime(real));
+    const mime = rec.mime || guessMime(real);
+    const disposition = serveDisposition(mime);
+    // Renderable media keeps its real type and serves inline; everything else is relabelled
+    // application/octet-stream and handed back as an attachment, so neither the declared type nor MIME
+    // sniffing can execute it. nosniff and a locked-down CSP are belt-and-suspenders on top.
+    res.setHeader('Content-Type', disposition === 'inline' ? mime : 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
     res.setHeader('Content-Length', String(st.size));
-    res.setHeader('Content-Disposition', `inline; filename="${(rec.name || path.basename(real)).replace(/["\\]/g, '')}"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${(rec.name || path.basename(real)).replace(/["\\]/g, '')}"`);
     fs.createReadStream(real).on('error', () => { try { res.destroy(); } catch (_) {} }).pipe(res);
   });
 
@@ -640,4 +670,4 @@ async function start(ctx) {
   };
 }
 
-module.exports = { meta, start };
+module.exports = { meta, start, serveDisposition, isLoopback };

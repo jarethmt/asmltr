@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
-const { start } = require('../connectors/types/android/index.js');
+const { start, serveDisposition, isLoopback } = require('../connectors/types/android/index.js');
 
 // End-to-end over a real ephemeral HTTP server: a device holds the SSE stream, POSTs a turn, and the
 // mocked core streams deltas back down the SSE; then a manager /out push arrives as an `inject` frame.
@@ -78,4 +78,31 @@ test('android connector: SSE ready → turn streams deltas → /out injects', as
   } finally {
     await inst.stop();
   }
+});
+
+// /gw/file serves media inline only for types the webview can't execute. HTML, SVG, and XML documents
+// run script, so they must come back as attachments; raster images, audio, video, PDF, and plain text
+// render inline. Regression guard for the stored-XSS finding (security review 2026-08).
+test('serveDisposition: renderable media inline, script-capable types as attachment', () => {
+  for (const t of ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp',
+                   'audio/mpeg', 'audio/wav', 'video/mp4', 'application/pdf', 'text/plain',
+                   'text/plain; charset=utf-8']) {
+    assert.equal(serveDisposition(t), 'inline', `${t} should render inline`);
+  }
+  for (const t of ['text/html', 'text/html; charset=utf-8', 'image/svg+xml', 'application/xhtml+xml',
+                   'application/xml', 'text/xml', 'application/octet-stream', 'application/javascript',
+                   '', null, undefined]) {
+    assert.equal(serveDisposition(t), 'attachment', `${t} should download as an attachment`);
+  }
+});
+
+// /out trusts loopback (the connector-manager) and treats every routable peer as untrusted.
+test('isLoopback: only 127.0.0.1 / ::1 count as loopback', () => {
+  for (const a of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    assert.equal(isLoopback({ socket: { remoteAddress: a } }), true, `${a} is loopback`);
+  }
+  for (const a of ['192.168.1.10', '10.0.0.5', '::ffff:192.168.1.10', '', undefined]) {
+    assert.equal(isLoopback({ socket: { remoteAddress: a } }), false, `${a} is not loopback`);
+  }
+  assert.equal(isLoopback({}), false, 'a request with no socket is not loopback');
 });
