@@ -217,6 +217,53 @@ public class NativeConfig {
   }
 
   /**
+   * Force capture onto the Bluetooth headset mic, and report whether it took.
+   *
+   * Chromium on Android does not enumerate per-device microphones — getUserMedia sees essentially
+   * one "default" input — so a deviceId picked in JS cannot select the earbud mic. The route has to
+   * be set at the AudioManager level instead: nominate the SCO device as the communication device and
+   * the capture that follows comes from the headset.
+   *
+   * Returns false when no Bluetooth headset is available, so the caller can carry on with the phone
+   * mic rather than failing the turn.
+   */
+  @JavascriptInterface
+  public boolean useHeadsetMic() {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return false;
+      if (android.os.Build.VERSION.SDK_INT >= 31) {
+        for (android.media.AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+          if (d.getType() == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+            return am.setCommunicationDevice(d);
+          }
+        }
+        return false;
+      }
+      if (!am.isBluetoothScoAvailableOffCall()) return false;
+      am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+      am.startBluetoothSco();
+      am.setBluetoothScoOn(true);
+      return true;
+    } catch (Throwable t) { return false; }
+  }
+
+  /** True once the Bluetooth SCO route is actually live — setCommunicationDevice() returns before the
+   *  link is up, and capture opened too early lands on the phone mic instead. */
+  @JavascriptInterface
+  public boolean headsetMicActive() {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return false;
+      if (android.os.Build.VERSION.SDK_INT >= 31) {
+        android.media.AudioDeviceInfo d = am.getCommunicationDevice();
+        return d != null && d.getType() == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO;
+      }
+      return am.isBluetoothScoOn();
+    } catch (Throwable t) { return false; }
+  }
+
+  /**
    * Drop the SCO/communication route the moment we stop capturing.
    *
    * Recording from the earbud mic brings the SCO (call) link up, and Android leaves it up for ~20s

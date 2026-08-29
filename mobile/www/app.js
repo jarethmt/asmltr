@@ -480,43 +480,30 @@ function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 // Pick the phone's built-in mic (never a Bluetooth input) so capturing a turn doesn't bring up the
 // earbuds' SCO/call link — which would mute the A2DP output the reply is spoken on. Returns null if we
 // can't tell them apart (labels need prior mic permission, which we have once a turn has run).
-// Names Android currently reports for connected headsets, straight from AudioManager. Exact names
-// beat keyword guessing — a denylist only covers hardware someone thought of, and e.g. "OpenDots ONE
-// by Shokz" contains no 'blue'/'sco'/'buds'/'headset'/'wireless' at all.
-function connectedHeadsetNames() {
-  try {
-    const raw = window.AsmltrNative && window.AsmltrNative.listAudioDevices && window.AsmltrNative.listAudioDevices();
-    if (!raw) return [];
-    return JSON.parse(raw).map((d) => String(d.name || '').trim().toLowerCase()).filter((n) => n.length > 2);
-  } catch (_) { return []; }
-}
-function looksLikeHeadset(label, names) {
-  const L = String(label || '').trim().toLowerCase();
-  if (!L) return false;
-  if (names.some((n) => L.includes(n) || n.includes(L))) return true;   // exact, from AudioManager
-  return /blue|sco|hands|headset|buds|jbl|airpod|earbud|wireless|a2dp|hfp|shokz|opendots/i.test(L);
-}
 // Talk through the HEADSET mic when one is connected — you're wearing the earbuds, so that's the mic
-// that should hear you, and holding the phone up to talk defeats the point.
+// that should hear you; holding the phone up to talk defeats the point of a hands-free assistant.
 //
-// The cost is that capturing from a Bluetooth mic brings up the SCO (call) link, which pulls the buds
-// off A2DP onto the narrowband call profile. Anything still playing gets dragged onto that channel and
-// starts sounding like a phone call. We handle that by pausing other players for the whole session:
-// OverlayService holds AUDIOFOCUS_GAIN_TRANSIENT while the assistant is open and abandons it on close,
-// so music stops on open and resumes afterwards instead of playing through the call channel.
+// This CANNOT be done from JS. Chromium on Android does not enumerate per-device microphones — it
+// exposes essentially one "default" audioinput — so no getUserMedia deviceId can select the earbud
+// mic. (An earlier revision tried exactly that, matching device labels; enumerateDevices never listed
+// the headset, so it silently fell back to the phone mic.) The route has to be nominated at the
+// AudioManager level, which is what AsmltrNative.useHeadsetMic() does.
 //
-// (An earlier revision pinned capture to the phone's built-in mic to dodge SCO entirely. That kept
-// output on A2DP but meant the earbud mic was never used — the wrong trade for a hands-free assistant.)
-async function headsetMicId() {
-  try {
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    const ins = devs.filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
-    if (!ins.length) return null;
-    const names = connectedHeadsetNames();
-    if (!names.length) return null;                       // nothing connected → let Android choose
-    const hs = ins.find((d) => looksLikeHeadset(d.label, names));
-    return hs ? hs.deviceId : null;
-  } catch (_) { return null; }
+// Cost: this brings the SCO (call) link up, pulling the buds off A2DP onto the narrowband call
+// profile. Handled elsewhere — OverlayService holds audio focus for the session so other players
+// pause rather than being dragged onto the call channel, cues follow the live route, and
+// releaseCommunicationRoute() hands A2DP back as soon as capture ends.
+async function routeToHeadsetMic() {
+  const N = window.AsmltrNative;
+  if (!N || !N.useHeadsetMic) return false;
+  try { if (!N.useHeadsetMic()) return false; } catch (_) { return false; }
+  // setCommunicationDevice() returns before the SCO link is actually up; opening capture too early
+  // lands on the phone mic. Wait for the route to go live (typically a few hundred ms).
+  for (let i = 0; i < 20; i++) {
+    try { if (N.headsetMicActive && N.headsetMicActive()) return true; } catch (_) {}
+    await new Promise((r) => setTimeout(r, 75));
+  }
+  return false;
 }
 async function startRec(skipCue) {
   if (state !== 'idle') return;
@@ -529,16 +516,15 @@ async function startRec(skipCue) {
     // Unprocessed capture: echoCancellation/noiseSuppression push Chromium down its WebRTC
     // *communication* path, which adds its own routing decisions on top of ours. We only record while
     // TTS isn't playing, so AEC buys us nothing anyway.
-    // Capture from the HEADSET mic when one is connected (see headsetMicId) — that's the mic next to
+    // Capture from the HEADSET mic when one is connected (see routeToHeadsetMic) — the mic next to
     // your mouth. It brings the SCO/call link up; OverlayService holds audio focus for the session so
     // other players pause rather than getting dragged onto the narrowband call channel.
     const base = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-    const micId = await headsetMicId();
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: micId ? { ...base, deviceId: { exact: micId } } : base });
-    } catch (_) {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: base }); // fallback: any mic
-    }
+    // Nominate the earbud mic BEFORE opening the stream — the route has to be live first, otherwise
+    // capture binds to the phone mic. No headset connected → falls through and uses the phone mic.
+    const onHeadset = await routeToHeadsetMic();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: base });
+    if (NATIVE) console.log('[asmltr] capture route:', onHeadset ? 'bluetooth headset (SCO)' : 'phone mic');
     // Cue AFTER the stream is live, not before. Opening the headset mic brings SCO up and tears the
     // A2DP route down mid-tone, so a cue fired first was getting clipped to nothing. Playing it here
     // means the route has settled and the tone rides whichever one is now active — and "listening" is
