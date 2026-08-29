@@ -106,16 +106,23 @@ public class OverlayService extends Service {
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
     final String action = intent != null ? intent.getAction() : ACTION_SHOW;
     if (ACTION_CLOSE.equals(action)) { stopSelf(); return START_NOT_STICKY; }
+    // Was the card already on screen? That distinguishes "waking from closed" from "pressed again
+    // while the assistant is up", and the two need opposite cue handling.
+    final boolean coldStart = !added;
     ensureAdded();
     setMinimizedInternal(false);
-    // Native listen cue for wake-word / headset-button starts: the WebView's own beep is inaudible when
-    // waking from closed (WebView not alive, BT route cold). Play it natively (warm route) and tell the
-    // page to SKIP its cue for this listen so we don't double up.
-    if (ACTION_LISTEN.equals(action)) { try { Chime.listen(this); } catch (Throwable t) {} }
+    // Native listen cue ONLY on a cold start: waking from closed, the WebView isn't alive and the BT
+    // route isn't warm, so the page's own beep is inaudible. When the overlay is already up, the page
+    // decides — a second press is a STOP, and firing the "listening" tone for it would be a lie.
+    if (ACTION_LISTEN.equals(action) && coldStart) { try { Chime.listen(this); } catch (Throwable t) {} }
     if (web != null) web.post(new Runnable() { public void run() {
-      // (re)start a listening turn on the assist gesture; a plain SHOW just surfaces the card
+      // Assist gesture → asmltrAssist(), which TOGGLES: start when idle, abandon the turn while
+      // listening, interrupt TTS while speaking. asmltrStartListening is the pre-toggle fallback.
       String js = ACTION_LISTEN.equals(action)
-        ? "window.__ASMLTR_ASSIST=true; window.__ASMLTR_SKIP_CUE=true; if(window.asmltrExpand)window.asmltrExpand(); if(window.asmltrStartListening)window.asmltrStartListening(true);"
+        ? "window.__ASMLTR_ASSIST=true; window.__ASMLTR_SKIP_CUE=" + coldStart + ";"
+          + " if(window.asmltrExpand)window.asmltrExpand();"
+          + " if(window.asmltrAssist)window.asmltrAssist(" + coldStart + ");"
+          + " else if(window.asmltrStartListening)window.asmltrStartListening(" + coldStart + ");"
         : "if(window.asmltrExpand)window.asmltrExpand();";
       web.evaluateJavascript(js, null);
     } });

@@ -136,7 +136,7 @@ function isStopPhrase(text) {
   const t = normPhrase(text); if (!t) return false; const words = t.split(' ').length;
   return stopPhrases.some((p) => { p = normPhrase(p); return p && (t === p || (words <= 4 && t.includes(p))); });
 }
-let continuous = OVERLAY, suppressRestart = false;
+let continuous = OVERLAY, suppressRestart = false, cancelledRec = false;
 // streaming TTS pipeline (synthesize each sentence as it arrives, play in order)
 let ttsBuf = '', ttsSeq = 0, ttsNextPlay = 0, ttsPlaying = false, replyTextDone = false; const ttsClips = {};
 
@@ -553,6 +553,9 @@ async function startRec(skipCue) {
   } catch (e) { bubble('sys', '⚠ mic: ' + e.message); setState('idle'); }
 }
 function stopRec() { stopVAD(); try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }
+// Abandon the turn we're recording: stop the mic and DROP the audio instead of transcribing it.
+// onRecStop honours the flag (it still has to run — it owns the teardown).
+function cancelRec() { cancelledRec = true; stopRec(); }
 async function onRecStop() {
   stopVAD();
   // Capture the streaming transcript (if any) BEFORE tearing the session down, then close it + drop the caption.
@@ -561,6 +564,13 @@ async function onRecStop() {
   // Stopping the tracks isn't enough: Android holds the SCO route for ~20s after the mic closes, and
   // the reply would play into that dead call channel. Hand the route back to A2DP now.
   try { if (window.AsmltrNative && window.AsmltrNative.releaseCommunicationRoute) window.AsmltrNative.releaseCommunicationRoute(); } catch (_) {}
+  // Cancelled by a second assist press: the mic is torn down above, now drop the audio without
+  // transcribing it. Same ending as a spoken stop-phrase, so it reads identically to the user.
+  if (cancelledRec) {
+    cancelledRec = false; suppressRestart = true; stopDrone(); setState('idle'); stopCue();
+    bubble('sys', '✓ stopped listening');
+    return;
+  }
   if (!heardSpeech) { setState('idle'); return; }   // tapped off without speaking → nothing
   const blob = new Blob(chunks, { type: (recorder && recorder.mimeType) || 'audio/webm' });
   if (!rtText && blob.size < 1200) { setState('idle'); return; }
@@ -755,6 +765,17 @@ function maybeAssistLaunch() {
   if (auto && state === 'idle') { window.__ASMLTR_ASSIST = false; setTimeout(() => { if (state === 'idle') startRec(); }, 250); }
 }
 window.asmltrStartListening = (skipCue) => { if (state === 'idle') startRec(skipCue); };
+// The assist gesture is a TOGGLE, not just a start. Pressing it again should do the obvious thing:
+//   idle → start listening
+//   rec  → abandon the turn (mic off, audio dropped, nothing sent)
+//   busy → abort: interrupts TTS mid-sentence and cancels the in-flight turn server-side
+// stopEverything() already owns the abort path (stops audio, resets the TTS queue, calls /gw/abort),
+// so barge-in is just routing the second press into it.
+window.asmltrAssist = (skipCue) => {
+  if (state === 'rec') { cancelRec(); return; }
+  if (state === 'busy') { stopEverything(); return; }
+  startRec(skipCue);
+};
 // Called by OverlayService when the card should collapse/expand; also usable from the min button.
 window.asmltrMinimize = () => { document.body.classList.add('minimized'); if (state === 'rec') stopRec(); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(true); } catch (_) {} };
 window.asmltrExpand = () => { document.body.classList.remove('minimized'); const n = nativeOverlay(); if (n && n.setMinimized) try { n.setMinimized(false); } catch (_) {} reportPanelHeight(); };

@@ -1,6 +1,6 @@
 {
   "name": "asmltr-mobile",
-  "version": "0.8.20",
+  "version": "0.8.21",
   "private": true,
   "description": "asmltr mobile assistant — Capacitor shell over the voice web brain + a native assist trigger",
   "scripts": {

@@ -39,8 +39,11 @@ public class AsmltrSession extends VoiceInteractionSession {
       } catch (Exception e) { /* rare FGS-from-background block → fall through to the in-session overlay */ }
     }
     // fallback: run the overlay in this session window
+    // Same toggle semantics as the overlay path: press again to stop listening / interrupt TTS.
     if (web != null) web.evaluateJavascript(
-      "window.__ASMLTR_ASSIST=true; if(window.asmltrStartListening){window.asmltrStartListening();}", null);
+      "window.__ASMLTR_ASSIST=true;"
+      + " if(window.asmltrAssist){window.asmltrAssist();}"
+      + " else if(window.asmltrStartListening){window.asmltrStartListening();}", null);
   }
 
   private String configJs() {
