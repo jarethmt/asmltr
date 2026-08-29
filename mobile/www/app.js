@@ -519,7 +519,14 @@ async function startRec(skipCue) {
     // Capture from the HEADSET mic when one is connected (see routeToHeadsetMic) — the mic next to
     // your mouth. It brings the SCO/call link up; OverlayService holds audio focus for the session so
     // other players pause rather than getting dragged onto the narrowband call channel.
-    const base = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    // echoCancellation MUST be on to reach the earbud mic. It puts Chromium on its WebRTC capture
+    // path, which opens the stream as AUDIO_SOURCE_VOICE_COMMUNICATION — the only source that follows
+    // the communication device onto SCO. With it off, capture opens as AUDIO_SOURCE_MIC and binds to
+    // the phone's built-in mic no matter what route we nominate (confirmed in audio_flinger: output
+    // moved to BLUETOOTH_SCO_HEADSET while "Input device: AUDIO_DEVICE_NONE, Audio source: DEFAULT").
+    // It also stops our own TTS bleeding back into the mic, which matters more now the speaker and mic
+    // are the same earbuds.
+    const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     // Nominate the earbud mic BEFORE opening the stream — the route has to be live first, otherwise
     // capture binds to the phone mic. No headset connected → falls through and uses the phone mic.
     const onHeadset = await routeToHeadsetMic();

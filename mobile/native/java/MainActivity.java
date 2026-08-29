@@ -20,6 +20,13 @@ public class MainActivity extends BridgeActivity {
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
       requestPermissions(new String[]{ Manifest.permission.RECORD_AUDIO }, 7);
     }
+    // Android 12+ gates Bluetooth behind a runtime grant. Without it Chromium's media stack won't touch
+    // the BT adapter ("cr_media: BLUETOOTH_CONNECT permission is missing") and every capture lands on
+    // the phone's built-in mic — so talking through the earbuds silently doesn't work.
+    if (Build.VERSION.SDK_INT >= 31
+        && checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != PackageManager.PERMISSION_GRANTED) {
+      requestPermissions(new String[]{ "android.permission.BLUETOOTH_CONNECT" }, 9);
+    }
     // One-time nudge for the "draw over other apps" grant so the persistent floating overlay can appear.
     SharedPreferences p = getSharedPreferences("asmltr", MODE_PRIVATE);
     if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this) && !p.getBoolean("overlayAsked", false)) {

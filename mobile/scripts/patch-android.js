@@ -32,7 +32,11 @@ const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET',
   // persistent device-control link: restart on boot, post its ongoing notification, stay alive in Doze
   'android.permission.RECEIVE_BOOT_COMPLETED', 'android.permission.POST_NOTIFICATIONS', 'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
   // keep the CPU/mic/audio running with the screen off during a listening/processing session
-  'android.permission.WAKE_LOCK'];
+  'android.permission.WAKE_LOCK',
+  // Capture from a Bluetooth headset mic. WITHOUT BLUETOOTH_CONNECT, Chromium's media stack refuses to
+  // touch the BT adapter at all ("cr_media: BLUETOOTH_CONNECT permission is missing") and every
+  // getUserMedia binds to the phone's built-in mic no matter which communication device we nominate.
+  'android.permission.BLUETOOTH_CONNECT'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
