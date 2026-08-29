@@ -19,19 +19,38 @@ import android.media.AudioTrack;
 public class Chime {
   private static final int SR = 44100;
 
-  /** Rising two-tone "now listening" cue, routed to Bluetooth/media. */
-  public static void listen(Context ctx) { play(440, 660); }
+  /** Rising two-tone "now listening" cue. */
+  public static void listen(Context ctx) { play(ctx, 440, 660); }
   /** Falling two-tone "stopped, mic off" cue. */
-  public static void stop(Context ctx) { play(660, 440); }
+  public static void stop(Context ctx) { play(ctx, 660, 440); }
+  /** Low descending "thunk" — turn killed. */
+  public static void kill(Context ctx) { play(ctx, 330, 220); }
 
-  private static void play(final int f1, final int f2) {
+  /**
+   * True while a communication (SCO) route is up — i.e. we're capturing from the headset mic.
+   * MEDIA-usage audio is displaced while SCO holds the route, so a cue played as MEDIA is simply
+   * never heard. Voice-communication usage rides the SCO link instead.
+   */
+  private static boolean onCommRoute(Context ctx) {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return false;
+      if (android.os.Build.VERSION.SDK_INT >= 31) return am.getCommunicationDevice() != null
+          && am.getCommunicationDevice().getType() == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO;
+      return am.isBluetoothScoOn();
+    } catch (Throwable t) { return false; }
+  }
+
+  private static void play(final Context ctx, final int f1, final int f2) {
     new Thread(() -> {
       try {
+        final boolean comm = onCommRoute(ctx);
         // 0.30s silent primer (warm the idle A2DP route) + two 0.12s tones with a small gap.
         short[] buf = build(f1, f2);
         AudioTrack track = new AudioTrack.Builder()
             .setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)                 // MEDIA → carried over A2DP
+                // On the SCO/call route MEDIA is inaudible — follow the route the mic put us on.
+                .setUsage(comm ? AudioAttributes.USAGE_VOICE_COMMUNICATION : AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build())
             .setAudioFormat(new AudioFormat.Builder()

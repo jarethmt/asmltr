@@ -201,6 +201,44 @@ public class NativeConfig {
     } catch (Throwable t) {}
   }
 
+  /**
+   * Play a mic cue natively. The WebView's WebAudio beep plays as MEDIA, which is inaudible while the
+   * SCO/call route is up for headset capture — so the "listening"/"stopped" tones vanished exactly
+   * when we started using the earbud mic. Chime follows the active route instead.
+   * kind: "listen" | "stop" | "kill".
+   */
+  @JavascriptInterface
+  public void cue(String kind) {
+    try {
+      if ("stop".equals(kind)) Chime.stop(ctx);
+      else if ("kill".equals(kind)) Chime.kill(ctx);
+      else Chime.listen(ctx);
+    } catch (Throwable t) {}
+  }
+
+  /**
+   * Drop the SCO/communication route the moment we stop capturing.
+   *
+   * Recording from the earbud mic brings the SCO (call) link up, and Android leaves it up for ~20s
+   * after the mic closes. The spoken reply would play into that dead narrowband channel and be
+   * inaudible until it expires. Clearing the communication device hands the route straight back to
+   * A2DP so the reply lands on media audio.
+   */
+  @JavascriptInterface
+  public void releaseCommunicationRoute() {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return;
+      if (android.os.Build.VERSION.SDK_INT >= 31) {
+        am.clearCommunicationDevice();
+      } else {
+        am.stopBluetoothSco();
+        am.setBluetoothScoOn(false);
+        am.setMode(AudioManager.MODE_NORMAL);
+      }
+    } catch (Throwable t) {}
+  }
+
   /** Connected audio output routes (for the BT-device picker). JSON array of { name, address, type }. */
   @JavascriptInterface
   public String listAudioDevices() {

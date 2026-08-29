@@ -45,6 +45,8 @@ public class OverlayService extends Service {
   // panel hugs the card content instead of being a fixed slab). dragY/panelH = -1 → uninitialized.
   private int dragX = 0, dragY = -1, panelH = -1;
   private android.os.PowerManager.WakeLock wakeLock; // held while listening/working → runs screen-off
+  private android.media.AudioManager audioManager;   // audio focus: pause other players while open
+  private android.media.AudioFocusRequest focusRequest;
 
   private int dp(int v) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()); }
 
@@ -54,7 +56,51 @@ public class OverlayService extends Service {
     super.onCreate();
     startForeground(42, buildNotification());
     wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+    takeAudioFocus();
     createWeb();
+  }
+
+  /**
+   * Hold transient audio focus for as long as the assistant is open, so whatever is playing pauses
+   * on open and resumes on close. This matters more than it looks on Bluetooth: capturing a turn
+   * from the earbud mic brings up the SCO (call) link, and music left running gets dragged onto the
+   * narrowband call channel — it keeps playing but sounds like a phone call. Pausing it sidesteps
+   * that entirely, and the player restores itself when we abandon focus.
+   *
+   * GAIN_TRANSIENT (not TRANSIENT_EXCLUSIVE) is deliberate: it is the contract media players most
+   * reliably auto-resume from.
+   */
+  private void takeAudioFocus() {
+    try {
+      audioManager = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+      if (audioManager == null) return;
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        focusRequest = new android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(new android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build())
+            .setWillPauseWhenDucked(true)       // we want them paused, not ducked under us
+            .setOnAudioFocusChangeListener(f -> {})
+            .build();
+        audioManager.requestAudioFocus(focusRequest);
+      } else {
+        audioManager.requestAudioFocus(null, android.media.AudioManager.STREAM_MUSIC,
+            android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+      }
+    } catch (Throwable t) {}
+  }
+
+  private void releaseAudioFocus() {
+    try {
+      if (audioManager == null) return;
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (focusRequest != null) audioManager.abandonAudioFocusRequest(focusRequest);
+      } else {
+        audioManager.abandonAudioFocus(null);
+      }
+    } catch (Throwable t) {}
+    focusRequest = null;
   }
 
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -226,6 +272,7 @@ public class OverlayService extends Service {
   }
 
   @Override public void onDestroy() {
+    releaseAudioFocus();                       // → whatever we paused on open resumes now
     try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception e) {}
     try { if (added && root != null) wm.removeView(root); } catch (Exception e) {}
     try { if (web != null) { web.loadUrl("about:blank"); web.destroy(); } } catch (Exception e) {}

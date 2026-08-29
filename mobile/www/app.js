@@ -460,9 +460,19 @@ function beepPair(f1, f2) {
     setTimeout(() => { try { ctx.close(); } catch (_) {} }, (LEAD + 0.5) * 1000);
   } catch (_) {}
 }
-function listenCue() { beepPair(440, 660); } // ascending — "now listening"
-function stopCue() { beepPair(660, 440); }   // descending — "stopped, mic off"
-function killCue() { beepPair(330, 220); }   // low descending "thunk" — turn KILLED (distinct from the mic cues)
+// Prefer the NATIVE cue: WebAudio plays as MEDIA, which is silent while the SCO/call route is up for
+// headset capture — so these tones disappeared the moment we started using the earbud mic. Chime
+// follows whichever route is live (SCO → voice-communication, otherwise A2DP/media). WebAudio stays as
+// the fallback for the PWA/browser, where there's no native bridge.
+function nativeCue(kind) {
+  try {
+    if (window.AsmltrNative && window.AsmltrNative.cue) { window.AsmltrNative.cue(kind); return true; }
+  } catch (_) {}
+  return false;
+}
+function listenCue() { if (!nativeCue('listen')) beepPair(440, 660); } // ascending — "now listening"
+function stopCue() { if (!nativeCue('stop')) beepPair(660, 440); }     // descending — "stopped, mic off"
+function killCue() { if (!nativeCue('kill')) beepPair(330, 220); }     // low "thunk" — turn KILLED
 function startDrone() { try { if (!drone) { drone = new Audio('assets/drone.ogg'); drone.loop = true; drone.volume = 0.45; } drone.currentTime = 0; drone.play().catch(() => {}); } catch (_) {} }
 function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 
@@ -470,10 +480,9 @@ function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 // Pick the phone's built-in mic (never a Bluetooth input) so capturing a turn doesn't bring up the
 // earbuds' SCO/call link — which would mute the A2DP output the reply is spoken on. Returns null if we
 // can't tell them apart (labels need prior mic permission, which we have once a turn has run).
-// Names Android currently reports for connected headsets. Exact names beat keyword guessing: a
-// keyword denylist only excludes hardware someone thought of. "OpenDots ONE by Shokz" contains no
-// 'blue'/'sco'/'buds'/'headset'/'wireless', so it slipped through and got picked AS the built-in
-// mic — which brought SCO up and dragged the earbuds onto the HFP call profile.
+// Names Android currently reports for connected headsets, straight from AudioManager. Exact names
+// beat keyword guessing — a denylist only covers hardware someone thought of, and e.g. "OpenDots ONE
+// by Shokz" contains no 'blue'/'sco'/'buds'/'headset'/'wireless' at all.
 function connectedHeadsetNames() {
   try {
     const raw = window.AsmltrNative && window.AsmltrNative.listAudioDevices && window.AsmltrNative.listAudioDevices();
@@ -481,22 +490,32 @@ function connectedHeadsetNames() {
     return JSON.parse(raw).map((d) => String(d.name || '').trim().toLowerCase()).filter((n) => n.length > 2);
   } catch (_) { return []; }
 }
-async function builtinMicId() {
+function looksLikeHeadset(label, names) {
+  const L = String(label || '').trim().toLowerCase();
+  if (!L) return false;
+  if (names.some((n) => L.includes(n) || n.includes(L))) return true;   // exact, from AudioManager
+  return /blue|sco|hands|headset|buds|jbl|airpod|earbud|wireless|a2dp|hfp|shokz|opendots/i.test(L);
+}
+// Talk through the HEADSET mic when one is connected — you're wearing the earbuds, so that's the mic
+// that should hear you, and holding the phone up to talk defeats the point.
+//
+// The cost is that capturing from a Bluetooth mic brings up the SCO (call) link, which pulls the buds
+// off A2DP onto the narrowband call profile. Anything still playing gets dragged onto that channel and
+// starts sounding like a phone call. We handle that by pausing other players for the whole session:
+// OverlayService holds AUDIOFOCUS_GAIN_TRANSIENT while the assistant is open and abandons it on close,
+// so music stops on open and resumes afterwards instead of playing through the call channel.
+//
+// (An earlier revision pinned capture to the phone's built-in mic to dodge SCO entirely. That kept
+// output on A2DP but meant the earbud mic was never used — the wrong trade for a hands-free assistant.)
+async function headsetMicId() {
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
     const ins = devs.filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
     if (!ins.length) return null;
-    const names = connectedHeadsetNames();                 // authoritative, from AudioManager
-    const bt = /blue|sco|hands|headset|buds|jbl|airpod|earbud|wireless|a2dp|hfp|shokz|opendots/i;
-    const isHeadset = (d) => {
-      const L = String(d.label || '').trim().toLowerCase();
-      if (!L) return false;
-      if (names.some((n) => L.includes(n) || n.includes(L))) return true; // exact match wins
-      return bt.test(L);                                                  // keyword fallback
-    };
-    const builtin = ins.find((d) => /built|internal|phone|bottom|top|back/i.test(d.label) && !isHeadset(d))
-                 || ins.find((d) => d.label && !isHeadset(d));
-    return builtin ? builtin.deviceId : null;
+    const names = connectedHeadsetNames();
+    if (!names.length) return null;                       // nothing connected → let Android choose
+    const hs = ins.find((d) => looksLikeHeadset(d.label, names));
+    return hs ? hs.deviceId : null;
   } catch (_) { return null; }
 }
 async function startRec(skipCue) {
@@ -506,23 +525,25 @@ async function startRec(skipCue) {
   // double. All other starts (manual tap, continuous restart) use the web cue — audible, overlay's open.
   const skip = skipCue || window.__ASMLTR_SKIP_CUE;
   window.__ASMLTR_SKIP_CUE = false;
-  if (!skip) listenCue(); // instant auditory feedback that listening started (hands-free / screen-off)
   try {
-    // IMPORTANT: echoCancellation/noiseSuppression route Chromium through its WebRTC *communication*
-    // audio path, which flips Android into MODE_IN_COMMUNICATION and forces Bluetooth headsets onto the
-    // HFP "call" profile — hijacking the earbud button to call-mute. Plain (unprocessed) capture keeps the
-    // headset on A2DP/media so its gesture still triggers the assistant. We only record when TTS isn't
-    // playing, so AEC isn't needed anyway.
-    // Also PIN the capture to the built-in mic: capturing the Bluetooth headset mic brings up the SCO
-    // (call) link, which routes audio OUTPUT to a muted SCO channel — so the spoken reply plays silently
-    // until SCO closes ~24s later. Built-in mic → no SCO → output stays on A2DP → reply is audible.
+    // Unprocessed capture: echoCancellation/noiseSuppression push Chromium down its WebRTC
+    // *communication* path, which adds its own routing decisions on top of ours. We only record while
+    // TTS isn't playing, so AEC buys us nothing anyway.
+    // Capture from the HEADSET mic when one is connected (see headsetMicId) — that's the mic next to
+    // your mouth. It brings the SCO/call link up; OverlayService holds audio focus for the session so
+    // other players pause rather than getting dragged onto the narrowband call channel.
     const base = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-    const micId = await builtinMicId();
+    const micId = await headsetMicId();
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: micId ? { ...base, deviceId: { exact: micId } } : base });
     } catch (_) {
       stream = await navigator.mediaDevices.getUserMedia({ audio: base }); // fallback: any mic
     }
+    // Cue AFTER the stream is live, not before. Opening the headset mic brings SCO up and tears the
+    // A2DP route down mid-tone, so a cue fired first was getting clipped to nothing. Playing it here
+    // means the route has settled and the tone rides whichever one is now active — and "listening" is
+    // truthful, because the mic really is open.
+    if (!skip) listenCue();
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
     recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     chunks = []; heardSpeech = false;
@@ -537,6 +558,9 @@ async function onRecStop() {
   // Capture the streaming transcript (if any) BEFORE tearing the session down, then close it + drop the caption.
   const rtUsed = rtActive, rtText = realtimeFinalText(); stopRealtimeSTT(); clearLiveCaption();
   try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  // Stopping the tracks isn't enough: Android holds the SCO route for ~20s after the mic closes, and
+  // the reply would play into that dead call channel. Hand the route back to A2DP now.
+  try { if (window.AsmltrNative && window.AsmltrNative.releaseCommunicationRoute) window.AsmltrNative.releaseCommunicationRoute(); } catch (_) {}
   if (!heardSpeech) { setState('idle'); return; }   // tapped off without speaking → nothing
   const blob = new Blob(chunks, { type: (recorder && recorder.mimeType) || 'audio/webm' });
   if (!rtText && blob.size < 1200) { setState('idle'); return; }
