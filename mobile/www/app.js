@@ -470,13 +470,32 @@ function stopDrone() { try { if (drone) drone.pause(); } catch (_) {} }
 // Pick the phone's built-in mic (never a Bluetooth input) so capturing a turn doesn't bring up the
 // earbuds' SCO/call link — which would mute the A2DP output the reply is spoken on. Returns null if we
 // can't tell them apart (labels need prior mic permission, which we have once a turn has run).
+// Names Android currently reports for connected headsets. Exact names beat keyword guessing: a
+// keyword denylist only excludes hardware someone thought of. "OpenDots ONE by Shokz" contains no
+// 'blue'/'sco'/'buds'/'headset'/'wireless', so it slipped through and got picked AS the built-in
+// mic — which brought SCO up and dragged the earbuds onto the HFP call profile.
+function connectedHeadsetNames() {
+  try {
+    const raw = window.AsmltrNative && window.AsmltrNative.listAudioDevices && window.AsmltrNative.listAudioDevices();
+    if (!raw) return [];
+    return JSON.parse(raw).map((d) => String(d.name || '').trim().toLowerCase()).filter((n) => n.length > 2);
+  } catch (_) { return []; }
+}
 async function builtinMicId() {
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
     const ins = devs.filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
     if (!ins.length) return null;
-    const bt = /blue|sco|hands|headset|buds|jbl|airpod|earbud|wireless|a2dp|hfp/i;
-    const builtin = ins.find((d) => /built|internal|phone|bottom|top|back/i.test(d.label)) || ins.find((d) => d.label && !bt.test(d.label));
+    const names = connectedHeadsetNames();                 // authoritative, from AudioManager
+    const bt = /blue|sco|hands|headset|buds|jbl|airpod|earbud|wireless|a2dp|hfp|shokz|opendots/i;
+    const isHeadset = (d) => {
+      const L = String(d.label || '').trim().toLowerCase();
+      if (!L) return false;
+      if (names.some((n) => L.includes(n) || n.includes(L))) return true; // exact match wins
+      return bt.test(L);                                                  // keyword fallback
+    };
+    const builtin = ins.find((d) => /built|internal|phone|bottom|top|back/i.test(d.label) && !isHeadset(d))
+                 || ins.find((d) => d.label && !isHeadset(d));
     return builtin ? builtin.deviceId : null;
   } catch (_) { return null; }
 }
