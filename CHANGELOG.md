@@ -10,6 +10,18 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **The assist gesture is a toggle.** Pressing it again while a turn is running now does the obvious
+  thing instead of nothing (`asmltrStartListening()` returned early unless idle): while listening it
+  abandons the turn — mic off, audio dropped, nothing transcribed or sent — and while thinking or
+  speaking it aborts, interrupting TTS mid-sentence and cancelling the in-flight turn via `/gw/abort`.
+  Both entry points share it (the overlay/headset-button route and the system assist gesture). The
+  cancel path reuses the spoken stop-phrase ending, so a gesture stop and a spoken stop are
+  indistinguishable and neither bounces back into continuous listening. `OverlayService` also pre-cues
+  natively only on a cold start now — it previously fired the "listening" tone for every assist press,
+  which would have announced listening for a press that stops it.
+
+### Added
+
 - **Chunked file uploads.** `POST /v2/upload/init`, `PUT /v2/upload/:id/:index` (raw
   `application/octet-stream`), `GET /v2/upload/:id`, `POST /v2/upload/:id/finish`, and
   `DELETE /v2/upload/:id`, backed by `beginChunked` / `putChunk` / `chunkStatus` / `finishChunked` /
@@ -63,6 +75,45 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   capped near 7.5 MiB of actual file: measured against that parser, 7,864,000 bytes is accepted and
   7,900,000 is not. Uploading a 10 MB file into a silo failed with `413 Payload Too Large` and no
   size named anywhere the user could see it. Both now send the file itself.
+
+### Fixed
+
+- **Talking through a Bluetooth headset now actually uses the headset's microphone.** The turn mic had
+  been pinned to the phone's built-in mic since 0.8.3, which dodged the SCO/call link but meant that
+  on earbuds you were talking to the phone in your pocket — speech recognition degraded the further
+  away it was. Getting capture onto the headset needed three separate things, each of which silently
+  defeated the others:
+  - **`BLUETOOTH_CONNECT` was never declared.** Chromium's media stack refuses to touch the Bluetooth
+    adapter without it (`cr_media: BLUETOOTH_CONNECT permission is missing`), so no route nomination
+    could ever reach the headset mic. Now declared in `patch-android.js` and requested at runtime
+    (Android 12+ gates it behind a dangerous-permission grant).
+  - **Device selection cannot be done from JS.** Chromium on Android does not enumerate per-device
+    microphones — it exposes essentially one `default` input — so matching device labels from
+    `enumerateDevices()` never found the headset and quietly fell through to the phone mic. The route
+    is now nominated at the `AudioManager` level (`useHeadsetMic()` →
+    `setCommunicationDevice(TYPE_BLUETOOTH_SCO)`), and because that call returns before the link is
+    live, `headsetMicActive()` polls until the SCO route is up before `getUserMedia` runs.
+  - **`echoCancellation: false` kept capture off the SCO path.** It opens the stream as
+    `AUDIO_SOURCE_MIC`, which ignores the communication device; only the WebRTC path's
+    `AUDIO_SOURCE_VOICE_COMMUNICATION` follows it. Echo cancellation is back on, which also stops our
+    own TTS bleeding into the mic now that the speaker and mic are the same earbuds.
+- **Music no longer keeps playing through the call channel while the assistant is open.** Bringing up
+  SCO drags whatever is playing onto the narrowband call profile — it keeps going, but sounds like a
+  phone call. `OverlayService` now holds `AUDIOFOCUS_GAIN_TRANSIENT` for the life of the session, so
+  other players pause on open and resume on close.
+- **The spoken reply is no longer swallowed by the SCO linger.** Android holds the communication route
+  for ~20s after the mic closes, so the reply played into a dead channel. `releaseCommunicationRoute()`
+  hands the route back to A2DP as soon as capture ends.
+- **The mic cues are audible again on Bluetooth.** Both the WebAudio beep and native `Chime` played as
+  `USAGE_MEDIA`, which is silent while SCO holds the route — so the start/stop tones vanished exactly
+  when headset capture started working. `Chime` now follows the live route
+  (SCO → `USAGE_VOICE_COMMUNICATION`, else media) and the web cues call it instead of WebAudio. The
+  listen cue also moved to *after* the stream opens, since the SCO transition was clipping a cue fired
+  before it.
+- **Bluetooth headsets whose name doesn't look like a headset are recognised.** Headset detection
+  keyword-matched device labels, so anything the list hadn't been taught was treated as a built-in mic
+  (a name carrying none of `blue`/`sco`/`buds`/`headset`/`wireless` slipped straight through). Device
+  names now come from `AudioManager` instead of being guessed.
 
 ### Fixed
 - **Connector telemetry no longer silently dropped (`android`, `device`, `remote-desktop`, `notify`, `recorder`).**

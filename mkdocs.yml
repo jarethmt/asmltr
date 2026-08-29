@@ -103,6 +103,7 @@ nav:
     - Usage & cost accounting: usage.md
     - Schedules (cron with a GUI): SCHEDULES.md
     - Notify & read-aloud: NOTIFY-READ-ALOUD.md
+    - Bluetooth audio on Android: BLUETOOTH-AUDIO.md
     - Versioning & updates: UPDATER-DESIGN.md
     - Testing the updater: testing-the-updater.md
   - Coordination:
