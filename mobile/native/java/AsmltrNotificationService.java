@@ -32,6 +32,7 @@ import java.util.List;
  * Config lives in SharedPreferences("asmltr"), written by NativeConfig.saveNotifyConfig from the app UI.
  */
 public class AsmltrNotificationService extends NotificationListenerService {
+  private static final String TAG = "AsmltrNotif";   // adb logcat -s AsmltrNotif
   private final Handler main = new Handler(Looper.getMainLooper());
   private final List<Item> burst = new ArrayList<>();
   private boolean flushScheduled = false;
@@ -42,28 +43,35 @@ public class AsmltrNotificationService extends NotificationListenerService {
 
   @Override public void onNotificationPosted(StatusBarNotification sbn) {
     try {
+      // Every gate says WHY it dropped a notification. Without this the reader is a black box: it
+      // either speaks or it doesn't, with no way to tell which of six conditions bailed.
       SharedPreferences p = prefs();
-      if (!p.getBoolean("notif_enabled", false)) return;
+      if (!p.getBoolean("notif_enabled", false)) { android.util.Log.d(TAG, "drop: reader disabled (notif_enabled=false)"); return; }
       if (sbn == null || sbn.getPackageName() == null) return;
       String pkg = sbn.getPackageName();
       if (pkg.equals(getPackageName())) return;                    // never read our own notifications
-      if (isDenied(p, pkg)) return;                                // per-app deny list
+      if (isDenied(p, pkg)) { android.util.Log.d(TAG, "drop: " + pkg + " is on the deny list"); return; }
 
       Notification n = sbn.getNotification();
       if (n == null) return;
       // Skip noise: ongoing/foreground-service notifications and transport/service categories.
-      if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) return;
-      if ((n.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) return;
+      if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) { android.util.Log.d(TAG, "drop: " + pkg + " ongoing"); return; }
+      if ((n.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) { android.util.Log.d(TAG, "drop: " + pkg + " foreground-service"); return; }
       String cat = n.category;
-      if (Notification.CATEGORY_TRANSPORT.equals(cat) || Notification.CATEGORY_SERVICE.equals(cat) || Notification.CATEGORY_PROGRESS.equals(cat)) return;
+      if (Notification.CATEGORY_TRANSPORT.equals(cat) || Notification.CATEGORY_SERVICE.equals(cat) || Notification.CATEGORY_PROGRESS.equals(cat)) { android.util.Log.d(TAG, "drop: " + pkg + " category=" + cat); return; }
 
       // Headphones gate: only read aloud over a Bluetooth (or wired) audio route, if required.
-      if (p.getBoolean("notif_headphones_only", true) && !btRouteOk(p)) return;
+      if (p.getBoolean("notif_headphones_only", true) && !btRouteOk(p)) {
+        android.util.Log.d(TAG, "drop: " + pkg + " — headphones_only is on but no matching audio route"
+            + " (wanted='" + p.getString("notif_bt_devices", "") + "')");
+        return;
+      }
 
       Bundle ex = n.extras;
       String title = str(ex, Notification.EXTRA_TITLE);
       String text = str(ex, Notification.EXTRA_TEXT);
-      if ((title == null || title.isEmpty()) && (text == null || text.isEmpty())) return;
+      if ((title == null || title.isEmpty()) && (text == null || text.isEmpty())) { android.util.Log.d(TAG, "drop: " + pkg + " has no title/text"); return; }
+      android.util.Log.d(TAG, "queued: " + pkg + " / " + title);
 
       Item it = new Item();
       it.pkg = pkg;
@@ -93,7 +101,7 @@ public class AsmltrNotificationService extends NotificationListenerService {
   private void triageAndSpeak(List<Item> batch) {
     SharedPreferences p = prefs();
     String base = p.getString("baseUrl", ""), token = p.getString("token", "");
-    if (base.isEmpty()) return;
+    if (base.isEmpty()) { android.util.Log.w(TAG, "drop: no baseUrl configured — can't reach triage"); return; }
     int threshold = p.getInt("notif_threshold", 40);
 
     // Build the triage payload. One → its own title/text; many → a combined batch the model summarizes.
@@ -121,18 +129,24 @@ public class AsmltrNotificationService extends NotificationListenerService {
       body.put("text", text);
       body.put("count", batch.size());
       body.put("app", batch.size() == 1 ? batch.get(0).app : "multiple");
+      android.util.Log.d(TAG, "triage → " + base + "/gw/notify-triage  (" + batch.size() + " item(s))");
       JSONObject r = postJson(base + "/gw/notify-triage", body);
-      if (r == null) return;
+      if (r == null) { android.util.Log.w(TAG, "triage returned nothing (network/auth failure)"); return; }
       boolean speak = r.optBoolean("speak", false);
       int priority = r.optInt("priority", 0);
       String synopsis = r.optString("synopsis", "");
       // Read the synopsis in the CONFIGURED voice (ElevenLabs/OpenAI via /gw/tts), not the OS robot engine.
       // The BT-route gate already ran before we buffered this, so no need to re-gate on headphones here.
+      android.util.Log.d(TAG, "triage result: speak=" + speak + " priority=" + priority
+          + " (threshold=" + threshold + ") synopsis=" + (synopsis.isEmpty() ? "<empty>" : synopsis));
       if (speak && priority >= threshold && !synopsis.isEmpty()) {
+        android.util.Log.d(TAG, "SPEAKING");
         NotifEyesOverlay.show(this, synopsis);   // float the eyes over the screen while it's read aloud
         Speech.speak(this, base, token, synopsis, false);
+      } else {
+        android.util.Log.d(TAG, "not speaking — gate not met");
       }
-    } catch (Throwable t) { /* triage failed — stay silent */ }
+    } catch (Throwable t) { android.util.Log.w(TAG, "triage failed: " + t); }
   }
 
   // ── gates + helpers ────────────────────────────────────────────────────────
