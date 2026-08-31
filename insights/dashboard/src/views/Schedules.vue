@@ -301,7 +301,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             <div>
               <label class="mb-1 block text-sm font-medium text-slate-200">Session</label>
               <input v-model="form.session" type="text" class="field-input font-mono" placeholder="new" />
-              <p class="mt-1 text-xs text-slate-500"><span class="font-mono">new</span> = fresh context each run; or a conversation_key to continue one.</p>
+              <p class="mt-1 text-xs text-slate-500"><span class="font-mono">new</span> = fresh context each run; or <span class="font-mono">schedule:&lt;id&gt;</span> for that job. Not Discord/email keys.</p>
             </div>
           </div>
         </template>

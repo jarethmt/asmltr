@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to seed.json (gitignored), then run `node core/src/trust/seed.js`. Trust is DEFAULT-DENY. Ivy localhost: principal id `owner` is James Watt. Web chat + asmltr ask post channel assistant-web; core stamps sender.raw_id from ASMLTR_WEB_OWNER_ID (fallback X-Remote-User). Seed that same value as an assistant-web identifier. CLI is not a trust channel (control actor is cli:adjutant@<tty>). Do not invent Discord snowflakes — add a real discord id later.",
+  "_comment": "Copy to seed.json (gitignored), then run `node core/src/trust/seed.js`. Trust is DEFAULT-DENY. Principal id `owner` is the install operator. Web chat + asmltr ask post channel assistant-web; core stamps sender.raw_id from ASMLTR_WEB_OWNER_ID (fallback X-Remote-User). Seed that same value as an assistant-web identifier. CLI is not a trust channel. Discord values below are placeholders (18 zeros / 18 ones) — replace with real numeric user ids locally; do not invent them. Do not put personal names, emails, or host paths in this example. default_tier is a schema field, not the send gate. Same-guild Discord post is trusted role or resolve() allow. Owner (bypass_moderation) always can. Stills/video/code are NOT this file — see shared/media-allow.example.json.",
   "roles": [
     {
       "id": "readonly",
@@ -11,12 +11,24 @@
   "principals": [
     {
       "id": "owner",
-      "display_name": "James Watt",
+      "display_name": "Owner",
+      "default_tier": 5,
       "notes": "Owner / full trust. Local assistant-web only until Discord is added later.",
       "identifiers": [
-        { "surface": "assistant-web", "value": "owner" }
+        { "surface": "assistant-web", "value": "owner" },
+        { "surface": "discord", "value": "000000000000000000" }
       ],
       "grants": [ { "bypass_moderation": true, "allow": ["*"] } ]
+    },
+    {
+      "id": "friend",
+      "display_name": "Friend",
+      "default_tier": 3,
+      "notes": "Example friend principal. Same-guild Discord post needs a trusted/send grant, not this tier field. Not owner — no bypass_moderation. Replace id/display_name and the discord identifier before seeding.",
+      "identifiers": [
+        { "surface": "discord", "value": "111111111111111111" }
+      ],
+      "grants": [ { "role_id": "readonly" } ]
     }
   ]
 }

@@ -125,6 +125,7 @@ Two flags shape how the core and manager treat a connector:
 | `android` | Device gateway for the mobile app — voice/chat + a persistent control link, device actuation, read-aloud, notification reader. | [Android](android.md) |
 | `device` | Generic device gateway — the platform-agnostic base (HTTP+SSE+token, server-proxied speech, capability descriptors) for any networked client: Pi kiosks, appliances, desk buddies. `android`/iOS layer their extras on it. | [Device](device.md) |
 | `cli` | Interactive `claude` sessions in tmux, monitored + steerable. | [CLI](cli.md) |
+| `email` | SMTP/IMAP mailbox channel. Inbound AR must pass and match a host authserv allowlist. | [Email](email.md) |
 
 !!! tip "Discover schemas at runtime"
     `GET /types` returns the live `configSchema` for every registered connector — the source of

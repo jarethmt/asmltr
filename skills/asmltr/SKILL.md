@@ -1,6 +1,6 @@
 ---
 name: asmltr
-description: How to drive asmltr — the assistant's own multi-channel backend on this machine. Use whenever you need to proactively notify/reach the owner (`asmltr notify` — read-aloud/push/text ladder, e.g. from a scheduled prompt), send/route a message to any channel (Discord, Telegram, email, …), attach or find a file, read or browse email, approve held replies, post cross-session awareness, or monitor/take over other sessions. One CLI (`asmltr`) is the front door to all of it.
+description: How to drive asmltr — the assistant's own multi-channel backend on this machine. Use whenever you need to proactively notify/reach the owner (`asmltr notify` — read-aloud/push/text ladder, e.g. from a scheduled prompt), send/route a message to any channel (Discord, Telegram, email, …), attach or find a file, read or browse email, approve held replies, post cross-session awareness, monitor/take over other sessions, or bounce/restart asmltr services. One CLI (`asmltr`) is the front door to all of it.
 ---
 
 # asmltr — your backend across every channel
@@ -12,8 +12,8 @@ runs the local Agent SDK, plus a collector + dashboard for monitoring. You drive
 per-command usage).
 
 This skill is your high-level map. Reach for it when a task means "get this OUT to a channel",
-"find/attach a file", "read my email", "approve a reply", "make the other sessions aware", or
-"watch / take over a session".
+"find/attach a file", "read my email", "approve a reply", "make the other sessions aware",
+"watch / take over a session", or "bounce / restart asmltr".
 
 ## The one rule that trips people up
 
@@ -105,6 +105,24 @@ asmltr attach <key>                # claim a channel session + resume in tmux (a
 asmltr release <key>               # end takeover; channel resumes
 asmltr kill <id> | stop <id> | diff <id>
 ```
+
+## Bounce (restart services)
+
+A bounce kills the process running **this turn**. Doing it mid-checklist, or before the
+connector has posted the reply, hangs Discord on **Working** / **Still working** forever.
+
+```bash
+asmltr bounce              # queue until THIS turn ends, then restart core+manager+collector
+asmltr bounce --dry-run    # print the plan, change nothing
+```
+
+Rules:
+
+- Bounce is **last**. Queue it, reply (or `[[NO_REPLY]]`), stop. No more tools after it.
+- If bounce is on a checklist, do every other item first. Do not bounce then verify — that is the next turn, after you come back.
+- **Never** `systemctl restart` / `pm2 restart` asmltr-core (or manager/collector) from a live turn. A PATH shim rewrites those to `asmltr bounce`, but do not rely on it.
+- `--now` is for a human at a real terminal. Inside a turn it is refused and queued after the turn instead.
+- Only core, manager, and collector. Do not restart unrelated units.
 
 ## Keeping asmltr current
 

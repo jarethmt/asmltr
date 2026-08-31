@@ -94,7 +94,17 @@ The classifier resolves its key **by name** through the secret provider (never
 | `ASMLTR_MODERATION_PROVIDER` | `openai` | `openai` or `anthropic` |
 | `ASMLTR_MODERATION_MODEL` | `gpt-5-nano` (openai) / `claude-haiku-4-5-20251001` (anthropic) | Classifier model |
 | `ASMLTR_MODERATION_KEY` | `openai_api_key` / `anthropic_api_key` | Secret **key name** for the classifier |
+| `ASMLTR_MODERATION_REASONING_EFFORT` | omit (unset) | OpenAI only. Default omits the field (API default). Set `minimal` to cap `gpt-5-nano` latency (~2–3.5s uncapped). `low` / `medium` / `high` also send the field; empty / `off` / `none` omit |
 | `ASMLTR_MOD_LOG_DIR` | `core/data/moderation-logs` | Where moderation decisions are logged |
+| `ASMLTR_IMAGE_GEN_CLASSIFY` | on | Picture-intent YES/NO (`gpt-5-nano` on the moderation OpenAI key) before Discord/Telegram still-gen raise. Set `off` / `0` / `false` / `no` to skip. Missing `openai_api_key` also skips (logged once). `image_gen` tools still work. See [Moderation](../security/moderation.md#picture-intent-classify-stills-not-moderation) |
+
+## Tool policy (stills / video / code)
+
+Not env-driven except the path. Copy `shared/media-allow.example.json` to `~/.asmltr/media-allow.json` and list **trust principal ids** (and optionally Discord user ids) locally — never real ids in git.
+
+| Variable | Default | What |
+|---|---|---|
+| `ASMLTR_MEDIA_ALLOW_FILE` | `~/.asmltr/media-allow.json` | Example allowlists: `photoAllow` / `imageAllow` (format only; not a public stills gate), `videoAllow` (clips **and** stills), `mediaAllow` (both), `codeAllow` (write-a-program). Empty = owner/bypass only. Same-guild Discord post is **not** this file — it is trusted role or `resolve()` allow. |
 
 ## Admin / security alerts
 

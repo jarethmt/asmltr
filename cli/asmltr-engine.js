@@ -41,7 +41,8 @@ function profile(id, cwd) {
     try { perm = require('../shared/runtime').getCliPermissionMode(); } catch (_) {}
     const selfAware = process.env.ASMLTR_SELF_AWARE !== 'off';
     const TOOLBELT = '## ASMLTR TOOLBELT\nRun `asmltr help` for cross-session tools: `asmltr ls`, ' +
-      '`asmltr send <channel> <target> "<text>"`, `asmltr announce "<text>"` / `asmltr announcements`.';
+      '`asmltr send <channel> <target> "<text>"`, `asmltr announce "<text>"` / `asmltr announcements`, ' +
+      '`asmltr bounce` (restart last — never inline from a live turn).';
     let appended = ''; try { appended = selfAware ? require('../shared/identity').assemble({ cwd, extra: TOOLBELT }) : ''; } catch (_) {}
     return {
       surface: 'claude-code',
