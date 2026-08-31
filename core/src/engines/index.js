@@ -9,6 +9,12 @@
  *   complete({prompt, model}) → string        (cheap one-shot for the title/status/assessment labelers)
  *   cheapModel : string                       (default model for the labelers)
  *   getLastModel() → string|null
+ *
+ * Extra opts (images, mediaFiles, denyTools, attachChannel, attachTarget, …) are
+ * ignored by engines that do not read them. Vision is per-engine, not in this
+ * dispatcher: Claude uses SDK image blocks; Grok uses ACP `--prompt-file`.
+ * Gemini/Codex: no vision serialize yet — wire `images`/`mediaFiles` in those
+ * adapters when someone adds it (see comments in gemini.js / codex.js).
  */
 const registry = require('../../../shared/engines');
 const CACHE = {};

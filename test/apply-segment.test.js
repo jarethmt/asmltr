@@ -61,18 +61,18 @@ test('applySegment: space-only chunk is not dropped as falsy', async () => {
   assert.equal(applySegment('time. ', 'The'), 'time. The');
 });
 
-test('applySegment: next sentence without leading space still gets ". "', async () => {
+test('applySegment: next sentence without a space token stays honest', async () => {
   const { applySegment } = await import(helperUrl);
-  assert.equal(applySegment('time.', 'The'), 'time. The');
-  assert.equal(applySegment('work.', "I'll"), "work. I'll");
-  assert.equal(applySegment('grow.', "I'll"), "grow. I'll");
+  assert.equal(applySegment('time.', 'The'), 'time.The');
+  assert.equal(applySegment('work.', "I'll"), "work.I'll");
+  assert.equal(applySegment('grow.', "I'll"), "grow.I'll");
 });
 
 test('applySegment: narration draft then restated answer is one sentence, not both', async () => {
   const { applySegment } = await import(helperUrl);
   const draft = 'Coconut aminos is already on your card as the soy-sauce stand-in.';
   const answer = 'Coconut aminos is already on your card as the soy-sauce replacement.';
-  const reply = applySegment(draft, answer);
+  const reply = applySegment(draft, answer, { lastBlock: true });
   assert.equal(reply, answer);
   assert.ok(!reply.includes('stand-in'));
   assert.ok(!reply.includes(draft + ' ' + answer));
@@ -83,20 +83,30 @@ test('applySegment: status block then restated answer keeps the answer only', as
   const { applySegment } = await import(helperUrl);
   const status = "Vim is in Preferences, not Story — and it was a bad translation of your house rule, not something I believe about myself. I'll take it out. Coconut aminos is already on your card as the soy-sauce stand-in.";
   const answer = 'Coconut aminos is already on your card as the soy-sauce replacement. That stays.';
-  const reply = applySegment(status, answer);
+  const reply = applySegment(status, answer, { lastBlock: true });
   assert.equal(reply, answer);
   assert.ok(!reply.includes('stand-in'));
   assert.ok(!reply.includes('Vim is in Preferences'));
 });
 
-test('applySegment: time. + The is still period-space, not a narration replace', async () => {
+test('applySegment: without lastBlock, two complete Claude blocks append', async () => {
+  const { applySegment } = await import(helperUrl);
+  const narrate = 'I will look this up and then give you the recipe.';
+  const answer = 'Here is the homemade sloppy joe version you asked for.';
+  const reply = applySegment(narrate, answer);
+  assert.equal(reply, narrate + answer);
+  assert.ok(reply.includes('look this up'));
+  assert.ok(reply.includes('sloppy joe'));
+});
+
+test('applySegment: time. + The is honest concat, not a narration replace', async () => {
   const { applySegment, isCompleteBlock } = await import(helperUrl);
   assert.equal(isCompleteBlock('time.'), false);
   assert.equal(isCompleteBlock('The'), false);
-  assert.equal(applySegment('time.', 'The'), 'time. The');
+  assert.equal(applySegment('time.', 'The'), 'time.The');
 });
 
-test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', async () => {
+test('applySegment: owner kettle draft then answer is FINAL only, not on.Yes', async () => {
   const { applySegment, preferLastBlock, isCompleteBlock } = await import(helperUrl);
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
@@ -105,12 +115,12 @@ test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', a
   assert.equal(isCompleteBlock(draft), true);
   assert.equal(isCompleteBlock(mid), true);
   assert.equal(isCompleteBlock(fin), true);
-  assert.equal(applySegment(draft, answer), answer);
-  assert.ok(!applySegment(draft, answer).includes('on.Yes'));
-  assert.ok(!applySegment(draft, answer).startsWith('TEST-DRAFT'));
-  let reply = applySegment('', draft);
-  reply = applySegment(reply, mid);
-  reply = applySegment(reply, fin);
+  assert.equal(applySegment(draft, answer, { lastBlock: true }), answer);
+  assert.ok(!applySegment(draft, answer, { lastBlock: true }).includes('on.Yes'));
+  assert.ok(!applySegment(draft, answer, { lastBlock: true }).startsWith('TEST-DRAFT'));
+  let reply = applySegment('', draft, { lastBlock: true });
+  reply = applySegment(reply, mid, { lastBlock: true });
+  reply = applySegment(reply, fin, { lastBlock: true });
   assert.equal(reply, fin);
   assert.ok(!reply.includes('kettle'));
   assert.ok(!reply.includes('on.Yes'));
@@ -118,6 +128,9 @@ test('applySegment: James kettle draft then answer is FINAL only, not on.Yes', a
   assert.equal(liveMash, 'TEST-DRAFT: the kettle is on.Yes. I can do it on purpose, and I just did.');
   assert.equal(preferLastBlock(answer, liveMash + '\n\n' + fin), answer);
   assert.equal(preferLastBlock(liveMash + '\n\n' + fin, answer), answer);
-  assert.equal(applySegment('time.', 'The'), 'time. The');
+  assert.equal(applySegment('time.', 'The'), 'time.The');
+  const { joinText } = await import(helperUrl);
+  assert.equal(joinText(draft, 'Yes'), 'TEST-DRAFT: the kettle is on.Yes');
+  assert.ok(joinText(draft, 'Yes').includes('on.Yes'));
 });
 

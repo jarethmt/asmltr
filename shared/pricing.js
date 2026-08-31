@@ -21,7 +21,7 @@ const os = require('os');
 // $/1M tokens {in,out}. Aliases (opus/sonnet/haiku) resolve to the current tier they track.
 const DEFAULTS = {
   models: {
-    // Anthropic (subscription via the Agent SDK on Eve's box → billed:false, but the equivalent value is real)
+    // Anthropic (subscription via the Agent SDK → billed:false, but the equivalent value is real)
     'opus': { in: 15, out: 75 }, 'claude-opus': { in: 15, out: 75 },
     'sonnet': { in: 3, out: 15 }, 'claude-sonnet': { in: 3, out: 15 },
     'haiku': { in: 0.8, out: 4 }, 'claude-haiku': { in: 0.8, out: 4 },

@@ -2,6 +2,7 @@
 /**
  * Live-active = stored status=active AND not a no-pid row past idle.
  * Idle is a nap cutoff for the Live list (?active=1), not a process kill.
+ * ASMLTR_IDLE_MS / DEFAULT_IDLE_MS 1800000 (30 min). Not grok session idle.
  * Pid-backed rows stay live until reconcile ends them (pid dead).
  */
 

@@ -51,7 +51,7 @@ export function statusMeta(s) {
   return STATUS_META[s] || { color: '#64748B', label: s || 'unknown', pulse: false }
 }
 
-// Ivy/grok default matches core DEFAULT_IDLE_MINUTES / ASMLTR_IDLE_MS=1800000.
+// Live card nap (display-only). 30 minutes. ASMLTR_IDLE_MS. Not grok session idle.
 export const DEFAULT_IDLE_MS = 1_800_000
 
 /** Collector timestamps are unix ms; tolerate accidental seconds. */

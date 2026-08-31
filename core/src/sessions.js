@@ -13,15 +13,18 @@
  *   passes resume=that UUID → grok.js emits `-r <uuid>`. That is the real
  *   continuity mechanism. Do not fake it by re-injecting the full system
  *   prompt every turn: grok's `-r` already replays the first-turn system
- *   block (historyReplaysSystemPrompt=true). When idle expires we CLEAR the
+ *   block (historyReplaysSystemPrompt=true). When a finite idle expires we CLEAR the
  *   UUID (and last_stable_*) so the next turn is a fresh grok session and
- *   the full identity prompt is sent again.
+ *   the full identity prompt is sent again. The infinite path never clears
+ *   the grok UUID.
  *
  * IDLE POLICY:
  *   Stored as 'infinite' | 'idle:<minutes>' (integer minutes — see
- *   parseIdlePolicy / idlePolicyFromEnv). Core used to hardcode infinite
- *   for every turn (token-burn). Ivy/grok default is idle:15, overridable
- *   by ASMLTR_IDLE_MS (milliseconds) or ASMLTR_IDLE_POLICY.
+ *   parseIdlePolicy / idlePolicyFromEnv). Default is infinite (jarethmt).
+ *   Session idle reads ASMLTR_IDLE_POLICY only (infinite/off/none or idle:N).
+ *   Do not read ASMLTR_IDLE_MS here — that env is the Live card nap
+ *   (collector liveActive.js + dashboard format.js DEFAULT_IDLE_MS 1800000).
+ *   Unset policy → infinite even when ASMLTR_IDLE_MS=1800000 is set for Live.
  */
 
 const path = require('path');
@@ -50,14 +53,15 @@ db.exec(`
     outbound_instance_id TEXT,                             -- connector instance to reply THROUGH for an out-of-band inject
     outbound_target    TEXT,                               -- channel/chat id to reply TO
     last_stable_hash   TEXT,                               -- sha256 of the STABLE system-prompt block last injected (inject-once optimization)
-    last_stable_engine TEXT                                -- which engine that stable block was injected for (guards a mid-session engine switch)
+    last_stable_engine TEXT,                               -- which engine that stable block was injected for (guards a mid-session engine switch)
+    next_effort        TEXT                                -- one-shot grok --effort for the NEXT spawn (high|xhigh|medium|low); cleared after use
   );
 `);
 
 // Migrations: add columns to a pre-existing table (created before they existed).
 const _colsStmt = db.prepare('PRAGMA table_info(sessions)');
 const _cols = _colsStmt.all().map((c) => c.name);
-for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target', 'last_stable_hash', 'last_stable_engine']) {
+for (const col of ['working_dir', 'outbound_instance_id', 'outbound_target', 'last_stable_hash', 'last_stable_engine', 'next_effort']) {
   if (!_cols.includes(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
 }
 // Per-session cursor: the highest announcement id this session has already drained.
@@ -112,7 +116,7 @@ function nowMs() { return Date.now(); }
 // Canonical on-disk values: 'infinite' | 'idle:<minutes>'. Accept a few human
 // aliases at the env boundary ('15m', '15', 'off') and always persist the
 // canonical form so resolveForTurn's /^idle:(\d+)$/ keeps working.
-const DEFAULT_IDLE_MINUTES = 15;
+const DEFAULT_IDLE_MINUTES = 30;
 
 function parseIdlePolicy(raw) {
   if (raw == null) return null;
@@ -130,16 +134,11 @@ function parseIdlePolicy(raw) {
   return null;
 }
 
-/** Default idle for ivy/grok: 15 minutes. ASMLTR_IDLE_POLICY wins; else ASMLTR_IDLE_MS; else idle:15. */
+/** Session idle: ASMLTR_IDLE_POLICY if set; else infinite. ASMLTR_IDLE_MS is Live-only. */
 function idlePolicyFromEnv() {
   const named = parseIdlePolicy(process.env.ASMLTR_IDLE_POLICY);
   if (named) return named;
-  const ms = Number(process.env.ASMLTR_IDLE_MS);
-  if (Number.isFinite(ms)) {
-    if (ms <= 0) return 'infinite';
-    return `idle:${Math.max(1, Math.round(ms / 60000))}`;
-  }
-  return `idle:${DEFAULT_IDLE_MINUTES}`;
+  return 'infinite';
 }
 
 const _setIdle = db.prepare('UPDATE sessions SET idle_policy = ? WHERE conversation_key = ?');
@@ -270,4 +269,33 @@ function recordStable(conversation_key, stable_hash, engine) {
   _setStable.run(stable_hash || null, engine || null, conversation_key);
 }
 
-module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH };
+const _setNextEffort = db.prepare('UPDATE sessions SET next_effort = ? WHERE conversation_key = ?');
+
+/**
+ * Operator one-shot: persist effort for the NEXT grok -p on this conversation_key.
+ * Consumed (cleared) by consumeNextEffort at spawn. Current in-flight grok -p is unchanged.
+ * effort: high|xhigh|medium|low. Pass null to clear.
+ */
+function setNextEffort(conversation_key, effort) {
+  if (!conversation_key) return false;
+  if (effort == null || effort === '') {
+    _setNextEffort.run(null, conversation_key);
+    return true;
+  }
+  const v = String(effort).trim().toLowerCase();
+  if (!['low', 'medium', 'high', 'xhigh'].includes(v)) return false;
+  _setNextEffort.run(v, conversation_key);
+  return true;
+}
+
+/** Return next_effort and clear it (one-shot). */
+function consumeNextEffort(conversation_key) {
+  if (!conversation_key) return null;
+  const row = _get.get(conversation_key);
+  if (!row || !row.next_effort) return null;
+  const v = String(row.next_effort).trim().toLowerCase();
+  _setNextEffort.run(null, conversation_key);
+  return ['low', 'medium', 'high', 'xhigh'].includes(v) ? v : null;
+}
+
+module.exports = { db, ensure, resolveForTurn, recordEngineId, clearEngineId, touch, setClaim, setOutboundRoute, recordStable, get, remove, addAnnouncement, drainAnnouncements, listAnnouncements, parseIdlePolicy, idlePolicyFromEnv, DEFAULT_IDLE_MINUTES, DB_PATH, setNextEffort, consumeNextEffort };

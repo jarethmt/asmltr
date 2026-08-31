@@ -1,8 +1,14 @@
 'use strict';
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const promptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-grok-args-'));
+process.env.ASMLTR_GROK_PROMPT_DIR = promptDir;
 const engines = require('../shared/engines');
 const grok = require('../core/src/engines/grok');
+after(() => { try { fs.rmSync(promptDir, { recursive: true, force: true }); } catch (_) {} });
 
 test('grok is a known subscription-only engine with no npm package', () => {
   assert.equal(engines.known('grok'), true);
@@ -53,19 +59,22 @@ test('isUuid / resumeArgs: -r for a UUID, never -s or -c', () => {
   assert.deepEqual(grok.resumeArgs('latest'), []);
 });
 
-test('buildArgs is headless -p, streaming-json, finite max-turns, no TUI', () => {
+test('buildArgs is headless --prompt-file, streaming-json, no CLI turn cap, no TUI', () => {
   const args = grok.buildArgs({ prompt: 'hello', systemPrompt: 'IDENTITY', sessionId: '01234567-89ab-cdef-0123-456789abcdef' });
   assert.equal(args[0], '--no-auto-update');
-  assert.ok(args.includes('-p'));
+  assert.ok(args.includes('--prompt-file'));
+  assert.equal(args.includes('-p'), false);
   assert.ok(args.includes('--output-format'));
   assert.equal(args[args.indexOf('--output-format') + 1], 'streaming-json');
   assert.ok(args.includes('--always-approve'));
-  assert.ok(args.includes('--max-turns'));
-  const mt = Number(args[args.indexOf('--max-turns') + 1]);
-  assert.ok(Number.isFinite(mt) && mt > 0 && mt <= 100);
+  assert.equal(args.includes('--max-turns'), false);
+  assert.ok(args.includes('--effort'));
   assert.ok(args.includes('-s'));
   assert.ok(!args.includes('-r'));
-  const p = args[args.indexOf('-p') + 1];
+  const f = args[args.indexOf('--prompt-file') + 1];
+  const body = JSON.parse(require('fs').readFileSync(f, 'utf8'));
+  try { require('fs').unlinkSync(f); } catch (_) {}
+  const p = body.content.find((c) => c.type === 'text').text;
   assert.ok(p.includes('IDENTITY'));
   assert.ok(p.includes('hello'));
   assert.ok(p.includes('<system-instructions>'));
@@ -84,20 +93,126 @@ test('complete() argv uses plain output', () => {
   assert.equal(args[args.indexOf('-m') + 1], 'grok-3');
 });
 
+test('complete() honor effort low and image/video denies for classify', () => {
+  const args = grok.buildArgs({
+    prompt: 'YES or NO', complete: true, effort: 'low',
+    denyShell: true, denyWrite: true, denyImage: true, denyVideo: true,
+  });
+  assert.equal(args[args.indexOf('--effort') + 1], 'low');
+  assert.equal(args[args.indexOf('--output-format') + 1], 'plain');
+  const denies = [];
+  for (let n = 0; n < args.length; n++) if (args[n] === '--deny') denies.push(args[n + 1]);
+  assert.ok(denies.includes('image_gen'));
+  assert.ok(denies.includes('image_edit'));
+  assert.ok(denies.includes('Bash'));
+});
+
+test('buildArgs denyShell adds --disallowed-tools bash,shell,run_terminal_cmd and --deny Bash', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyShell: true });
+  assert.ok(args.includes('--always-approve'));
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.equal(args[i + 1], 'bash,shell,run_terminal_cmd');
+  assert.ok(args[i + 1].includes('run_terminal_cmd'));
+  const d = args.indexOf('--deny');
+  assert.ok(d >= 0);
+  assert.equal(args[d + 1], 'Bash');
+});
+
+test('buildArgs denyWrite adds search_replace and --deny Edit/Write, keeps always-approve', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyWrite: true });
+  assert.ok(args.includes('--always-approve'));
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.ok(args[i + 1].includes('search_replace'));
+  const denies = [];
+  for (let n = 0; n < args.length; n++) if (args[n] === '--deny') denies.push(args[n + 1]);
+  assert.ok(denies.includes('Edit'));
+  assert.ok(denies.includes('Write'));
+});
+
+test('unrestricted buildArgs has no write/edit deny', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--disallowed-tools'), false);
+  assert.equal(args.includes('--deny'), false);
+  assert.ok(args.includes('--always-approve'));
+});
+
+test('buildArgs without denyShell does not pass --disallowed-tools', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--disallowed-tools'), false);
+});
+
+test('buildArgs denyVideo strips image_to_video and reference_to_video', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyVideo: true });
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.ok(args[i + 1].includes('image_to_video'));
+  assert.ok(args[i + 1].includes('reference_to_video'));
+  const denies = [];
+  for (let n = 0; n < args.length; n++) if (args[n] === '--deny') denies.push(args[n + 1]);
+  assert.ok(denies.includes('image_to_video'));
+  assert.ok(denies.includes('reference_to_video'));
+});
+
+test('buildArgs denyImage strips image_gen and image_edit', () => {
+  const args = grok.buildArgs({ prompt: 'hello', denyImage: true });
+  const i = args.indexOf('--disallowed-tools');
+  assert.ok(i >= 0);
+  assert.ok(args[i + 1].includes('image_gen'));
+  assert.ok(args[i + 1].includes('image_edit'));
+});
+
+test('runTurn env marks the child as inside a turn and prepends bounce-guard', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  assert.match(src, /ASMLTR_INSIDE_TURN: '1'/);
+  assert.match(src, /ASMLTR_TURN_KEY/);
+  assert.match(src, /withGuardPath/);
+});
+
 test('launchEnv strips XAI_API_KEY even if the parent has one', () => {
+  const bounce = require('../shared/bounce');
   const env = grok.launchEnv({ PATH: '/bin', XAI_API_KEY: 'xai-should-never-leak', HOME: '/tmp' });
-  assert.equal(env.PATH, '/bin');
+  assert.equal(env.PATH.startsWith(bounce.guardDir() + require('path').delimiter), true);
+  assert.ok(env.PATH.includes('/bin'));
   assert.ok(!('XAI_API_KEY' in env));
 });
 
-test('timeout and max-turns are finite (never infinite)', () => {
-  assert.ok(grok.DEFAULT_TIMEOUT_MS > 0 && grok.DEFAULT_TIMEOUT_MS <= 30 * 60 * 1000);
-  assert.ok(grok.DEFAULT_MAX_TURNS > 0 && grok.DEFAULT_MAX_TURNS <= 100);
-  assert.equal(grok.timeoutMs(), grok.DEFAULT_TIMEOUT_MS);
-  assert.equal(grok.maxTurns(), grok.DEFAULT_MAX_TURNS);
+test('launchEnv strips xai_voice_api_key / XAI_VOICE_API_KEY so grok CLI never sees the converse key', () => {
+  const env = grok.launchEnv({
+    PATH: '/bin',
+    XAI_API_KEY: 'nope',
+    XAI_VOICE_API_KEY: 'voice-should-never-leak',
+    xai_voice_api_key: 'voice-should-never-leak-lower',
+    HOME: '/tmp',
+  });
+  assert.ok(!('XAI_API_KEY' in env));
+  assert.ok(!('XAI_VOICE_API_KEY' in env));
+  assert.ok(!('xai_voice_api_key' in env));
 });
 
-test('historyReplaysSystemPrompt is true after osiris verified -r replay', () => {
+test('buildArgs omits a turn-cap flag; runTurn/complete do not arm a kill timer', () => {
+  const args = grok.buildArgs({ prompt: 'hello' });
+  assert.equal(args.includes('--max-turns'), false);
+  assert.ok(args.includes('--effort'));
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'engines', 'grok.js'), 'utf8');
+  const build = src.match(/function buildArgs\([\s\S]*?\n\}/);
+  assert.ok(build);
+  assert.equal(build[0].includes('--max-turns'), false);
+  assert.ok(src.includes('abortController'));
+  const run = src.match(/async function runTurn\([\s\S]*?\n\}/);
+  assert.ok(run);
+  assert.equal(/setTimeout\([\s\S]{0,200}child\.kill/.test(run[0]), false);
+  assert.equal(run[0].includes('watchdog'), false);
+  const complete = src.match(/async function complete\([\s\S]*?\n\}/);
+  assert.ok(complete);
+  assert.equal(/setTimeout\([\s\S]{0,200}child\.kill/.test(complete[0]), false);
+  assert.equal(complete[0].includes('watchdog'), false);
+});
+
+test('historyReplaysSystemPrompt is true after live-verified -r replay', () => {
   assert.equal(grok.historyReplaysSystemPrompt, true);
 });
 
@@ -108,7 +223,13 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   assert.equal(state.text, 'Hi');
   assert.equal(grok.applyEvent(grok.parseLine(`{"type":"text","data":"pong"}`), state).kind, 'delta');
   assert.equal(state.text, 'Hipong');
-  assert.equal(grok.applyEvent({ type: 'thought', text: 'hmm' }, state).kind, 'thinking');
+  assert.equal(grok.applyEvent({ type: 'thought', text: 'hmm' }, state).kind, 'thinking-delta');
+  assert.equal(state.thinking, 'hmm');
+  const rsn = grok.newState();
+  assert.equal(grok.applyEvent({ type: 'reasoning', data: 'plan it' }, rsn).kind, 'thinking-delta');
+  assert.equal(rsn.thinking, 'plan it');
+  assert.equal(grok.extractText({ type: 'reasoning', text: 'nope' }), '');
+  assert.equal(grok.extractText({ type: 'thought_summary', text: 'nope' }), '');
   assert.equal(grok.applyEvent({ type: 'tool_call', name: 'shell', input: { cmd: 'ls' } }, state).kind, 'tool');
   assert.equal(state.tools[0].name, 'shell');
   assert.equal(grok.applyEvent({ type: 'usage', usage: { input_tokens: 10, output_tokens: 4 } }, state).kind, 'usage');
@@ -123,13 +244,13 @@ test('streaming-json parser maps text / thought / tool_call / usage / sessionId 
   // assembly must match untrimmed state.text concat — trim() would mash.
   const liveState = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   let live = '';
-  for (const piece of ["Here", " is", " a", " summary"]) {
+  for (const piece of ["Here's", " a summary"]) {
     const r = grok.applyEvent({ type: 'text', data: piece }, liveState);
     assert.equal(r.kind, 'delta');
     assert.equal(r.text, piece);
     live += r.text;
   }
-  assert.equal(liveState.text, "Here is a summary");
+  assert.equal(liveState.text, "Here's a summary");
   assert.equal(live, liveState.text);
   assert.equal(grok.sessionIdFrom({ sessionId: sid }), sid);
 });
@@ -145,6 +266,9 @@ test('runTurn signature destructures systemPrompt (identity contract)', () => {
   assert.ok(params.includes('resume'));
   assert.ok(!src.includes('onSegment(r.text.trim())'), 'onSegment must not trim leading spaces');
   assert.ok(src.includes('onSegment(r.text)'));
+  assert.ok(src.includes("r.text != null && r.text !== '' && onDelta"), 'onDelta must fire for whitespace tokens');
+  assert.ok(src.includes('joined = prev + text'), 'incremental type:text data concatenates');
+  assert.ok(!src.includes('[.!?]'), 'no invent-space after .!?');
 });
 
 test('engines.get("grok") lazy-loads the grok adapter', () => {
@@ -168,15 +292,15 @@ test('applyEvent: space-only delta after period produces "time. The" not "time.T
   assert.notEqual(live, 'time.The');
 });
 
-test('applyEvent: next sentence without leading space still stores ". "', () => {
+test('applyEvent: next sentence without a space token stays honest time.The', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   let live = '';
   for (const piece of ['time.', 'The']) {
     const r = grok.applyEvent({ type: 'text', data: piece }, state);
     live += r.text;
   }
-  assert.equal(state.text, 'time. The');
-  assert.equal(live, 'time. The');
+  assert.equal(state.text, 'time.The');
+  assert.equal(live, 'time.The');
 });
 
 test('applyEvent: narration draft then restated answer stores one sentence, not both', () => {
@@ -206,6 +330,87 @@ test('applyEvent: status block then restated answer persist is the answer only',
   assert.equal(segs[segs.length - 1], answer);
 });
 
+test('applyEvent: tool call returns closed narration for live step streaming', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const status = 'I will check the RE-review email and the silo.';
+  grok.applyEvent({ type: 'text', text: status }, state);
+  const r = grok.applyEvent({ type: 'tool_call', name: 'read_file', input: { path: '/tmp/x' } }, state);
+  assert.equal(r.kind, 'tool');
+  assert.equal(r.closed, status);
+  assert.equal(state.text, '');
+  assert.deepEqual(state.segments, [status]);
+});
+
+test('parseLine unwraps ACP agent_thought_chunk as thought', () => {
+  const line = JSON.stringify({
+    method: 'session/update',
+    params: { update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'checking mail' } } },
+  });
+  const ev = grok.parseLine(line);
+  assert.equal(ev.type, 'thought');
+  assert.equal(ev.text, 'checking mail');
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const r = grok.applyEvent(ev, state);
+  assert.equal(r.kind, 'thinking-delta');
+  assert.equal(state.thinking, 'checking mail');
+});
+
+test('applyEvent: thought chunks coalesce and flush on tool / text / end', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  assert.equal(grok.applyEvent({ type: 'thought', data: 'Checking' }, state).kind, 'thinking-delta');
+  assert.equal(grok.applyEvent({ type: 'thought', data: ' mail' }, state).kind, 'thinking-delta');
+  assert.equal(state.thinking, 'Checking mail');
+  const tool = grok.applyEvent({ type: 'tool_call', name: 'read_file', input: { path: '/tmp/x' } }, state);
+  assert.equal(tool.kind, 'tool');
+  assert.equal(tool.closedThinking, 'Checking mail');
+  assert.equal(state.thinking, '');
+  grok.applyEvent({ type: 'thought', text: 'Now answer' }, state);
+  const text = grok.applyEvent({ type: 'text', data: 'Hi' }, state);
+  assert.equal(text.kind, 'delta');
+  assert.equal(text.closedThinking, 'Now answer');
+  grok.applyEvent({ type: 'thought', data: 'Wrap up' }, state);
+  const end = grok.applyEvent({ type: 'end', sessionId: '11111111-2222-3333-4444-555555555555' }, state);
+  assert.equal(end.kind, 'end');
+  assert.equal(end.closedThinking, 'Wrap up');
+});
+
+
+test('applyEvent: tool_call_update does not emit onTool or close thinking', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  grok.applyEvent({ type: 'thought', text: 'scratch' }, state);
+  const r = grok.applyEvent({ type: 'tool_call_update', name: 'Read' }, state);
+  assert.equal(r.kind, 'tool_update');
+  assert.equal(r.tool, undefined);
+  assert.equal(state.thinking, 'scratch');
+  assert.deepEqual(state.tools, []);
+});
+
+test('applyEvent: nameless tool_call does not use type as name', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const r = grok.applyEvent({ type: 'tool_call', input: {} }, state);
+  assert.equal(r.kind, 'tool');
+  assert.equal(r.tool.name, '');
+  assert.notEqual(r.tool.name, 'tool_call');
+  assert.equal(grok.toolNameOf({ type: 'tool_call' }), '');
+  assert.equal(grok.toolNameOf({ type: 'tool_call', name: 'tool_call' }), '');
+  assert.equal(grok.toolNameOf({ type: 'tool_call', name: 'Read' }), 'Read');
+  assert.equal(grok.toolNameOf({ type: 'tool_call', toolCall: { name: 'Bash' } }), 'Bash');
+});
+
+test('applyEvent: named tool_call still closes thinking once', () => {
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  grok.applyEvent({ type: 'thought', text: 'plan' }, state);
+  grok.applyEvent({ type: 'thought', text: ' more' }, state);
+  const r = grok.applyEvent({ type: 'tool_call', name: 'Read', input: { path: '/tmp/x' } }, state);
+  assert.equal(r.kind, 'tool');
+  assert.equal(r.tool.name, 'Read');
+  assert.equal(r.closedThinking, 'plan more');
+  assert.equal(state.thinking, '');
+  const upd = grok.applyEvent({ type: 'tool_call_update' }, state);
+  assert.equal(upd.kind, 'tool_update');
+  assert.equal(state.thinking, '');
+});
+
 test('applyEvent: tool call closes narration so later text is not glued', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   const status = 'Coconut aminos is already on your card as the soy-sauce stand-in.';
@@ -219,16 +424,16 @@ test('applyEvent: tool call closes narration so later text is not glued', () => 
   assert.ok(!state.text.includes('stand-in'));
 });
 
-test('applyEvent: time. + The as complete-shaped events still get period-space, not replace', () => {
+test('applyEvent: time. + The as complete-shaped events stay honest, not replace', () => {
   const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
   grok.applyEvent({ type: 'text', text: 'time.' }, state);
   const r = grok.applyEvent({ type: 'text', text: 'The' }, state);
-  assert.equal(state.text, 'time. The');
-  assert.equal(r.text, ' The');
+  assert.equal(state.text, 'time.The');
+  assert.equal(r.text, 'The');
   assert.deepEqual(state.segments, []);
 });
 
-test('applyEvent: James kettle incremental draft + tool + answer stores FINAL only', () => {
+test('applyEvent: owner kettle incremental draft + tool + answer stores FINAL only', () => {
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
   const fin = 'TEST-FINAL: the tea is poured.';
@@ -253,7 +458,7 @@ test('applyEvent: James kettle incremental draft + tool + answer stores FINAL on
   assert.ok(!state.text.includes('on.Yes'));
 });
 
-test('applyEvent: James kettle snapshots last complete block wins', () => {
+test('applyEvent: owner kettle snapshots last complete block wins', () => {
   const draft = 'TEST-DRAFT: the kettle is on.';
   const mid = 'Yes. I can do it on purpose, and I just did.';
   const fin = 'TEST-FINAL: the tea is poured.';
@@ -269,3 +474,22 @@ test('applyEvent: James kettle snapshots last complete block wins', () => {
   assert.ok(!state.text.includes('kettle'));
 });
 
+test('joinText: honest concat; URLs/IPs/query/versions unspaced; space token kept', () => {
+  assert.equal(grok.joinText("Here's", ' a summary'), "Here's a summary");
+  assert.equal(grok.joinText('time.', ' The'), 'time. The');
+  assert.equal(grok.joinText('time.', 'The'), 'time.The');
+  assert.equal(['127.', '0.', '0.', '1'].reduce((a, b) => grok.joinText(a, b), ''), '127.0.0.1');
+  assert.equal(grok.joinText('accounts.', 'google.com'), 'accounts.google.com');
+  assert.equal(grok.joinText('auth?', 'response_type'), 'auth?response_type');
+  assert.equal(grok.joinText('www.', 'googleapis.com'), 'www.googleapis.com');
+  assert.equal(grok.joinText('file.', 'json'), 'file.json');
+  assert.equal(grok.joinText('v1.', '2.3'), 'v1.2.3');
+  assert.equal(grok.joinText(grok.joinText('time.', ' '), 'The'), 'time. The');
+  assert.equal(grok.extractText({ type: 'text', data: ' ' }), ' ');
+  assert.equal(grok.extractText({ type: 'text', data: ' a summary' }), ' a summary');
+  const state = grok.newState('01234567-89ab-cdef-0123-456789abcdef');
+  const r = grok.applyEvent({ type: 'text', data: ' ' }, state);
+  assert.equal(r.kind, 'delta');
+  assert.equal(r.text, ' ');
+  assert.equal(state.text, ' ');
+});

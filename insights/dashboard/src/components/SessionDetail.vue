@@ -9,7 +9,7 @@
 // The header title is inline-editable — a manual title locks against AI regeneration.
 import { ref, computed, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useCollectorStore } from '@/stores/collector'
-import { api, control, webChat, parsePayload } from '@/services/api'
+import { api, control, webChat, parsePayload, enginesApi } from '@/services/api'
 import { manager } from '@/services/manager'
 import { useSpeech } from '@/composables/useSpeech'
 import { statusMeta, displayStatus, fmtTime, fmtAge, fmtNum, truncate } from '@/lib/format'
@@ -17,7 +17,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import SurfaceBadge from './SurfaceBadge.vue'
 import FileArtifacts from './FileArtifacts.vue'
 import { eventRow } from '@/lib/transcript'
-import { applySegment, preferLastBlock } from '@/lib/segment'
+import { applySegment, preferLastBlock, joinText } from '@/lib/segment'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -82,6 +82,17 @@ async function loadMuteState() {
 }
 onMounted(loadMuteState)
 watch(key, loadMuteState)
+// Last-block live replace is Grok (status snapshot → answer). Claude/Gemini/Codex
+// narrate→tool→answer must keep the narration. Default claude so a failed fetch
+// does not collapse a Claude-default dashboard.
+const reasoningEngine = ref('claude')
+const grokLive = computed(() => reasoningEngine.value === 'grok')
+onMounted(async () => {
+  try {
+    const r = await enginesApi.list()
+    if (r && r.default) reasoningEngine.value = r.default
+  } catch (_) {}
+})
 // Resolve this session to its mutable unit: { instanceId, channelId, label } (a parent prop wins).
 const myMutable = computed(() => {
   if (props.mutable) return props.mutable
@@ -271,13 +282,23 @@ watch(key, () => { load(); nextTick(bindScrollerListeners) })
 // ---- chat rows (events → transcript) ----------------------------------------
 // eventRow (event → chat row) lives in @/lib/transcript so this chat and the Schedules last-run
 // transcript render identically. Local turns (web streaming) are appended below.
-const localTurns = ref([]) // web sessions: { user, reply, tools:[], streaming, error, ts }
+const localTurns = ref([]) // web sessions: { user, reply, tools:[], steps:[], streaming, error, ts }
 const rows = computed(() => {
   const out = history.value.map(eventRow)
   for (const t of localTurns.value) {
     out.push({ kind: 'user', text: t.user, ts: t.ts })
-    if (t.tools?.length) out.push({ kind: 'activity', icon: '🔧', label: `using ${t.tools.join(', ')}`, text: '', ts: t.ts + 1 })
-    out.push({ kind: 'assistant', text: t.reply, streaming: t.streaming, error: t.error, ts: t.ts + 2 })
+    let n = 1
+    if (t.steps?.length) {
+      for (const s of t.steps) {
+        if (s.kind === 'thinking') out.push({ kind: 'activity', icon: '💭', label: 'thinking', text: s.text, ts: t.ts + n })
+        else if (s.kind === 'tool') out.push({ kind: 'activity', icon: '🔧', label: s.name || 'tool', text: '', ts: t.ts + n })
+        n++
+      }
+    } else if (t.tools?.length) {
+      out.push({ kind: 'activity', icon: '🔧', label: `using ${t.tools.join(', ')}`, text: '', ts: t.ts + n })
+      n++
+    }
+    out.push({ kind: 'assistant', text: t.reply, streaming: t.streaming, error: t.error, ts: t.ts + n + 1 })
   }
   return out
 })
@@ -334,7 +355,7 @@ function webSend() {
   const files = attached.value.slice()
   let body = text
   if (files.length) body += '\n\n' + files.map((f) => `[Attached file: ${f.name} → ${f.path}]`).join('\n')
-  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], streaming: true, error: null, ts: Date.now(), blockClosed: false })
+  const turn = reactive({ user: text + (files.length ? `\n📎 ${files.map((f) => f.name).join(', ')}` : ''), reply: '', tools: [], steps: [], streaming: true, error: null, ts: Date.now(), blockClosed: false })
   localTurns.value = [...localTurns.value, turn]
   stickToBottom.value = true
   scrollToBottom(true)
@@ -343,19 +364,27 @@ function webSend() {
     { conversation_key: key.value, text: body, attachments: files.map((f) => ({ type: f.kind === 'image' ? 'image' : 'file', path: f.path, name: f.name, media_type: f.mime })), working_dir: sess.value.working_dir || null, system_prompt_extra: props.contextProvider ? props.contextProvider() : null },
     {
       onDelta: (t) => {
-        // Discord: a tool (or a completed narration block) closes the pending
+        // Grok: a tool (or a completed narration block) closes the pending
         // draft. Later tokens are a new block — do not glue status + answer.
-        if (turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
-        else turn.reply += t
+        // Claude: keep appending; narrate→tool→answer is one turn.
+        if (grokLive.value && turn.blockClosed) { turn.reply = t || ''; turn.blockClosed = false }
+        else turn.reply = joinText(turn.reply, t)
         bumpStream()
       },
       onTool: (name) => {
         if (name && !turn.tools.includes(name)) { turn.tools = [...turn.tools, name] }
-        turn.blockClosed = true
+        if (name) turn.steps = [...turn.steps, { kind: 'tool', name }]
+        if (grokLive.value) turn.blockClosed = true
+        bumpStream()
+      },
+      onThinking: (t) => {
+        const s = String(t || '').trim()
+        if (s) turn.steps = [...turn.steps, { kind: 'thinking', text: s }]
         bumpStream()
       },
       onSegment: (t) => {
-        turn.reply = applySegment(turn.blockClosed ? '' : turn.reply, t)
+        const prev = (grokLive.value && turn.blockClosed) ? '' : turn.reply
+        turn.reply = applySegment(prev, t, { lastBlock: grokLive.value })
         turn.blockClosed = false
         bumpStream()
       },
@@ -381,9 +410,9 @@ function webSend() {
               }
             }
           }
-          // Last finished block wins. Do not keep a longer glued draft+answer
-          // (live mash or stored mash) just because it has more characters.
-          const next = preferLastBlock(lastText, turn.reply)
+          // Grok: last finished block wins (status mash vs answer).
+          // Claude: keep the live reply — do not collapse narrate→tool→answer.
+          const next = grokLive.value ? preferLastBlock(lastText, turn.reply) : (turn.reply || lastText)
           if (next !== (turn.reply || '')) { turn.reply = next; bumpStream() }
         } catch (_) {}
       },
