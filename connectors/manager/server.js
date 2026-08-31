@@ -2,6 +2,9 @@
 'use strict';
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send/read HTTP status ↔ body `ok`
+const attachStage = require('../../shared/attach-stage');
+const { bearerEqual } = require('../../shared/bearer-equal');
+const { connectorAuthHeaders } = require('../../shared/connector-http-auth');
 /**
  * asmltr connector manager — registry + supervisor + management API (the plane
  * the dashboard "Integrations" page drives). Host/PM2, bind 127.0.0.1.
@@ -32,6 +35,7 @@ const childEnv = {
   ASMLTR_CORE_URL: process.env.ASMLTR_CORE_URL || 'http://127.0.0.1:3023/v2/handle',
   ASMLTR_COLLECTOR_URL: process.env.ASMLTR_COLLECTOR_URL || 'http://127.0.0.1:3017/ingest',
   ASMLTR_INSIGHTS_TOKEN: process.env.ASMLTR_INSIGHTS_TOKEN || '',
+  ASMLTR_MANAGER_TOKEN: process.env.ASMLTR_MANAGER_TOKEN || '',
 };
 const supervisor = makeSupervisor(childEnv);
 
@@ -40,8 +44,18 @@ const TYPES_DIR = path.join(__dirname, '..', 'types');
 function loadTypes() {
   const out = {};
   for (const t of fs.readdirSync(TYPES_DIR)) {
+    const dir = path.join(TYPES_DIR, t);
+    let st;
+    try { st = fs.statSync(dir); } catch (_) { continue; }
+    if (!st.isDirectory()) continue;
+    // Node connector plugin = index.js + meta. Hook-only dirs (claude-code/hook.py) are
+    // not plugins — skip silent (was: "type 'claude-code' failed to load" every boot).
+    // Interactive CLIs are not types/ folders: `asmltr grok` → grok, `asmltr gemini` →
+    // gemini, `asmltr codex` → codex (cli/asmltr-engine.js). Native Stop/SessionStart
+    // hooks for Gemini/Codex would live next to this as their own hook script, not here.
+    if (!fs.existsSync(path.join(dir, 'index.js'))) continue;
     try {
-      const mod = require(path.join(TYPES_DIR, t));
+      const mod = require(dir);
       if (mod && mod.meta) out[mod.meta.type] = mod.meta;
     } catch (e) { console.error(`[manager] type '${t}' failed to load:`, e.message); }
   }
@@ -76,8 +90,7 @@ function validateConfig(typeMeta, config) {
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 function requireToken(req, res, next) {
-  if (!TOKEN) return next();
-  if ((req.get('authorization') || '') === `Bearer ${TOKEN}`) return next();
+  if (bearerEqual(req.get('authorization'), TOKEN)) return next();
   return res.status(401).json({ error: 'unauthorized' });
 }
 
@@ -148,7 +161,7 @@ async function proxyEndpoint(id, endpoint, method, body) {
   if (!port) return { status: 400, json: { ok: false, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` } };
   try {
     const r = await fetch(`http://127.0.0.1:${port}/${endpoint}`, {
-      method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+      method, headers: connectorAuthHeaders(TOKEN), body: body ? JSON.stringify(body) : undefined,
     });
     const j = await r.json().catch(() => ({}));
     return { status: r.status, json: { instance_id: id, type: inst.type, name: inst.name, ...j } };
@@ -173,8 +186,8 @@ const ATTACH_KINDS = ['file', 'photo', 'document'];
 const supportsAttachments = (meta) => !!(meta && meta.outbound && (meta.outbound.kinds || []).some((k) => ATTACH_KINDS.includes(k)));
 
 // --- unified outbound: route a message OUT through a connector instance --------
-// POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, ref?, title?, require_headphones? }
-async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, ref, title, require_headphones }) {
+// POST /send { channel|instance_id, target, kind?, text?, path?, caption?, subject?, cc?, ref?, title?, require_headphones?, force? }
+async function deliver({ channel, instance_id, target, kind = 'text', text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) {
   const inst = instance_id ? registry.get(instance_id)
     : channel ? (registry.list().find((i) => i.type === channel && i.enabled) || registry.list().find((i) => i.type === channel))
     : null;
@@ -187,6 +200,12 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   if (ATTACH_KINDS.includes(kind) && !supportsAttachments(meta)) {
     return { ok: false, status: 400, error: `type '${inst.type}' does not support outbound file attachments` };
   }
+  if (filePath) {
+    const stage = attachStage;
+    if (typeof stage.outboundFileAllowed === 'function' && !stage.outboundFileAllowed(filePath)) {
+      return { ok: false, status: 403, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' };
+    }
+  }
   const port = instancePort(inst);
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };
   // Reach the connector on the interface it actually bound. Most bind 127.0.0.1, but some (e.g. the
@@ -195,11 +214,12 @@ async function deliver({ channel, instance_id, target, kind = 'text', text, path
   const bindHost = inst.config && inst.config.bind_host;
   const host = (bindHost && bindHost !== '0.0.0.0' && bindHost !== '::') ? bindHost : '127.0.0.1';
   try {
-    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, ref, title, require_headphones }) });
+    const r = await fetch(`http://${host}:${port}/out`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify({ kind, target, text, path: filePath, caption, subject, cc, ref, title, require_headphones, source_guild, on_behalf_of, reply_to, source_channel, query, force, drop, reply_all, new_thread }) });
     const j = await r.json().catch(() => ({}));
     // Status follows the connector's own `ok` (authoritative — a real send), not the raw fetch status,
     // so a delivered message can't come back as an HTTP failure. See shared/send-result.js.
-    return settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
+    const settled = settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
+    return settled;
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }
 }
 app.post('/send', requireToken, async (req, res) => { const r = await deliver(req.body || {}); res.status(r.status).json(r); });
@@ -220,7 +240,7 @@ async function readSource(body) {
   if (!port) return { ok: false, status: 400, error: `instance '${inst.name}' has no http_port (and type '${inst.type}' declares no default)` };
   try {
     const { channel: _c, instance_id: _i, ...args } = body;
-    const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    const r = await fetch(`http://127.0.0.1:${port}/read`, { method: 'POST', headers: connectorAuthHeaders(TOKEN), body: JSON.stringify(args) });
     const j = await r.json().catch(() => ({}));
     return settleDelivery(r.ok, j, { via: `${inst.type}:${inst.name}` });
   } catch (e) { return { ok: false, status: 502, error: `connector unreachable: ${e.message}` }; }

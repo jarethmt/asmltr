@@ -19,6 +19,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
+const { identifierLookups, normalizeIdentValue } = require('./ident-lookups');
+const { identAddDecision } = require('./ident-add');
+const { crossChannelIdentityLine } = require('./cast-identity');
 
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -145,7 +148,20 @@ const principals = {
   },
 };
 const identifiers = {
-  add: (principal_id, surface, value) => { db.prepare('INSERT OR REPLACE INTO identifiers (principal_id,surface,value) VALUES (?,?,?)').run(principal_id, surface, value); return principals.get(principal_id); },
+  add: (principal_id, surface, value) => {
+    value = normalizeIdentValue(surface, value);
+    const existing = db.prepare('SELECT principal_id FROM identifiers WHERE surface=? AND value=?').get(surface, value);
+    const decision = identAddDecision({ existingPrincipalId: existing && existing.principal_id, targetPrincipalId: principal_id });
+    if (!decision.ok) {
+      const err = new Error(decision.error);
+      err.status = decision.status;
+      throw err;
+    }
+    if (!decision.same) {
+      db.prepare('INSERT INTO identifiers (principal_id,surface,value) VALUES (?,?,?)').run(principal_id, surface, value);
+    }
+    return principals.get(principal_id);
+  },
   remove: (id) => db.prepare('DELETE FROM identifiers WHERE id=?').run(id).changes > 0,
 };
 const roles = {
@@ -225,30 +241,43 @@ const engagement = {
 // --- resolution --------------------------------------------------------------
 const _identBySurfaceVal = db.prepare('SELECT principal_id FROM identifiers WHERE surface=? AND value=?');
 
+/** Connector sets envelope.public only. Core resolve combines principal + surface. */
+function decorateResolved(resolved, envelope) {
+  const pub = !!(envelope && envelope.public);
+  resolved.public = pub;
+  resolved.surface = envelope && envelope.channel ? String(envelope.channel) : '';
+  // Product owner-always-bypass: unspoofable principal id from identifier match, never a connector claim.
+  if (resolved.user_key === 'owner' && !resolved.revoked) resolved.bypass_moderation = true;
+  // Grants may narrow on public: wildcard * is owner-bypass only on a public surface.
+  if (pub && !resolved.bypass_moderation && Array.isArray(resolved.permissions)) {
+    resolved.permissions = resolved.permissions.filter((t) => t !== '*');
+  }
+  return resolved;
+}
+
 /** Resolve an inbound envelope to effective trust. DEFAULT-DENY for unknowns. */
 function resolve(envelope) {
   const surface = envelope.channel;
   const { raw_id, raw_username, api_key } = envelope.sender || {};
   const scopeId = envelope.context && envelope.context.scope_id;
 
-  // identifier match: (surface,id) → (surface,username) → (apikey,key)
+  // identifier match: (surface,id) → (surface,username except email) → (apikey,key)
   let pid = null;
-  for (const [s, v] of [[surface, raw_id], [surface, raw_username], ['apikey', api_key]]) {
-    if (!v) continue;
+  for (const [s, v] of identifierLookups(surface, { raw_id, raw_username, api_key })) {
     const row = _identBySurfaceVal.get(s, String(v));
     if (row) { pid = row.principal_id; break; }
   }
 
   if (!pid) {
-    return { user_key: 'default', display_name: raw_username || 'Unknown', trust_tier: 0,
+    return decorateResolved({ user_key: 'default', display_name: raw_username || 'Unknown', trust_tier: 0,
       permissions: [], requires_approval: [], forbidden: [], bypass_moderation: false, strict_mode: false,
-      revoked: false, is_default: true, scope_label: null };
+      revoked: false, is_default: true, scope_label: null }, envelope);
   }
 
   const p = db.prepare('SELECT * FROM principals WHERE id=?').get(pid);
   if (p.revoked) {
-    return { user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier, permissions: [],
-      requires_approval: [], forbidden: ['*'], bypass_moderation: false, strict_mode: false, revoked: true, is_default: false, scope_label: null };
+    return decorateResolved({ user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier, permissions: [],
+      requires_approval: [], forbidden: ['*'], bypass_moderation: false, strict_mode: false, revoked: true, is_default: false, scope_label: null }, envelope);
   }
 
   // union grants matching context (scope null = global)
@@ -276,10 +305,10 @@ function resolve(envelope) {
   const rel = relationships.forPrincipal(SELF_ID, { surface, scopeId }).find((r) => r.other === pid) || null;
   const engagementPolicy = engagement.policy(pid, surface, scopeId);
 
-  return { user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier,
+  return decorateResolved({ user_key: p.id, display_name: p.display_name, trust_tier: p.default_tier,
     permissions: [...eff.allow], requires_approval: [...eff.requires_approval], forbidden: [...eff.forbidden],
     bypass_moderation: eff.bypass, strict_mode: eff.strict, revoked: false, is_default: false, scope_label: scopeLabel,
-    kind: (prof && prof.kind) || 'human', profile: prof || null, identities, relationship: rel, engagement: engagementPolicy };
+    kind: (prof && prof.kind) || 'human', profile: prof || null, identities, relationship: rel, engagement: engagementPolicy }, envelope);
 }
 
 /**
@@ -339,10 +368,8 @@ function buildRelationshipPrompt(resolved, envelope) {
     parts.push(who.join(' '));
   }
 
-  if (resolved.identities && resolved.identities.length > 1) {
-    const across = resolved.identities.map((i) => `${i.surface}:${i.value}`).join(', ');
-    parts.push(`CROSS-CHANNEL IDENTITY — ${resolved.display_name} is the SAME person you also know as ${across}. It is one relationship across channels, not several strangers; recognize them on any of these.`);
-  }
+  const identLine = crossChannelIdentityLine(resolved, envelope);
+  if (identLine) parts.push(identLine);
 
   if (resolved.relationship) {
     const r = resolved.relationship;
@@ -364,4 +391,4 @@ function buildRelationshipPrompt(resolved, envelope) {
   return parts.length ? 'CAST & RELATIONSHIPS\n' + parts.join('\n') : '';
 }
 
-module.exports = { db, principals, identifiers, roles, grants, profiles, relationships, engagement, resolve, buildAuthzPrompt, buildRelationshipPrompt, SELF_ID, DB_PATH };
+module.exports = { db, principals, identifiers, roles, grants, profiles, relationships, engagement, resolve, buildAuthzPrompt, buildRelationshipPrompt, identifierLookups, SELF_ID, DB_PATH };

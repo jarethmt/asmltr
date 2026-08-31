@@ -34,10 +34,9 @@ function ensureSchedulerPrincipal() {
 
 /** Run one prompt job through the full core pipeline. Returns the assistant's reply text (for last_output). */
 async function runPrompt(job, handle) {
-  // session: "new" (default) → a stable per-job key we RESET first (fresh context every run, one row per job,
-  // no leak). session: "<conversation_key>" → target that existing conversation (continues it).
-  const fresh = !job.session || job.session === 'new';
-  const key = fresh ? `schedule:${job.id}` : job.session;
+  // session: "new" (default) → schedule:<id>, reset each run. Only schedule:* keys are allowed (V37).
+  const key = schedules.promptConversationKey(job);
+  const fresh = key === `schedule:${job.id}`;
   if (fresh) { try { sessions.remove(key); } catch (_) {} }
   const envelope = {
     channel: SCHEDULER_SURFACE,
