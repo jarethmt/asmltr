@@ -113,12 +113,9 @@ function syncGemini(bin) {
 /** Grok: reconcile the registry into grok's MCP config via `grok mcp add` (best-effort; mirrors Gemini). */
 function syncGrok(bin) {
   if (!bin) return { ok: false, reason: 'grok not installed' };
-  let existing = '';
-  try { existing = execFileSync(bin, ['mcp', 'list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000 }); } catch (_) {}
   const done = [];
   for (const [name, v] of Object.entries(enabled())) {
     if (v.url) continue; // http/SSE add differs per grok version; stdio is the portable path
-    if (existing.includes(name)) continue;
     try {
       const envFlags = Object.entries(v.env || {}).flatMap(([k, val]) => ['-e', `${k}=${val}`]);
       execFileSync(bin, ['mcp', 'add', ...envFlags, name, '--', v.command, ...(v.args || [])], { stdio: 'ignore', timeout: 15000 });
