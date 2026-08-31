@@ -10,10 +10,12 @@
  * (auto-send full-trust / draft everyone else), but Discord/Telegram/etc. can enable it too.
  */
 
+const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
 const DB_PATH = require('./db-path').coreDbPath();
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL'); // exec, not pragma(): Node 24 GC of throwaway Statement ABRTs
 db.exec(`CREATE TABLE IF NOT EXISTS drafts (
@@ -69,7 +71,7 @@ function shouldHold(policy, resolved) {
   if (policy === 'auto_send_full_trust') return !(resolved && resolved.bypass_moderation);
   const m = /^trust_tier:(\d+)$/.exec(policy);
   if (m) return (Number(resolved && resolved.trust_tier) || 0) < Number(m[1]);
-  return false; // unknown policy → fail open to send (never silently swallow a reply)
+  return true; // unknown policy → fail closed (hold)
 }
 
 module.exports = { create, get, list, setStatus, pendingCount, shouldHold };
