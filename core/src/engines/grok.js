@@ -542,8 +542,8 @@ function buildArgs(opts) {
   args.push('--output-format', opts.complete ? 'plain' : 'streaming-json');
   args.push('--always-approve');
   const disallowed = [];
-  // Core flag: denyAll (policyFor deny.all / voice envelope) empties tools BEFORE spawn.
-  const denyAll = !!opts.denyAll || isDiscordVoice(opts);
+  // Core flag: denyAll (policyFor deny.all) empties tools BEFORE spawn. Voice is not deny-all.
+  const denyAll = !!opts.denyAll;
   if (denyAll) {
     // Empty allow-list = tools:[]. grok only keeps listed built-ins.
     args.push('--tools', '');
@@ -793,8 +793,7 @@ let _mcpSynced = false;
 
 async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent, conversationKey, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, denyTools, attachChannel, attachTarget, attachGuild, attachSender, images, mediaFiles, channel_context, voice }) {
   const voiceTurn = isDiscordVoice({ channel, conversationKey, channel_context, voice });
-  // Do not provision MCP servers on a spoken turn.
-  if (!_mcpSynced && !voiceTurn) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
+  if (!_mcpSynced) { _mcpSynced = true; try { require('../../../shared/mcp-registry').syncGrok(bin()); } catch (_) {} }
 
   const sessionId = (resume && isUuid(resume)) ? resume : crypto.randomUUID();
   // Do not consume ~/.asmltr/next-effort on email/mcp/voice — those channels force their effort.
@@ -802,7 +801,7 @@ async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortC
   const effortOpts = { prompt, cwd, nextEffort, effortPrompt, channel, senderId, owner, bypass_moderation, user_key, sender, conversationKey, channel_context, voice };
   const { denyToolsEnv } = require('../../../shared/media-allow');
   const deny = denyTools || {};
-  const denyAll = !!deny.all || voiceTurn;
+  const denyAll = !!deny.all;
   let classified = classifyEffort(effortOpts);
   const scored = scoringPrompt(effortOpts);
   let imageGen = false;

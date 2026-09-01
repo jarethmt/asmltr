@@ -72,13 +72,14 @@ test('classifyRaw is a separate helper; moderate() is unchanged', () => {
   assert.match(log, /image_gen tools still work/);
 });
 
-test('voice moderation skip: every voice turn skips nano; text still fail-closed', () => {
+test('voice is moderated like text: only bypass_moderation skips the network', () => {
   const { shouldSkipModerationNetwork } = require('../core/src/moderation');
   assert.equal(shouldSkipModerationNetwork({ bypass_moderation: true }, {}), true);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: true }), true);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'friend', is_default: false }, { voice: true }), true);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'default', is_default: true }, { voice: true }), true);
-  assert.equal(shouldSkipModerationNetwork({ user_key: 'untrusted-speaker', is_default: true }, { voice: true }), true);
+  assert.equal(shouldSkipModerationNetwork({ bypass_moderation: true }, { voice: true }), true);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: true }), false);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'friend', is_default: false }, { voice: true }), false);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'default', is_default: true }, { voice: true }), false);
+  assert.equal(shouldSkipModerationNetwork({ user_key: 'untrusted-speaker', is_default: true }, { voice: true }), false);
   assert.equal(shouldSkipModerationNetwork({ user_key: 'owner' }, { voice: false }), false);
   assert.equal(shouldSkipModerationNetwork({ user_key: 'default', is_default: true }, {}), false);
 });

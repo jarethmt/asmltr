@@ -11,11 +11,7 @@ function policyFile() {
   const env = String(process.env.ASMLTR_MEDIA_ALLOW_FILE || '').trim();
   if (env) return env;
   const home = path.join(os.homedir(), '.asmltr');
-  const neu = path.join(home, 'media-allow.json');
-  // Host disk name may still be this; not a public capability plane.
-  const old = path.join(home, 'tool-policy.json');
-  try { if (fs.existsSync(neu)) return neu; } catch (_) {}
-  return old;
+  return path.join(home, 'media-allow.json');
 }
 
 function loadAllowlist(file) {
@@ -170,8 +166,8 @@ function emptyDeny() {
 }
 
 function policyFor(envelope, resolved, allow) {
-  // Voice handleStream: hard deny every tool. Discord TEXT is unchanged.
-  if (isDiscordVoice(envelope)) return { deny: denyAllFlags(), restricted: true };
+  // Voice is a channel, not a security domain. Moderation + grants decide capability
+  // the same way they do for text (do not strip tools here).
   const deny = emptyDeny();
   if (!videoAuthorized(envelope, resolved, allow)) deny.video = true;
   if (!imageAuthorized(envelope, resolved, allow)) {

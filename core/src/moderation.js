@@ -267,13 +267,11 @@ async function logModerationEvent(event) {
 }
 
 /**
- * Voice turns skip gpt-5-nano entirely (latency + spoken lock).
- * Text: bypass_moderation still skips the network; everyone else is fail-closed.
+ * bypass_moderation skips the network; everyone else is fail-closed.
+ * Voice is not a skip — same check as text (latency is ASMLTR_MODERATION_REASONING_EFFORT).
  */
 function shouldSkipModerationNetwork(resolved, meta = {}) {
   if (resolved && resolved.bypass_moderation) return true;
-  // Spoken Discord turns skip gpt-5-nano (all speakers, not owner-only).
-  if (meta && (meta.voice === true || isDiscordVoice(meta))) return true;
   return false;
 }
 

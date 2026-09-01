@@ -195,7 +195,7 @@ test('public default is not channel-deny: bypass + public stays unrestricted', (
   });
 });
 
-test('voice handleStream denies all tools; discord text is unchanged', () => {
+test('voice is not a deny-all domain; grants match discord text for the same principal', () => {
   const { isDiscordVoice } = require('../shared/media-allow');
   const voiceEnv = {
     channel: 'discord',
@@ -207,11 +207,10 @@ test('voice handleStream denies all tools; discord text is unchanged', () => {
   assert.equal(isDiscordVoice(voiceEnv), true);
   assert.equal(isDiscordVoice({ channel: 'discord', conversation_key: 'discord:gaia:channel:7' }), false);
   const owner = policyFor(voiceEnv, { bypass_moderation: true, user_key: 'owner' });
-  assert.equal(owner.deny.all, true);
-  for (const k of ['shell', 'streams', 'send', 'silo', 'write', 'siloWrite', 'video', 'image', 'code', 'attach', 'uploads', 'guildPost']) {
-    assert.equal(owner.deny[k], true, k);
-  }
-  assert.equal(denyToolsEnv(owner.deny), 'shell,streams,send,silo,write,siloWrite,video,image,code,attach,uploads,guildPost');
+  assert.equal(owner.deny.all, undefined);
+  assert.equal(owner.restricted, false);
+  assert.equal(owner.deny.shell, false);
+  assert.equal(owner.deny.send, false);
 
   const text = policyFor({
     channel: 'discord', public: false,
