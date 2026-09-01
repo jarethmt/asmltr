@@ -33,6 +33,7 @@ const stt = require('../../../shared/speech/stt');
 const tts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const identity = require('../../../shared/identity'); // for /gw/theme (signature palette + agent name)
+const { extractDeviceToken, deviceAuthAllowed, resolveTurnKey } = require('./device-auth');
 
 const meta = {
   type: 'android',
@@ -77,10 +78,8 @@ async function start(ctx) {
   function keyEntry(token) { return loadKeys(keysFile).find((k) => k.key === token) || null; }
   // Resolve a device's caller identity from its token. Returns null when a token is required but invalid.
   function auth(token) {
-    if (!requireToken) { const e = token && keyEntry(token); return { identity: (e && e.identity) || 'android-anon', username: (e && e.username) || 'android' }; }
-    if (!token) return null;
-    const e = keyEntry(token);
-    return e ? { identity: e.identity, username: e.username || e.identity } : null;
+    const d = deviceAuthAllowed({ requireToken, token, lookup: keyEntry });
+    return d.ok ? { identity: d.identity, username: d.username } : null;
   }
   const convKey = (device) => `android:${ctx.instanceId}:device:${device}`;
   function pushSSE(device, obj) {
@@ -279,11 +278,17 @@ async function start(ctx) {
     if (!device) return res.status(400).json({ ok: false, error: 'device id required' });
     if (!text.trim()) return res.status(400).json({ ok: false, error: 'text required' });
     const name = String(b.name || who.username || 'android');
-    // Optionally DIRECT this turn at another session (the overlay session switcher): run on its
-    // conversation_key + channel so it continues THAT conversation; the reply still streams to this phone.
+    // Fail closed: target_key may only be this device's convKey or another key owned by this identity.
+    const ownKey = convKey(device);
+    const identityOwnKeys = new Set([ownKey]);
+    for (const [id, d] of devices) {
+      if (d.identity && who && d.identity === who.identity) identityOwnKeys.add(convKey(id));
+    }
     const targetKey = String(b.target_key || '').trim();
+    const decided = resolveTurnKey({ targetKey, ownConvKey: ownKey, identityOwnKeys });
+    if (!decided.ok) return res.status(decided.status).json({ ok: false, error: decided.error });
     const targetSurface = String(b.target_surface || '').trim();
-    const convo = targetKey || convKey(device);
+    const convo = decided.conversationKey;
     const channel = targetKey ? (targetSurface || (convo.includes(':') ? convo.split(':')[0] : 'core')) : 'android';
 
     // Surface MUST be 'assistant-native' — 'android' isn't a valid event surface, so it'd be dropped and
@@ -362,6 +367,7 @@ async function start(ctx) {
   }
   app.post('/gw/rpc', (req, res) => {
     const b = req.body || {};
+    if (requireToken && !auth(extractDeviceToken(req))) return res.status(401).json({ ok: false, error: 'invalid device token' });
     const tgt = pickTarget(b.device ? String(b.device).trim() : '');
     if (!tgt) return res.status(404).json({ ok: false, error: 'no connected device' });
     const tool = String(b.tool || '').trim();
@@ -398,6 +404,7 @@ async function start(ctx) {
   // to read the text ALOUD without running a turn. A '*' / empty target broadcasts to every connected
   // device — and to the background control link too, so read-aloud works even when the overlay is closed.
   app.post('/out', (req, res) => {
+    if (requireToken && !auth(extractDeviceToken(req))) return res.status(401).json({ ok: false, error: 'invalid device token' });
     const { target, text, kind, title, require_headphones, path: filePath, caption, host_id, control } = req.body || {};
     const device = String(target || '').trim();
     // kind:'file' → register the file + push a `media` frame the app renders inline / downloads via /gw/file.

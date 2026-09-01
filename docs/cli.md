@@ -10,6 +10,8 @@ set of one-shot subcommands.
 
 ```
 asmltr                 live TUI dashboard
+asmltr ask "<text>"    one local turn with the default engine (gaia: grok)
+asmltr chat            local readline REPL over the same session (resume UUID)
 asmltr ls              list active sessions
 asmltr map             active sessions grouped by working dir (collision radar)
 asmltr who <path>      which sessions recently touched a file/dir
@@ -19,6 +21,8 @@ asmltr tail            live global event stream
 asmltr watch <key>     live stream for one session
 asmltr system          current system metrics
 asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
+asmltr send discord <id-or-name> "<text>"  same Discord server (trusted role / resolve allow)
+asmltr guild-post <id-or-name> "<text>"  alias of same-guild send
 asmltr announce "<text>" [--to T]    post a cross-session announcement
 asmltr announcements                 list live announcements
 asmltr attach <key>    claim a channel session + resume it in tmux
@@ -29,12 +33,13 @@ asmltr diff <id>       git diff of a session's worktree
 asmltr claude [args]   launch a monitored session on the Claude engine
 asmltr gemini [args]   … on the Gemini engine
 asmltr codex  [args]   … on the Codex engine
+asmltr grok   [args]   … on the Grok engine
 asmltr version         installed + per-service versions; whether an update is available
 asmltr update          pull + install the latest & restart (verifies; auto-rolls-back)
 ```
 
 !!! tip "Reasoning engines"
-    `asmltr claude|gemini|codex` each launch a wrapped, monitored, takeover-able session on that
+    `asmltr claude|gemini|codex|grok` each launch a wrapped, monitored, takeover-able session on that
     [reasoning engine](REASONING-ENGINES.md) (whichever CLI harnesses are installed). The `<agent-name>`
     command points at the **default** engine, chosen in Settings → Engines. `asmltr silo`, `asmltr backup`,
     and `asmltr vault` round out the toolbelt.
@@ -46,7 +51,7 @@ asmltr update          pull + install the latest & restart (verifies; auto-rolls
     | Service | Default | Used by |
     |---|---|---|
     | collector | `http://127.0.0.1:3017` | reads (`ls`, `brief`, `events`, `tail`, `watch`, `system`, `map`, `who`) + control (`kill`, `stop`, `diff`) |
-    | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` |
+    | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` + `ask` / `chat` |
     | connector manager | `http://127.0.0.1:3024` | `send` (outbound to any channel) |
 
 ---
@@ -192,6 +197,23 @@ asmltr send <channel> <target> --file <path> [--caption "<text>"]
 
 Posts to the connector manager's `/send`; prints `✓ sent …` with the delivery route
 on success, or the error on failure.
+
+Public Discord denies cross-system `asmltr send` (email / other servers). Same-server
+posting is still `asmltr send discord <id-or-name>` (trusted role or resolve allow).
+`asmltr guild-post` is an alias.
+
+### Same-guild `asmltr send discord`
+
+Post in **this** Discord server only. A **name** looks up and does not post — confirm,
+then call again with the id. Normal channels post in the channel (not a thread). Forum:
+thread id comments; forum channel id starts a new post (`--title`). Never the same
+channel they asked from. Muted destinations still accept the post. Prefixed
+`Posting on behalf of <@asker>`. After a real post the ask channel gets `Post complete.`
+
+```
+asmltr send discord <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>]
+asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>]
+```
 
 ### `asmltr announce`
 

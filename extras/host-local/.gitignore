@@ -1,0 +1,9 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+token.json
+.client.json
+.device-pending.json
+contacts.json
+aliases.json

@@ -86,7 +86,8 @@ function main() {
   const selfAware = process.env.ASMLTR_SELF_AWARE !== 'off';
   const TOOLBELT = '## ASMLTR TOOLBELT\nRun `asmltr help` for cross-session tools: `asmltr ls` (other active ' +
     'sessions — avoid duplicating their work), `asmltr send <channel> <target> "<text>"` (route output to ' +
-    'another channel), `asmltr announce "<text>"` / `asmltr announcements` (awareness notes across sessions).';
+    'another channel), `asmltr announce "<text>"` / `asmltr announcements` (awareness notes across sessions), ' +
+    '`asmltr bounce` (restart last — never inline from a live turn).';
   const appended = selfAware ? require('../shared/identity').assemble({ cwd, extra: TOOLBELT }) : '';
   const claudeArgs = [...permArgs, ...(appended ? ['--append-system-prompt', appended] : []), ...args];
   const ok = M.spawnDetached(name, cwd, ['bash', '-c', guard, claudeBin, ...claudeArgs]);

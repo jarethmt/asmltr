@@ -9,6 +9,27 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 ## [Unreleased]
 
 ### Added
+- **Email `--new-thread`.** Blank new letter: no last-inbound quote, no `In-Reply-To`/`References`, no reply-all merge. `--no-reply-all` still only drops extra recipients and still quotes this thread. Sidebar (other customers / personal / internal SKUs) and customer mail after a tainted chain use `--new-thread` so Gmail does not staple that history. Clean human reply-all is unchanged. 31 Aug 2026.
+
+### Changed
+- **Email signature image.** After `AI Assistant to …`, two blank lines, then a markdown image, then the Example Co pitch with no extra blank. HTML is 96×96, block, flush above the pitch. `cid:assistant-sig` is mailed inline (`signature_image` path); https images still render. javascript: image URLs are dropped. Inbound quote sanitizer still strips quoted `cid:` so we do not replay someone else's inline parts.
+- **Same-guild Discord post is `asmltr send`.** Confirm-first name lookup, on-behalf-of preface, and fuzzy channel match stay. Capability is trusted role or `resolve()` allow (`guild-post` / `send` / `*`). `asmltr guild-post` is a CLI alias of send. Discord/Telegram `/out` and manager `/send` use public attach-stage. Host path deny-list is overlay `hostGate` on manager `/send` and Discord `/out`.
+- **Stop actually halts send/voice/stream/inject.** Those paths register a processing abort target. Starter may abort their turn (not owner-only). SDK `/v2/abort` can pass speaker/starter/owner so a host overlay can fail-closed.
+
+### Removed
+- **extras/host-local Rolodex MCP.** Contacts are gworkspace People API. `register.sh` no longer adds Rolodex or a rolodex sync timer. Host dumps under `~/rolodex` / `~/.asmltr/rolodex-cache/` are left on disk.
+
+### Fixed
+- **Email: reply-all drops automated senders.** `noreply` / `no-reply` / `alerts@` / `notifications@` are not people on the chain (26 Aug 2026). Real vendor employees stay. Staff outreach from an automated-alert turn still uses `--no-reply-all`.
+- **Email: do not owner-forward thread participants as strangers.** A From that is already on the chain (In-Reply-To/References + we are To/Cc), stored on the persisted thread, or present in the optional Rolodex/contacts file creates a turn. Cold mail from an address we have never seen still forwards to `owner_forward_to`.
+- **Email: no auto-reply of session text.** The connector no longer SMTPs the assistant `reply` action. Letters go out only via `asmltr send` / `/out` (in context: spoken to, or told to do something). CC-only chains are listen-unless-asked. `owner_forward_to` is still a visible Cc when To is someone else. No 30-minute duplicate timer.
+- **Email: chain reply-all.** `/out` with a thread `ref` keeps everyone on inbound From/To/Cc (minus the mailbox). `--drop` / `--no-reply-all` only if asked to omit someone. `asmltr send email` from an email turn passes the conversation `ref`.
+- **Email signature pitch** (Gaia): extra blank before the name; name and `AI Assistant to …` on adjacent lines; two blanks; then `[Example Co](https://example.com) can build an AI assistant like this for your team.` HTML keeps consecutive blank source lines (`&nbsp;` paragraphs) so Gmail does not collapse `\n\n\n` to one gap.
+
+### Added
+- **Example configs for gaia exceptions (no PII):** `shared/media-allow.example.json`; Access-card `friend` (`default_tier` 3) in `seed.example.json` / `seed.gaia.example.json`; `ASMLTR_IMAGE_GEN_CLASSIFY` + `ASMLTR_MEDIA_ALLOW_FILE` in `.env.example` / `env.gaia.example`.
+- **`asmltr guild-post` name lookup** also indexes threads on regular text/announcement channels (not only forums) and media channels.
+- **`asmltr bounce`:** queue a core+manager+collector restart until the current turn ends (then a short delay so Discord/email can post the reply). Inline `systemctl`/`pm2` restarts of the asmltr stack from a live turn are rewritten to the same queue. `--now` is refused inside a turn.
 
 - **Chunked file uploads.** `POST /v2/upload/init`, `PUT /v2/upload/:id/:index` (raw
   `application/octet-stream`), `GET /v2/upload/:id`, `POST /v2/upload/:id/finish`, and
@@ -94,24 +115,14 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   keeping the pin meant nothing ever exercised 24.19 — the version the host will eventually run, which
   is the exposure the N-API move was for. CI now resolves `24` again.
 
-- **A stop is no longer silently dropped when it lands during moderation.** A turn only became
-  abortable at `inFlight.set(...)`, which sits *after* `moderation.moderate()` — a network call to
-  another model that takes seconds for any sender who isn't `bypass_moderation`. A stop arriving in
-  that window got `404 no in-flight turn for that conversation`, the connector answered "Couldn't stop
-  the current turn", and the turn then ran to completion anyway. Observed live: message in at
-  16:02:00, stop at 16:02:05, moderation decision at 16:02:08. Turns are now registered in
-  `dispatch()` *before* the key lock, so they are abortable from the moment they're accepted, and the
-  turn checks for an abort after moderation rather than starting the engine on work a human already
-  killed. Because registration now precedes the key lock, `inFlight` holds a Set per conversation and
-  `/v2/abort` stops the running turn **and everything queued behind it** on that key — stopping a
-  conversation stops the conversation. Background maintenance timers are `unref`'d so the core can be
-  required in a test without pinning the process.
-
 ### Added
 
 ### Changed
 
 ### Fixed
+- **Discord "email me that" no longer sits on Working and sends twice.** After a mid-turn context cut the origin session distrusted the compaction summary, grepped for proof, and SMTP'd the same reminder again. `asmltr send` now refuses the same email To+subject for 30 minutes (`--force` only if they said it never arrived). Toolbelt: send, confirm here, end the turn — do not wait on another session.
+- **Moderation no longer spends 2–3.5s reasoning on every inbound.** Default classifier `gpt-5-nano` is a reasoning model; the OpenAI call now sets `reasoning_effort: 'minimal'` on gpt-5-family models only (override `ASMLTR_MODERATION_REASONING_EFFORT`; empty/`off`/`none` disables). Decision logs include `duration_ms`. A model that rejects the field is retried without it.
+- **Discord "Working" lock after a mid-turn bounce.** Still-working heartbeat is always cleared in `finally`, even when `/v2/stream` errors because core died.
 - **Voice speaker identity (#148).** In a multi-person voice call Eve addressed everyone as one person and applied the wrong trust tier, because the voice path passed the speaker's display name as `sender.raw_id` (matches no identity mapping → resolved `default`/tier 0). The speaker's immutable Discord user ID now rides through to `sender.raw_id` (same key the text path uses), so each turn resolves the correct principal + trust — the person who said her name. Verified: user ID → the real principal (tier 1); display name → default (tier 0).
 - **"Eve, stop" now actually halts an in-flight realtime reply (#149).** Stop/barge-in fired and aborted, but the reply still spoke ~10s later when the LLM turn finished after the abort. `speak()` now requires a live speech session, and a per-guild reply generation (bumped on stop) makes the in-flight reply bail before synthesizing/speaking/posting even if generation completes after the abort.
 

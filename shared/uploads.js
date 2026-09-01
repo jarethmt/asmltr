@@ -142,6 +142,7 @@ function readManifest() {
 function list(o = {}) {
   let items = readManifest();
   if (o.channel) items = items.filter((r) => r.channel === o.channel);
+  if (o.conversationKey) items = items.filter((r) => r.conversation_key === o.conversationKey);
   if (o.sinceMs) items = items.filter((r) => r.ts >= o.sinceMs);
   if (o.sender) { const s = o.sender.toLowerCase(); items = items.filter((r) => `${r.sender || ''} ${r.sender_id || ''}`.toLowerCase().includes(s)); }
   if (o.query) { const q = o.query.toLowerCase(); items = items.filter((r) => `${r.filename} ${r.caption || ''} ${r.channel}`.toLowerCase().includes(q)); }
@@ -152,8 +153,12 @@ function list(o = {}) {
 function get(id) { return readManifest().find((r) => r.id === id) || null; }
 
 /** Compact newest-first summary for injecting into a session's context. */
-function recentSummary(n = 8) {
-  const items = list({ limit: n });
+function recentSummary(n = 8, o = {}) {
+  const items = list({
+    limit: n,
+    conversationKey: o.conversationKey || undefined,
+    channel: o.channel || undefined,
+  });
   if (!items.length) return '';
   return items.map((r) => {
     const when = r.iso.replace('T', ' ').slice(0, 16) + ' UTC';

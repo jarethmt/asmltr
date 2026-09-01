@@ -96,13 +96,28 @@ remote destination too.
 
 | Setting | Meaning |
 |---------|---------|
-| **Every (hours)** | how often a snapshot is taken |
+| **Hour / minute** | local clock (optional `timezone`, e.g. `America/New_York`). Due when local time is past that clock **today** and `last_run` is before today's clock. Not a rolling catch-up 15s after boot. |
+| **Every (hours)** | fallback interval **only when hour/minute are unset** |
 | **Destination** | local, or a storage integration (off-box) |
 | **Max stored** | keep only the newest N (`0` = unlimited) |
 | **Max age (days)** | drop anything older than this (`0` = no age limit) |
 
-The scheduler runs **in-process in the core** (checked every ~10 min; persisted in
-`~/.asmltr/backup-schedule.json`). It needs a passphrase available to the core process
+The scheduler **ticks in-process in the core** (~10 min; persisted in
+`~/.asmltr/backup-schedule.json`). Snapshots still run **out of process**: dashboard
+POST `/v2/backups` and `runScheduled` spawn `node scripts/backup.js create` with `ASMLTR_BACKUP_CHILD=1`
+so sqlite backup work stays in a child isolate (child inherits env; do not log it). Direct CLI
+`node scripts/backup.js create` keeps the sqlite online-backup path.
+
+The older rationale — "must not open a second better-sqlite3 `Database` in the core process or
+Node 24 ABRTs (`Database::~Database` → `RemoveEnvironmentCleanupHook`)" — is **historical**.
+[#120](https://github.com/jarethmt/asmltr/issues/120) shipped better-sqlite3 v13 (N-API); that abort
+cannot fire on current Node. Keep the child-process design (isolation, a long backup must not stall
+the core event loop); do not treat the ABRT as a current constraint.
+
+If a Grok CLI child (`~/.grok/bin/grok`) is running, a due **scheduled** backup is skipped without
+bumping `last_run` so later ticks retry. Manual dashboard create still runs.
+
+It needs a passphrase available to the core process
 (`ASMLTR_BACKUP_PASSPHRASE`, or the vault password) — without one, a due backup is logged and skipped
 rather than failing. Retention runs after each scheduled snapshot, on both local and the remote destination.
 

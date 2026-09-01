@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "corona": {
+      "type": "stdio",
+      "command": "/path/to/asmltr/extras/host-local/corona/run.sh",
+      "args": [],
+      "env": {
+        "CORONA_URL": "http://127.0.0.1:12701"
+      }
+    },
+    "onenote": {
+      "type": "stdio",
+      "command": "/path/to/asmltr/extras/host-local/onenote/run.sh",
+      "args": [],
+      "env": {}
+    }
+  }
+}

@@ -21,7 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 const HOME = os.homedir();
@@ -34,9 +34,23 @@ const UPLOAD_STAGING = (() => {
   try { return require('../shared/uploads').stagingDir(); } catch (_) { return null; }
 })();
 
+const CHROME_LOCK_NAMES = new Set(['SingletonCookie', 'SingletonLock', 'SingletonSocket']);
+
 /** True when `p` is a path we deliberately keep out of the home-store snapshot. */
 function excludedFromHome(p) {
-  return [BACKUP_DIR, UPLOAD_STAGING].some((dir) => dir && (p === dir || p.startsWith(dir + path.sep)));
+  if ([BACKUP_DIR, UPLOAD_STAGING].some((dir) => dir && (p === dir || p.startsWith(dir + path.sep)))) return true;
+  const base = path.basename(p);
+  if (CHROME_LOCK_NAMES.has(base)) return true;
+  try {
+    const st = fs.lstatSync(p);
+    if (st.isSocket() || st.isFIFO()) return true;
+    if (st.isSymbolicLink()) {
+      try { fs.statSync(p); } catch (_) { return true; }
+    }
+  } catch (_) {
+    /* missing path is not an exclude rule — cpSync just will not copy it */
+  }
+  return false;
 }
 const SCHEDULE_FILE = process.env.ASMLTR_BACKUP_SCHEDULE_FILE || path.join(ASMLTR, 'backup-schedule.json');
 const REMOTE_PREFIX = 'asmltr-backups'; // subfolder within a destination integration's root
@@ -167,8 +181,103 @@ function resolvePassphrase(opts = {}) {
   return String(p);
 }
 
+// ── out-of-process create (core must never open a second sqlite handle) ───────
+// Node 24 + better-sqlite3: Database::~Database → RemoveEnvironmentCleanupHook
+// asserts env != nullptr and ABRTs the core (and whatever grok it was hosting).
+const BACKUP_CHILD_ENV = 'ASMLTR_BACKUP_CHILD';
+
+function grokChildRunning() {
+  // Character-class pattern so pgrep does not match its own argv.
+  const r = spawnSync('pgrep', ['-f', '[.]grok/bin/grok'], { encoding: 'utf8' });
+  return r.status === 0 && !!(r.stdout && r.stdout.trim());
+}
+
+function tzParts(ms, timeZone) {
+  const opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' };
+  if (timeZone) opts.timeZone = timeZone;
+  const map = {};
+  for (const p of new Intl.DateTimeFormat('en-US', opts).formatToParts(new Date(ms))) {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  }
+  return { year: +map.year, month: +map.month, day: +map.day, hour: +map.hour, minute: +map.minute, second: +map.second };
+}
+
+function zonedWallMs(year, month, day, hour, minute, timeZone) {
+  if (!timeZone) return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+  let t = Date.UTC(year, month - 1, day, hour, minute, 0);
+  for (let i = 0; i < 4; i++) {
+    const p = tzParts(t, timeZone);
+    const got = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    const want = Date.UTC(year, month - 1, day, hour, minute, 0);
+    const delta = want - got;
+    if (!delta) break;
+    t += delta;
+  }
+  return t;
+}
+
+function clockFieldsSet(s) {
+  return s && s.hour != null && s.hour !== '' && s.minute != null && s.minute !== '';
+}
+
+/** Due at local hour:minute (optional timezone) when last_run is before today's clock. every_hours is fallback only. */
+function scheduleDue(s, nowMs = Date.now()) {
+  if (!clockFieldsSet(s)) return nowMs - (s.last_run || 0) >= (s.every_hours || 24) * 3600 * 1000;
+  const h = Number(s.hour), m = Number(s.minute);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return nowMs - (s.last_run || 0) >= (s.every_hours || 24) * 3600 * 1000;
+  const tz = s.timezone || undefined;
+  const p = tzParts(nowMs, tz);
+  const todayAt = zonedWallMs(p.year, p.month, p.day, h, m, tz);
+  if (nowMs < todayAt) return false;
+  if ((s.last_run || 0) >= todayAt) return false;
+  return true;
+}
+
+function parseChildCreateStdout(stdout) {
+  const lines = String(stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith('{')) continue;
+    try { const o = JSON.parse(lines[i]); if (o && o.file) return o; } catch (_) {}
+  }
+  throw new Error('backup child produced no JSON result');
+}
+
+function spawnCreateBackupChild(opts = {}) {
+  const args = [path.join(__dirname, 'backup.js'), 'create'];
+  if (opts.label) args.push('--label', String(opts.label));
+  if (opts.out) args.push('--out', String(opts.out));
+  if (opts.destination) args.push('--destination', String(opts.destination));
+  const env = { ...process.env, [BACKUP_CHILD_ENV]: '1' };
+  if (opts.passphrase) env.ASMLTR_BACKUP_PASSPHRASE = String(opts.passphrase);
+  const log = opts.log || (() => {});
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const combined = (stdout + '\n' + stderr).split(/\r?\n/);
+      for (const line of combined) {
+        const s = line.trim();
+        if (!s) continue;
+        if (s.startsWith('{')) continue;
+        if (/passphrase|ASMLTR_BACKUP_PASSPHRASE|TRUST_PROTOCOL_VAULT_PASSWORD|token|secret/i.test(s)) continue;
+        log(s);
+      }
+      if (code !== 0) {
+        const errLine = stderr.trim().split(/\r?\n/).filter(Boolean).pop() || ('exit ' + code);
+        return reject(new Error(errLine.replace(/passphrase[^\s]*/ig, 'passphrase<redacted>')));
+      }
+      try { resolve(parseChildCreateStdout(stdout)); } catch (e) { reject(e); }
+    });
+  });
+}
+
 // ── create ───────────────────────────────────────────────────────────────────
 async function createBackup(opts = {}) {
+  // Required from core (or any other module): sqlite in a child isolate. CLI main keeps the in-process path.
+  if (!process.env[BACKUP_CHILD_ENV] && require.main !== module) return spawnCreateBackupChild(opts);
   const passphrase = resolvePassphrase(opts);
   const label = (opts.label || 'manual').replace(/[^a-z0-9_-]/gi, '');
   ensureDir(BACKUP_DIR);
@@ -178,6 +287,7 @@ async function createBackup(opts = {}) {
     const manifest = { format: 1, tool: 'asmltr backup', version: readVersion(), label, created_at: Date.now(), host: os.hostname(), components: {}, checksums: {} };
 
     // 1) SQLite — consistent online-backup snapshots. better-sqlite3 lives in a workspace, not repo root.
+    // CLI / ASMLTR_BACKUP_CHILD only — core must never reach new Database() in this isolate.
     ensureDir(path.join(stage, 'db'));
     const Database = requireBetterSqlite();
     for (const d of SQLITE_DBS) {
@@ -206,11 +316,19 @@ async function createBackup(opts = {}) {
       const dest = path.join(stage, 'home');
       fs.cpSync(ASMLTR, dest, { recursive: true, filter: (s) => !excludedFromHome(s) });
       let files = 0, bytes = 0;
-      const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { files++; bytes += fs.statSync(p).size; } } };
+      const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { try { bytes += fs.lstatSync(p).size; files++; } catch (_) {} } } };
       walk(dest);
       manifest.components['home'] = { present: true, files, bytes };
       log(`home: ${files} files (${bytes} bytes)`);
     } else { manifest.components['home'] = { present: false }; }
+
+    const grokSkills = path.join(HOME, '.grok', 'skills');
+    if (fs.existsSync(grokSkills)) {
+      const dest = path.join(stage, 'grok-skills');
+      fs.cpSync(grokSkills, dest, { recursive: true });
+      manifest.components['grok-skills'] = { present: true };
+      log('grok-skills: copied');
+    } else { manifest.components['grok-skills'] = { present: false }; }
 
     fs.writeFileSync(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
@@ -347,7 +465,7 @@ async function pruneBackups({ maxCount = 0, maxAgeDays = 0, destination = 'local
 }
 
 // ── schedule config + scheduler ────────────────────────────────────────────────
-const SCHEDULE_DEFAULT = { enabled: false, every_hours: 24, destination: 'local', max_count: 14, max_age_days: 0, last_run: 0 };
+const SCHEDULE_DEFAULT = { enabled: false, every_hours: 24, destination: 'local', max_count: 14, max_age_days: 0, last_run: 0, hour: null, minute: null, timezone: null };
 function getSchedule() { try { return { ...SCHEDULE_DEFAULT, ...JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf8')) }; } catch (_) { return { ...SCHEDULE_DEFAULT }; } }
 function setSchedule(patch) { const s = { ...getSchedule(), ...patch }; ensureDir(path.dirname(SCHEDULE_FILE)); fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(s, null, 2)); return s; }
 
@@ -368,7 +486,8 @@ function startScheduler({ log = () => {}, intervalMs = 10 * 60 * 1000 } = {}) {
     try {
       const s = getSchedule();
       if (!s.enabled) return;
-      if (Date.now() - (s.last_run || 0) < (s.every_hours || 24) * 3600000) return;
+      if (!scheduleDue(s)) return;
+      if (grokChildRunning()) return void log('scheduled backup due but skipped — grok child running');
       if (!(process.env.ASMLTR_BACKUP_PASSPHRASE || process.env.TRUST_PROTOCOL_VAULT_PASSWORD)) return void log('scheduled backup due but skipped — no passphrase (set ASMLTR_BACKUP_PASSPHRASE)');
       log('running scheduled backup…');
       const r = await runScheduled({ log });
@@ -376,7 +495,7 @@ function startScheduler({ log = () => {}, intervalMs = 10 * 60 * 1000 } = {}) {
     } catch (e) { log('scheduled backup error: ' + e.message); }
   };
   const t = setInterval(tick, intervalMs); if (t.unref) t.unref();
-  const boot = setTimeout(tick, 15000); if (boot.unref) boot.unref(); // first check shortly after boot
+  const boot = setTimeout(tick, 15000); if (boot.unref) boot.unref(); // first check shortly after boot (clock/due logic; not a 24h catch-up)
   return t;
 }
 
@@ -390,11 +509,11 @@ if (require.main === module) {
   const log = (m) => console.log(m);
   (async () => {
     try {
-      if (cmd === 'create') { const r = await createBackup({ label: flags.label, passphrase: flags.passphrase, out: flags.out, log }); console.log(JSON.stringify({ file: r.file, bytes: r.bytes }, null, 2)); }
+      if (cmd === 'create') { const r = await createBackup({ label: flags.label, passphrase: flags.passphrase, out: flags.out, destination: flags.destination, log }); console.log(JSON.stringify({ file: r.file, bytes: r.bytes, remote: r.remote || null, manifest: r.manifest })); }
       else if (cmd === 'list') { for (const b of listBackups()) console.log(`${b.name}\t${(b.bytes / 1048576).toFixed(2)} MB`); }
       else if (cmd === 'verify') { const r = await verifyBackup(pos[0], { passphrase: flags.passphrase, log }); console.log(r.ok ? `OK — ${r.manifest.version}/${r.manifest.label} @ ${new Date(r.manifest.created_at).toISOString()} (${r.checked} artifacts verified)` : `INTEGRITY FAILED — ${r.mismatches.map((m) => m.file).join(', ')}`); if (!r.ok) process.exit(1); }
       else if (cmd === 'restore') { await restoreBackup(pos[0], { passphrase: flags.passphrase, dryRun: flags['dry-run'], activate: flags.activate, force: flags.force, log }); }
-      else { console.log('usage: node scripts/backup.js <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--out path]'); process.exit(cmd ? 1 : 0); }
+      else { console.log('usage: node scripts/backup.js <create|list|verify|restore> [file] [--label x] [--passphrase x] [--destination x] [--dry-run] [--out path]'); process.exit(cmd ? 1 : 0); }
     } catch (e) { console.error('backup error: ' + e.message); process.exit(1); }
   })();
 }

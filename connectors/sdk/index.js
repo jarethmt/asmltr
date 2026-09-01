@@ -117,6 +117,7 @@ function makeCoreClient(coreUrl) {
               else if (obj.type === 'tool') { if (h.onTool && obj.name) { try { h.onTool(obj.name); } catch (_) {} } if (h.onToolCall) { try { h.onToolCall(obj); } catch (_) {} } }
               else if (obj.type === 'tool_result') { if (h.onToolResult) { try { h.onToolResult(obj); } catch (_) {} } }
               else if (obj.type === 'thinking') { if (h.onThinking && obj.text) { try { h.onThinking(obj.text); } catch (_) {} } }
+              else if (obj.type === 'effort') { if (h.onEffort && obj.effort) { try { h.onEffort(obj.effort, obj); } catch (_) {} } }
               else if (obj.type === 'subagent') { if (h.onSubagent && obj.id) { try { h.onSubagent(obj); } catch (_) {} } }
               else if (obj.type === 'done') { settled = true; resolve(obj.actions || []); }
               else if (obj.type === 'error') { settled = true; reject(new Error(obj.error || 'stream error')); }
@@ -198,8 +199,33 @@ function makeCoreClient(coreUrl) {
         req.on('error', reject); guard(req); req.write(payload); req.end();
       });
     },
+    _get(path) {
+      return new Promise((resolve, reject) => {
+        const req = lib.request({
+          hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path, method: 'GET',
+          headers: { Accept: 'application/json' },
+        }, (res) => {
+          let data = ''; res.setEncoding('utf8'); res.on('data', (c) => { data += c; });
+          res.on('end', () => { let j = {}; try { j = data ? JSON.parse(data) : {}; } catch (_) {}
+            if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(j.error || `core ${res.statusCode}`));
+            resolve(j); });
+        });
+        req.on('error', reject); guard(req); req.end();
+      });
+    },
+    // Access principals for public-surface sanitizer hints (ids / names / mailboxes). Fail-open at caller.
+    trustPrincipals() { return this._get('/trust/principals').then((j) => j.principals || []); },
     // Abort the in-flight turn for a conversation (the session survives + is resumable).
-    abort(conversationKey) { return this._post('/v2/abort', { conversation_key: conversationKey }); },
+    abort(conversationKey, ids) {
+      const body = { conversation_key: conversationKey };
+      if (ids && typeof ids === 'object') {
+        if (ids.speakerId) body.speakerId = ids.speakerId;
+        if (ids.authorId) body.authorId = ids.authorId;
+        if (ids.starterId) body.starterId = ids.starterId;
+        if (ids.ownerId) body.ownerId = ids.ownerId;
+      }
+      return this._post('/v2/abort', body);
+    },
     // Inject text into a running/next turn as steering guidance. interrupt:true aborts+redirects;
     // interrupt:false (default) queues behind the current turn and continues it with the guidance folded in.
     inject(conversationKey, text, opts = {}) { return this._post('/v2/inject', { conversation_key: conversationKey, text, by: opts.by || 'operator', interrupt: !!opts.interrupt }); },

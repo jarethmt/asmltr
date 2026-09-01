@@ -93,6 +93,7 @@ nav:
     - Android (device gateway): connectors/android.md
     - Device (generic gateway): connectors/device.md
     - CLI sessions: connectors/cli.md
+    - Email: connectors/email.md
   - Integrations:
     - Integrations & storage: integrations/index.md
     - Data silos & the Self silo: silos.md
