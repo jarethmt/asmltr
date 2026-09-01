@@ -103,11 +103,16 @@ remote destination too.
 | **Max age (days)** | drop anything older than this (`0` = no age limit) |
 
 The scheduler **ticks in-process in the core** (~10 min; persisted in
-`~/.asmltr/backup-schedule.json`) but **must not open a second better-sqlite3 `Database` in the core
-process** — that ABRTs Node 24 (`Database::~Database` → `RemoveEnvironmentCleanupHook`). Dashboard
+`~/.asmltr/backup-schedule.json`). Snapshots still run **out of process**: dashboard
 POST `/v2/backups` and `runScheduled` spawn `node scripts/backup.js create` with `ASMLTR_BACKUP_CHILD=1`
-so sqlite runs in another isolate (child inherits env; do not log it). Direct CLI
+so sqlite backup work stays in a child isolate (child inherits env; do not log it). Direct CLI
 `node scripts/backup.js create` keeps the sqlite online-backup path.
+
+The older rationale — "must not open a second better-sqlite3 `Database` in the core process or
+Node 24 ABRTs (`Database::~Database` → `RemoveEnvironmentCleanupHook`)" — is **historical**.
+[#120](https://github.com/jarethmt/asmltr/issues/120) shipped better-sqlite3 v13 (N-API); that abort
+cannot fire on current Node. Keep the child-process design (isolation, a long backup must not stall
+the core event loop); do not treat the ABRT as a current constraint.
 
 If a Grok CLI child (`~/.grok/bin/grok`) is running, a due **scheduled** backup is skipped without
 bumping `last_run` so later ticks retry. Manual dashboard create still runs.

@@ -48,10 +48,11 @@ Resolution rules (from `deliver()` in `connectors/manager/server.js`):
     (surfaced to the agent as `supports_attachments_out`). Text sends work on any
     outbound-capable connector.
 
-!!! warning "Public Discord denies `asmltr send`"
-    Even the owner cannot `asmltr send` from a public Discord channel (no email, no Telegram, no
-    other Discord servers). Same-server posting is `asmltr send discord` (trusted role or
-    resolve allow). See [Discord → Same-guild post](../connectors/discord.md#same-guild-post-asmltr-send-discord).
+!!! note "Public product: owner can `asmltr send`"
+    In this tree `isRestricted()` is false, so `policyFor` does not set `deny.send`. The owner
+    (and anyone whose grants allow send) can `asmltr send` from a public Discord channel.
+    Same-server posting is still `asmltr send discord` (trusted role or `resolve()` allow).
+    Host overlays may wrap send; that is not this code. See [Discord → Same-guild post](../connectors/discord.md#same-guild-post-asmltr-send-discord).
 
 ## The agent verb: `asmltr send`
 
