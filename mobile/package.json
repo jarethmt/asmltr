@@ -1,8 +1,8 @@
 {
   "name": "asmltr-mobile",
-  "version": "0.8.25",
+  "version": "0.8.26",
   "private": true,
-  "description": "asmltr mobile assistant — Capacitor shell over the voice web brain + a native assist trigger",
+  "description": "asmltr mobile assistant \u2014 Capacitor shell over the voice web brain + a native assist trigger",
   "scripts": {
     "sync": "cap sync android",
     "add:android": "cap add android",

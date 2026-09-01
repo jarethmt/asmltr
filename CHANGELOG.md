@@ -10,6 +10,38 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Integrations are now the home for outward-facing capability**, defined as an *optional,
+  per-install capability the agent reaches outward to use* — see
+  [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md). Plugin types load from two trees under one contract:
+  `connectors/types` (role `channel` — the world reaches in to converse) and `integrations/types`
+  (role `service`). Integrations gained `kind` (storage · tools · transport) and `lifecycle`
+  (passive · supervised); conflating those two axes is what previously forced a screen-sharing broker
+  to masquerade as a chat connector to get supervised.
+- **Remote desktop moved out of `connectors/types`** and dropped the `outbound: { kinds: [] }`
+  opt-out it only carried to escape the wrong category. The manager now excludes services from send
+  targets by role rather than by that opt-out.
+- **A remote desktop viewer in the web console.** Fleet gains View / Control per machine and **Watch**
+  on any live session — including one the agent opened, since every session is recorded against the
+  principal that opened it and `self` is just another principal. The host serves each viewer its own
+  peer connection, so watching never interrupts whoever is driving.
+- **SSH as a transport integration**, with watchable shells: one PTY, many observers. A shell the
+  agent opens is broadcast to every subscriber with bounded scrollback, so an operator can watch the
+  work live from the web console. Opening requires the `shell` grant, watching requires `view`,
+  resolved by the same default-deny resolver as screen access. Private keys resolve from the TRUST
+  vault at connect time and never reach a model's context. `asmltr device shell|kill-shell`.
+
+### Fixed
+
+- **The dashboard's remote-desktop control could never have worked.** The web viewer listened for
+  `ondatachannel`, which never fires for a pre-negotiated channel, and emitted DOM-shaped input
+  (numeric button indexes, `keydown`/`keyup`) that the host agent silently discarded. Both surfaces
+  now run one shared viewer module (`shared/rtc/viewer.js`) that creates the same
+  `negotiated:true`/`id:0` channel the host creates, with the input wire schema documented on the
+  module. The duplication had hidden the divergence; removing it surfaced the bug.
+- **One-shot remote commands use an SSH exec channel rather than a PTY.** A remote line editor echoes
+  and repaints, so PTY capture returned prompt redraw mixed with output.
+
+
 - **The assist gesture is a toggle.** Pressing it again while a turn is running now does the obvious
   thing instead of nothing (`asmltrStartListening()` returned early unless idle): while listening it
   abandons the turn — mic off, audio dropped, nothing transcribed or sent — and while thinking or
