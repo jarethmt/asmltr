@@ -68,7 +68,16 @@ const integrations = require('../../integrations/registry'); // third-party serv
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
 const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
 const { isNoReplySentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
-const { parseReact } = require('../../shared/react-token'); // Discord [[REACT:😂]] — strip before silence/post
+// [[REACT:emoji]] is introduced with Discord (#155 / shared/react-token). Optional so this
+// commit and email load standalone when that file is not in the tree yet.
+function parseReact(text) {
+  try {
+    return require('../../shared/react-token').parseReact(text);
+  } catch (err) {
+    if (err && err.code === 'MODULE_NOT_FOUND') return { text: String(text == null ? '' : text), emoji: null };
+    throw err;
+  }
+}
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
 try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
@@ -389,7 +398,7 @@ async function handle(envelope, opts = {}) {
   // Shared upload store; the in-prompt list is THIS conversation only so a photo ID in
   // one Discord channel does not grab last night's still from another room. Other rooms
   // stay available on purpose via `asmltr uploads`. Trust-gated: owner sessions only.
-  if (!voiceTurn && resolved.bypass_moderation) {
+  if (resolved.bypass_moderation) {
     pUploadsInstr = 'FILE UPLOADS: every file a user sends on any channel (Telegram, Discord, …) is saved to ONE shared area. ' +
       'The list below is THIS conversation only — do not treat a file from another Discord channel or app as the picture they just asked about. ' +
       'First look at recent context in THIS conversation (this session / last few messages). That is normal. If nothing obvious is there and this turn has no attached still, do not hunt this list or another room. Ask: "Did you forget to attach the media, or could you be more specific about what you want me to look at?" ' +
