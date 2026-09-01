@@ -1652,7 +1652,7 @@ async function checkSdkFreshness() {
     }
   } catch (_) {}
 }
-setTimeout(checkSdkFreshness, 30000); // once shortly after boot
+const _sdkBootTimer = setTimeout(checkSdkFreshness, 30000); if (_sdkBootTimer.unref) _sdkBootTimer.unref(); // once shortly after boot
 const _sdkTimer = setInterval(checkSdkFreshness, 6 * 3600 * 1000); if (_sdkTimer.unref) _sdkTimer.unref(); // every 6h
 
 // --- DRAFTS (hold-for-approval queue, any connector) -------------------------
