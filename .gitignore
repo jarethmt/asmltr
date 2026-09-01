@@ -39,3 +39,5 @@ connectors/types/remote-desktop/keys.json
 # generated docs build output (deployed via mkdocs gh-deploy, not from here)
 /site/
 
+# Vendored at build time from shared/ — never commit a second copy (it would drift)
+mobile/www/shared/

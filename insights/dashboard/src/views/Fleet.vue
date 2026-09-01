@@ -10,6 +10,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
 import RemoteScreen from '@/components/RemoteScreen.vue'
+import RemoteTerminal from '@/components/RemoteTerminal.vue'
 import { devices as api, rd } from '@/services/api'
 
 const devices = ref([])
@@ -34,6 +35,29 @@ function watchSession(s) {
   viewing.value = { hostId: s.device_id, name: (d && d.name) || s.device_id, control: false }
 }
 function canReachScreen(d) { return isOnline(d) && d.transports.some((t) => t.transport === 'rd' && t.enabled) }
+function canShell(d) { return d.transports.some((t) => t.transport === 'ssh' && t.enabled) }
+
+// A shell session, whether this operator opened it or the agent did. Watching an agent-owned session
+// is the same subscription as owning one — the core fans one PTY out to every subscriber.
+const terminal = ref(null)   // { sessionId, title, canType }
+const meId = 'jarethmt'      // TODO: from the authenticated session once P2 serves identity to the GUI
+
+async function openShell(d) {
+  busy.value = 'shell:' + d.id
+  try {
+    const r = await fetch('/v2/device-shell', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: d.id, principal_id: meId, cols: 120, rows: 30, surface: 'dashboard' }),
+    }).then((x) => x.json())
+    if (r.error) throw new Error(r.error)
+    terminal.value = { sessionId: r.id, title: d.name + ' — shell', canType: true }
+    await refresh()
+  } catch (e) { error.value = e.message } finally { busy.value = '' }
+}
+function watchShell(s) {
+  const d = devices.value.find((x) => x.id === s.device_id)
+  terminal.value = { sessionId: s.id, title: ((d && d.name) || s.device_id) + ' — watching', canType: false }
+}
 
 // Add-device form
 const adding = ref(false)
@@ -168,6 +192,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       <button :disabled="!draft.name.trim() || busy === 'add'" class="rounded-lg bg-brand-gradient px-4 py-2 text-xs font-semibold text-white disabled:opacity-40" @click="addDevice">Add</button>
     </div>
 
+    <div v-if="terminal" class="mb-4">
+      <RemoteTerminal
+        :key="terminal.sessionId"
+        :session-id="terminal.sessionId" :title="terminal.title" :can-type="terminal.canType" :principal-id="meId"
+        @closed="terminal = null"
+      />
+    </div>
+
     <div v-if="viewing" class="mb-4">
       <RemoteScreen
         :key="viewing.hostId + ':' + viewing.control"
@@ -208,6 +240,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             </button>
             <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="!canReachScreen(d)" @click="openScreen(d, false)">View</button>
             <button class="glass glass-hover px-2.5 py-1 text-xs text-violet-300 disabled:opacity-40" :disabled="!canReachScreen(d)" @click="openScreen(d, true)">Control</button>
+            <button class="glass glass-hover px-2.5 py-1 text-xs text-emerald-300 disabled:opacity-40" :disabled="!canShell(d) || busy === 'shell:' + d.id" @click="openShell(d)">Shell</button>
             <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="busy === 'enroll:' + d.id" @click="enroll(d)">Enroll</button>
             <button class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="!isOnline(d) || busy === 'cast:' + d.id" @click="cast(d)">Cast</button>
             <button class="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 disabled:opacity-40" :disabled="busy === 'revoke:' + d.id" @click="revoke(d)">Revoke</button>
@@ -219,7 +252,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             <span class="pill border border-violet-400/30 bg-violet-400/10 text-[10px] text-violet-300">LIVE {{ s.capability }}</span>
             <span class="text-slate-400">{{ s.principal_id || 'unknown' }}</span>
             <span class="text-slate-600">since {{ when(s.started_at) }}</span>
-            <button class="ml-auto text-xs text-violet-300 hover:text-violet-200" @click="watchSession(s)">Watch</button>
+            <button class="ml-auto text-xs text-violet-300 hover:text-violet-200"
+              @click="s.transport === 'ssh' ? watchShell(s) : watchSession(s)">Watch</button>
             <button class="text-xs text-rose-400 hover:text-rose-300" :disabled="busy === 'kill:' + s.id" @click="kill(s)">Kill</button>
           </div>
         </div>

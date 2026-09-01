@@ -792,6 +792,31 @@ async function cmdDevice(argv, f) {
     console.log(r.ok ? A.grn(`✓ grant #${gid} revoked`) : A.red('no such active grant'));
     return;
   }
+  if (verb === 'shell') {
+    const id = rest[1];
+    if (!id) return console.log(A.red('usage: asmltr device shell <device_id> ["command"]  [--as <principal_id>]'));
+    const principal = f.as || 'self';
+    const command = rest.slice(2).join(' ');
+    if (command) {
+      // One-shot: still a real, WATCHABLE session — a human can open it in Fleet while it runs.
+      const r = await coreApi('/v2/device-shell/run', 'POST', { device_id: id, principal_id: principal, command });
+      process.stdout.write(r.output || '');
+      if (r.timed_out) console.log(A.yel('\n[timed out]'));
+      return;
+    }
+    const s = await coreApi('/v2/device-shell', 'POST', { device_id: id, principal_id: principal, surface: 'cli' });
+    console.log(A.grn(`✓ shell open on ${id}`) + A.dim(`  session ${s.id}`));
+    console.log(A.dim('  watch it live in the dashboard Fleet page, or close it with:'));
+    console.log(A.dim(`    asmltr device kill-shell ${s.id}`));
+    return;
+  }
+  if (verb === 'kill-shell') {
+    const sid = rest[1];
+    if (!sid) return console.log(A.red('usage: asmltr device kill-shell <session_id>'));
+    const r = await coreApi(`/v2/device-shell/${encodeURIComponent(sid)}`, 'DELETE');
+    console.log(r.ok ? A.grn('✓ shell closed') : A.yel('no such open shell'));
+    return;
+  }
   if (verb === 'sessions') {
     const { sessions } = await coreApi(`/v2/device-sessions?${rest[1] ? 'device_id=' + encodeURIComponent(rest[1]) + '&' : ''}${bool('open') ? 'open=1' : ''}`);
     if (!sessions.length) return console.log(A.dim('no sessions recorded'));
@@ -832,6 +857,8 @@ async function cmdDevice(argv, f) {
   grant <principal> <device> <capability> [--transport T --forbid --expires <ms>]
   grants <device_id>                        who may do what here
   ungrant <grant_id>
+  shell <device_id> ["command"]             open (or run in) a shell — watchable live in Fleet
+  kill-shell <session_id>
   sessions [device_id] [--open]             the audit trail
   kill <session_id>                         tear down a live session now
   revoke <device_id> [--transport rd]       kill the credential, grants and sessions

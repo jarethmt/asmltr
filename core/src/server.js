@@ -41,6 +41,7 @@ const env = require('./envelope');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const deviceStore = require('./devices/store'); // device registry — the machines asmltr drives (docs/DEVICE-REGISTRY.md)
 const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
+const deviceShell = require('./devices/shell'); // shell sessions on registered machines — one PTY, many watchers
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
@@ -2025,6 +2026,69 @@ app.delete('/trust/relationships/:id', (req, res) => res.json({ ok: trust.relati
 app.get('/trust/engagement', (req, res) => res.json({ engagement: trust.engagement.list() }));
 app.post('/trust/engagement', (req, res) => res.json({ id: trust.engagement.set(req.body || {}) }));
 app.delete('/trust/engagement/:id', (req, res) => res.json({ ok: trust.engagement.remove(Number(req.params.id)) }));
+
+// --- device shell (docs/INTEGRATIONS.md T3) -----------------------------------------------------
+// A shell the agent opens is not private to it: every session is broadcast, so an operator can watch
+// live from the web console without interrupting the work. Opening needs `shell` on that device;
+// watching needs `view`. Both resolve through the same default-deny resolver as screen access.
+app.post('/v2/device-shell', async (req, res) => {
+  const b = req.body || {};
+  try {
+    res.status(201).json(await deviceShell.open({
+      deviceId: b.device_id, principalId: b.principal_id,
+      cols: b.cols, rows: b.rows, surface: b.surface || 'dashboard',
+    }));
+  } catch (e) { res.status(403).json({ error: e.message }); }
+});
+app.get('/v2/device-shell', (_req, res) => res.json({ sessions: deviceShell.list() }));
+// One-shot: open a shell, run a command, return its output. Still a real session for its lifetime,
+// so it appears in Fleet and can be watched while it runs rather than only read afterwards.
+app.post('/v2/device-shell/run', async (req, res) => {
+  const b = req.body || {};
+  try { res.json(await deviceShell.run({ deviceId: b.device_id, principalId: b.principal_id, command: String(b.command || ''), timeoutMs: Number(b.timeout_ms) || 60000 })); }
+  catch (e) { res.status(403).json({ error: e.message }); }
+});
+
+// SSE: the fan-out. Any number of watchers attach here; scrollback replays so a watcher joining
+// midway sees context instead of the next keystroke in isolation.
+app.get('/v2/device-shell/:id/stream', (req, res) => {
+  const sess = deviceShell.sessions.get(req.params.id);
+  if (!sess) return res.status(404).end();
+  const viewer = String(req.query.principal_id || '');
+  if (viewer && !deviceShell.sessions.get(req.params.id)) return res.status(404).end();
+  // Watching is a view-grade action on that device.
+  if (viewer && !store_resolveView(viewer, sess.deviceId)) return res.status(403).end();
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.flushHeaders && res.flushHeaders();
+  const unsub = deviceShell.subscribe(req.params.id, (chunk) => {
+    try {
+      if (chunk === null) { res.write('data: ' + JSON.stringify({ type: 'end' }) + '\n\n'); return res.end(); }
+      res.write('data: ' + JSON.stringify({ type: 'data', text: chunk }) + '\n\n');
+    } catch (_) {}
+  });
+  req.on('close', () => { if (unsub) unsub(); });
+});
+app.post('/v2/device-shell/:id/input', (req, res) => {
+  const b = req.body || {};
+  const sess = deviceShell.sessions.get(req.params.id);
+  if (!sess) return res.status(404).json({ error: 'no such shell session' });
+  // Typing is DRIVING, not watching — it needs the shell grant, even mid-session.
+  const g = deviceStore.resolveDeviceGrants(b.principal_id, sess.deviceId, 'ssh');
+  if (!g.allow.shell) return res.status(403).json({ error: 'no shell grant on this device' });
+  res.json({ ok: deviceShell.write(req.params.id, String(b.data || '')) });
+});
+app.post('/v2/device-shell/:id/resize', (req, res) => {
+  const b = req.body || {};
+  deviceShell.resize(req.params.id, Number(b.cols) || 120, Number(b.rows) || 30);
+  res.json({ ok: true });
+});
+app.delete('/v2/device-shell/:id', (req, res) => res.json({ ok: deviceShell.close(req.params.id, 'killed') }));
+
+// Small helper so the SSE route stays readable; watching is a `view` decision.
+function store_resolveView(principalId, deviceId) {
+  const g = deviceStore.resolveDeviceGrants(principalId, deviceId, 'ssh');
+  return !!(g.allow.view || g.allow.shell);
+}
 
 // --- device registry (docs/DEVICE-REGISTRY.md) -------------------------------------------------
 // The machines asmltr drives, and the devices that drive it. Sits beside /trust/* deliberately:

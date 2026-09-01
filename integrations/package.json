@@ -4,6 +4,7 @@
   "private": true,
   "description": "Outward-facing optional capabilities the agent reaches out to use (docs/INTEGRATIONS.md)",
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "ssh2": "^1.17.0"
   }
 }

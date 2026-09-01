@@ -132,14 +132,16 @@ export function createViewer(opts) {
       if (st === 'failed') status('connection failed (no route between peers)', 'off');
       else if (st === 'disconnected') status('connection lost', 'warn');
     };
-    // The HOST opens the control channel, so we listen rather than create — creating one here
-    // races the host's and leaves input on a channel nobody reads.
-    pc.ondatachannel = (e) => {
-      if (myGen !== gen || !e.channel || e.channel.label !== 'control') return;
-      sess.dc = e.channel;
-      e.channel.onopen = () => emit('control', true);
-      e.channel.onclose = () => emit('control', false);
-    };
+    // The control channel is PRE-NEGOTIATED — negotiated:true, id:0, ordered:true, label:'control'.
+    // Both peers create it independently with the same id, so `ondatachannel` NEVER fires; listening
+    // for it silently yields a viewer that can never send input. The host agent creates the identical
+    // channel (agents/host-remote-desktop/webrtc.go) and these definitions must stay in lockstep.
+    if (sess && sess.control) {
+      const dc = pc.createDataChannel('control', { negotiated: true, id: 0, ordered: true });
+      sess.dc = dc;
+      dc.onopen = () => { if (myGen === gen) emit('control', true); };
+      dc.onclose = () => { if (myGen === gen) emit('control', false); };
+    }
   }
 
   /** Hosts this credential may view. The broker filters by grant, so an unauthorized machine is
@@ -184,7 +186,15 @@ export function createViewer(opts) {
     emit('control', false);
   }
 
-  /** Send an input event. Silently a no-op without a control grant — the host re-checks anyway. */
+  /**
+   * Send an input event over the control channel. The host agent's schema — both surfaces and the
+   * Go agent must agree, so it is recorded here rather than rediscovered per client:
+   *   { t:'move'|'down'|'up'|'click', x, y, button }   x,y are [0,1] fractions of the remote screen
+   *   { t:'scroll', dx, dy }                            wheel deltas in pixels; sign = direction
+   *   { t:'key', code, down, key? }                     code is a UI-Events code ('KeyA','Enter')
+   * button is 'left' | 'right' | 'middle' — NOT a numeric index.
+   * Silently a no-op without a control grant; the host re-checks regardless.
+   */
   function sendInput(evt) {
     if (!sess || !sess.dc || sess.dc.readyState !== 'open') return false;
     try { sess.dc.send(JSON.stringify(evt)); return true; } catch (_) { return false; }

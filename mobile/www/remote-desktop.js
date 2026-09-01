@@ -1,7 +1,7 @@
 'use strict';
 /*
  * asmltr mobile — Remote Desktop VIEWER + CONTROLLER for the custom WebRTC remote-desktop capability
- * (see docs/REMOTE-DESKTOP.md + connectors/types/remote-desktop/index.js — the signaling broker).
+ * (see docs/REMOTE-DESKTOP.md + integrations/types/remote-desktop/index.js — the signaling broker).
  *
  * This is a self-contained surface: discover hosts through the broker, open a session, hold the broker
  * SSE stream, relay SDP/ICE through POST /rd/msg so ICE can hole-punch a DIRECT peer-to-peer media path,
@@ -16,13 +16,11 @@
  * Signaling roles: the broker asks the HOST to make the offer (offer_request). So the VIEWER is the
  * ANSWERER — it waits for the host's SDP offer on the SSE stream, answers, and both trickle ICE.
  *
- * The `control` data channel is PRE-NEGOTIATED (negotiated:true, id:0, label 'control') so it doesn't
- * depend on offer ordering or an ondatachannel race — the host agent MUST open the same channel. It only
- * opens client-side when the broker stamped the session with control (view-only otherwise).
- *
- * Lifecycle discipline is lifted from the live-STT fix in app.js: every session carries a GENERATION
- * token (rdGen). Teardown bumps it; every awaited async step re-checks its gen and bails (closing its
- * half-built peer) if superseded — so a session can never leak a PeerConnection or SSE stream.
+ * SIGNALING, ICE, THE PEER CONNECTION AND THE CONTROL CHANNEL ARE NOT IMPLEMENTED HERE. They live in
+ * shared/rtc/viewer.js (vendored to www/shared/ at build time) and are shared byte-for-byte with the
+ * web console — including the pre-negotiated control channel and the generation-token lifecycle that
+ * stops an abandoned session resurrecting itself. This file owns the SURFACE: host list, stage, the
+ * touch→mouse gesture layer and the soft keyboard.
  */
 const RD_CFG_KEY = 'asmltr.rd.cfg';
 const MAIN_CFG_KEY = 'asmltr.mobile.cfg';
@@ -45,36 +43,22 @@ function loadCfg() {
 function saveCfg(c) { try { localStorage.setItem(RD_CFG_KEY, JSON.stringify(c)); } catch (_) {} }
 let cfg = loadCfg();
 
-// ---------- broker HTTP ----------
+// ---------- broker access + live session ----------
+// The viewer module is vendored into www/shared/ at build time from the repo's shared/ tree, so the
+// phone and the web console run byte-identical connection logic.
+import { createViewer } from './shared/rtc-viewer.js';
+window.AsmltrViewerFactory = createViewer;
+
+let viewer = null;        // the shared viewer instance for the live session, else null
+let sess = null;          // { id, control, host } — UI/gesture state mirrored from the viewer
+
+// Host discovery still goes through a viewer instance (it owns the broker's auth + wire format).
 async function rdMsg(body) {
   if (!cfg.brokerUrl) throw new Error('set the broker URL in settings');
-  const r = await fetch(cfg.brokerUrl + '/rd/msg', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: cfg.token, ...body }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.ok === false) throw new Error(j.error || ('HTTP ' + r.status));
-  return j;
+  const probe = createViewer({ brokerUrl: cfg.brokerUrl, token: cfg.token, clientId: cfg.clientId });
+  if (body && body.type === 'list') return { hosts: await probe.list() };
+  throw new Error('unsupported broker call: ' + (body && body.type));
 }
-async function fetchIce() {
-  try {
-    const r = await fetch(cfg.brokerUrl + '/rd/ice-config?token=' + encodeURIComponent(cfg.token));
-    const j = await r.json().catch(() => ({}));
-    if (j && j.iceServers) return j.iceServers;
-  } catch (_) {}
-  return [{ urls: ['stun:stun.l.google.com:19302'] }]; // safe fallback so ICE still has a STUN server
-}
-
-// ---------- status / view switching ----------
-function setStatus(text, cls) { const el = $('rdStatus'); if (el) { el.textContent = text; el.className = 'pill pill-' + (cls || 'off'); } }
-function showList() { $('rdStage').classList.add('hidden'); $('rdList').classList.remove('hidden'); }
-function showStage() { $('rdList').classList.add('hidden'); $('rdStage').classList.remove('hidden'); }
-
-// ---------- session state + generation guard ----------
-let sess = null;          // { id, control, pc, es, host } for the live session, else null
-let rdGen = 0;            // bumped on every teardown/switch; stale async steps self-abort (see live-STT fix)
-let pendingIce = [];      // remote ICE that arrived before setRemoteDescription
-let readyResolve = null;  // resolves when the viewer SSE stream sends its first `ready`
 
 // ---------- host discovery ----------
 async function refreshHosts() {
@@ -110,126 +94,32 @@ function hostRow(h) {
   return row;
 }
 
-// ---------- SSE signaling stream ----------
-function openStream(gen) {
-  const url = cfg.brokerUrl + '/rd/stream?token=' + encodeURIComponent(cfg.token)
-    + '&role=viewer&client_id=' + encodeURIComponent(cfg.clientId);
-  const es = new EventSource(url);
-  es.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch (_) { return; } onSignal(m, gen); };
-  es.onerror = () => { if (gen === rdGen && sess) setStatus('signaling dropped — reconnecting…', 'warn'); };
-  return es;
-}
-function waitReady(gen) {
-  return new Promise((resolve, reject) => {
-    const to = setTimeout(() => { readyResolve = null; reject(new Error('broker stream timeout')); }, 10000);
-    readyResolve = () => { clearTimeout(to); readyResolve = null; resolve(); };
-    void gen;
-  });
-}
-async function onSignal(m, gen) {
-  if (gen !== rdGen) return;                       // frame from a torn-down session
-  const t = String(m.type || '');
-  if (t === 'ready') { if (readyResolve) readyResolve(); return; }
-  if (!sess || m.session_id !== sess.id) return;   // only our current session's peer traffic
-  if (t === 'sdp') return onRemoteSdp(m.sdp, gen);
-  if (t === 'ice') return onRemoteIce(m.candidate, gen);
-  if (t === 'bye') { setStatus('host ended the session', 'off'); return teardown(); }
-}
-
-// ---------- SDP / ICE relay (viewer = answerer) ----------
-async function onRemoteSdp(desc, gen) {
-  if (!sess || !desc) return;
-  try {
-    // Accept either a full RTCSessionDescription {type,sdp} or a bare sdp string (default it to 'offer').
-    const offer = (desc && desc.type && desc.sdp) ? desc : { type: 'offer', sdp: desc };
-    await sess.pc.setRemoteDescription(offer);
-    if (gen !== rdGen) return;
-    for (const c of pendingIce) { try { await sess.pc.addIceCandidate(c); } catch (_) {} }
-    pendingIce = [];
-    const answer = await sess.pc.createAnswer();
-    if (gen !== rdGen) return;
-    await sess.pc.setLocalDescription(answer);
-    if (gen !== rdGen) return;
-    // role is REQUIRED: host + phone share the "owner" trust identity, so the broker can't infer the
-    // relay direction from the token — we must tell it we're the viewer.
-    await rdMsg({ type: 'sdp', session_id: sess.id, role: 'viewer', sdp: { type: answer.type, sdp: answer.sdp } });
-  } catch (e) { if (gen === rdGen) setStatus('sdp error: ' + e.message, 'warn'); }
-}
-async function onRemoteIce(cand, gen) {
-  if (!sess || !cand) return;
-  // Buffer candidates that beat the remote description in (WebRTC rejects them otherwise).
-  if (!sess.pc.remoteDescription || !sess.pc.remoteDescription.type) { pendingIce.push(cand); return; }
-  try { await sess.pc.addIceCandidate(cand); } catch (_) { if (gen !== rdGen) return; }
-}
-
-// ---------- connect / peer wiring ----------
-async function connectHost(host, wantControl) {
-  teardown();                        // drop anything live (bumps rdGen, closes prior peer + stream)
-  const gen = ++rdGen;
-  pendingIce = [];
+// ---------- session lifecycle (delegated to the shared viewer) ----------
+// Signaling, ICE, the peer connection and the pre-negotiated control channel all live in
+// shared/rtc/viewer.js — the SAME module the web console runs. They used to be duplicated here, and
+// they had already drifted: the web copy listened for `ondatachannel`, which never fires for a
+// pre-negotiated channel, so its control silently did nothing. One implementation, one behaviour.
+function connectHost(host, wantControl) {
+  teardown();
   showStage();
   $('rdStageName').textContent = host.name || host.host_id;
   setControlUI(false);
   setStatus('connecting…', 'warn');
-  try {
-    const es = openStream(gen);
-    await waitReady(gen);
-    if (gen !== rdGen) { try { es.close(); } catch (_) {} return; }
-    const iceServers = await fetchIce();
-    if (gen !== rdGen) { try { es.close(); } catch (_) {} return; }
-    const r = await rdMsg({ type: 'connect', host_id: host.host_id, want: { control: !!wantControl }, client_id: cfg.clientId });
-    if (gen !== rdGen) { try { es.close(); } catch (_) {} return; }
-    const control = !!r.control;
-    const pc = new RTCPeerConnection({ iceServers });
-    sess = { id: r.session_id, control, pc, es, host };
-    wirePeer(pc, r.session_id, gen, control);
-    if (wantControl && !control) setStatus('connected (view-only — no control grant)', 'on');
-    // The host now receives offer_request and sends its SDP offer over our SSE stream → onRemoteSdp().
-  } catch (e) {
-    if (gen === rdGen) { setStatus('✗ ' + e.message, 'off'); teardown(); }
-  }
-}
-function wirePeer(pc, sessionId, gen, control) {
-  pc.onicecandidate = (e) => {
-    if (e.candidate && gen === rdGen) {
-      rdMsg({ type: 'ice', session_id: sessionId, role: 'viewer', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }).catch(() => {});
-    }
-  };
-  pc.ontrack = (e) => {
-    if (gen !== rdGen) return;
-    const v = $('rdVideo');
-    if (v && e.streams && e.streams[0]) { v.srcObject = e.streams[0]; v.play().catch(() => {}); }
-  };
-  pc.onconnectionstatechange = () => {
-    if (gen !== rdGen) return;
-    const s = pc.connectionState;
-    if (s === 'connected') setStatus(sess && sess.control ? 'connected · control' : 'connected · view-only', 'on');
-    else if (s === 'connecting') setStatus('negotiating…', 'warn');
-    else if (s === 'disconnected') setStatus('link dropped — recovering…', 'warn');
-    else if (s === 'failed') { setStatus('connection failed', 'off'); teardown(); }
-  };
-  if (control) {
-    // Pre-negotiated so it survives offer/answer ordering and needs no renegotiation. The host agent
-    // MUST open the identical channel: label 'control', negotiated:true, id:0.
-    const dc = pc.createDataChannel('control', { negotiated: true, id: 0, ordered: true });
-    dc.onopen = () => { if (gen === rdGen && sess) { sess.control = true; setControlUI(true); } };
-    dc.onclose = () => { if (gen === rdGen) setControlUI(false); };
-    sess.dc = dc;
-  }
+
+  viewer = window.AsmltrViewerFactory({ brokerUrl: cfg.brokerUrl, token: cfg.token, clientId: cfg.clientId });
+  viewer.on('status', (text, level) => setStatus(text, level));
+  viewer.on('stream', (stream) => { const v = $('rdVideo'); if (v) { v.srcObject = stream; v.play().catch(() => {}); } });
+  viewer.on('control', (on) => { if (sess) sess.control = on; setControlUI(on); });
+  viewer.on('session', (s) => { sess = { id: s.id, control: s.control, host }; });
+  viewer.on('ended', () => { sess = null; });
+  viewer.connect(host.host_id, { control: !!wantControl }).catch(() => {});
 }
 
 // ---------- teardown (leak-proof) ----------
 function teardown() {
-  rdGen++;                        // invalidate every in-flight async step for the dying session
-  readyResolve = null; pendingIce = [];
-  const s = sess; sess = null;
   cancelMoveFlush();
-  if (s) {
-    try { if (s.dc) s.dc.close(); } catch (_) {}
-    try { if (s.pc) s.pc.close(); } catch (_) {}
-    try { if (s.es) s.es.close(); } catch (_) {}
-    try { rdMsg({ type: 'bye', session_id: s.id }).catch(() => {}); } catch (_) {}   // tell broker + host
-  }
+  if (viewer) { try { viewer.disconnect(); } catch (_) {} viewer = null; }
+  sess = null;
   const v = $('rdVideo'); if (v) { try { v.srcObject = null; } catch (_) {} }
   setControlUI(false);
   exitMinimize();
@@ -248,8 +138,9 @@ function disconnect() { setStatus('disconnected', 'off'); teardown(); showList()
 //           - code is a UI-Events code ('KeyA','Enter','Backspace','Space','Digit1',…) when known,
 //             else the literal character; an optional `key` field carries the raw character.
 function sendCtl(obj) {
-  const dc = sess && sess.dc;
-  if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(obj)); } catch (_) {} }
+  // The control channel belongs to the shared viewer now; it no-ops without a control grant, and
+  // the host re-checks the grant regardless.
+  if (viewer) viewer.sendInput(obj);
 }
 function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch (_) {} }
 

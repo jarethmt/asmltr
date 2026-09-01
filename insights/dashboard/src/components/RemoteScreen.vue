@@ -39,14 +39,18 @@ function norm(e) {
   const r = videoEl.value.getBoundingClientRect()
   return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }
 }
-const onMove = (e) => { if (hasControl.value) { const p = norm(e); viewer.sendInput({ t: 'move', ...p }) } }
-const onDown = (e) => { if (hasControl.value) { const p = norm(e); viewer.sendInput({ t: 'down', button: e.button, ...p }) } }
-const onUp = (e) => { if (hasControl.value) { const p = norm(e); viewer.sendInput({ t: 'up', button: e.button, ...p }) } }
-const onWheel = (e) => { if (hasControl.value) { e.preventDefault(); viewer.sendInput({ t: 'scroll', dy: e.deltaY }) } }
+// The host's wire schema uses NAMED buttons and a single 'key' event carrying a down flag — see the
+// contract on sendInput() in shared/rtc/viewer.js. Emitting DOM-shaped events (numeric button
+// indexes, keydown/keyup types) produces input the agent silently discards.
+const BUTTON = ['left', 'middle', 'right']
+const onMove = (e) => { if (hasControl.value) viewer.sendInput({ t: 'move', ...norm(e) }) }
+const onDown = (e) => { if (hasControl.value) viewer.sendInput({ t: 'down', button: BUTTON[e.button] || 'left', ...norm(e) }) }
+const onUp = (e) => { if (hasControl.value) viewer.sendInput({ t: 'up', button: BUTTON[e.button] || 'left', ...norm(e) }) }
+const onWheel = (e) => { if (hasControl.value) { e.preventDefault(); viewer.sendInput({ t: 'scroll', dx: e.deltaX, dy: e.deltaY }) } }
 const onKey = (e) => {
   if (!hasControl.value) return
   e.preventDefault()
-  viewer.sendInput({ t: e.type === 'keydown' ? 'keydown' : 'keyup', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey })
+  viewer.sendInput({ t: 'key', code: e.code || e.key, key: e.key, down: e.type === 'keydown' })
 }
 
 watch(() => props.hostId, () => { stop(); start() })

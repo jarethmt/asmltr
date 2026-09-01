@@ -10,6 +10,11 @@ export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=1 -Dorg.g
 
 echo "==> npm install"; npm install --no-audit --no-fund
 if [ ! -d android ]; then echo "==> cap add android"; npx cap add android; fi
+# Vendor shared browser modules into www BEFORE cap sync copies them into the APK. www/shared/ is a
+# build artifact and gitignored — a committed copy is exactly the drift the shared tree prevents.
+echo "==> vendor shared modules into www"
+mkdir -p www/shared && cp ../shared/rtc/viewer.js www/shared/rtc-viewer.js
+
 echo "==> cap sync";   npx cap sync android
 echo "==> theme launcher icon from identity palette"; node scripts/gen-icon.js || true
 echo "==> patch native assist layer"; node scripts/patch-android.js
