@@ -1304,14 +1304,13 @@ ${referentPromptBlock()}`;
     if (voiceBusy.has(guildId)) return;  // don't stack replies
     // Immutable Discord user id is the trust key. A display-name fallback matches no mapping
     // and silently resolves to default / tier 0 — refuse the turn instead.
-    const speakerId = meta.userId != null && meta.userId !== '' ? String(meta.userId) : '';
     if (!speakerId) {
       ctx.log(`[voice] skip turn: missing Discord userId (will not use display name as raw_id)`);
       return;
     }
     voiceBusy.add(guildId);
     const originCid = ch && ch.id;
-    abortTarget(originCid, meta.userId || '', 'voice');
+    abortTarget(originCid, speakerId, 'voice');
     voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
     const myGen = voiceGen.get(guildId) || 0; // this reply's generation; stopVoiceReply bumps it to cancel
     const live = () => (voiceGen.get(guildId) || 0) === myGen; // still the current, un-stopped reply?
