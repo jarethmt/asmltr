@@ -50,4 +50,7 @@ test('asmltr.js wires gc-temps', () => {
   const src = fs.readFileSync(path.join(__dirname, '../cli/asmltr.js'), 'utf8');
   assert.match(src, /case 'gc-temps'/);
   assert.match(src, /gc-temps/);
+  const core = fs.readFileSync(path.join(__dirname, '../core/src/server.js'), 'utf8');
+  assert.match(core, /ASMLTR_GC_TEMPS/);
+  assert.match(core, /gc-temps/);
 });

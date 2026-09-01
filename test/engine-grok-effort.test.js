@@ -693,3 +693,11 @@ test('grok classify sees voice via isDiscordVoice for effort', () => {
   assert.match(grokSrc, /conversationKey, channel_context, voice/);
 });
 
+test('server passes voice signal into grok classify opts and moderate', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'server.js'), 'utf8');
+  assert.match(server, /isDiscordVoice/);
+  assert.match(server, /channel_context:\s*e\.channel_context/);
+  assert.match(server, /voice:\s*voiceTurn/);
+  assert.match(server, /moderation\.moderate\([^\n]*voice:\s*voiceTurn/);
+});
+

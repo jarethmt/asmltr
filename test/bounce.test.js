@@ -133,6 +133,13 @@ test('withGuardPath prepends bounce-guard once', () => {
   assert.equal(b.PATH.split(path.delimiter).filter((p) => p === guard).length, 1);
 });
 
+test('core wires /v2/bounce and fires onTurnEnded from dispatch', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'src', 'server.js'), 'utf8');
+  assert.match(src, /app\.post\('\/v2\/bounce'/);
+  assert.match(src, /queueAfterTurn/);
+  assert.match(src, /onTurnEnded\(key\)/);
+});
+
 test('cli help lists asmltr bounce', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'cli', 'asmltr.js'), 'utf8');
   assert.match(src, /asmltr bounce/);
