@@ -190,6 +190,15 @@
 
         const content = document.getElementById('content');
 
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         // Fetch client information
         async function loadClientInfo() {
             // Validate required parameters (resource is optional)
@@ -219,7 +228,7 @@
                 content.innerHTML = `
                     <div class="error">
                         <strong>Error</strong>
-                        <p>${error.message}</p>
+                        <p>${escapeHtml(error.message)}</p>
                     </div>
                 `;
             }
@@ -228,7 +237,7 @@
         function showConsentForm(clientName) {
             content.innerHTML = `
                 <div class="authorization-info">
-                    <div class="client-name">${clientName}</div>
+                    <div class="client-name">${escapeHtml(clientName)}</div>
                     <p style="color: #666; margin-bottom: 16px; font-size: 14px;">
                         is requesting access to __ASSISTANT__
                     </p>
@@ -243,7 +252,7 @@
                     <strong>⚠️ Security Notice</strong>
                     __ASSISTANT__ has full system access and can execute commands, read files,
                     and perform operations on behalf of authorized users. Only approve this
-                    request if you trust <strong>${clientName}</strong>.
+                    request if you trust <strong>${escapeHtml(clientName)}</strong>.
                 </div>
 
                 <div class="buttons">
@@ -291,7 +300,7 @@
                 content.innerHTML = `
                     <div class="error">
                         <strong>Authorization Error</strong>
-                        <p>${error.message}</p>
+                        <p>${escapeHtml(error.message)}</p>
                     </div>
                     <div class="buttons" style="margin-top: 16px;">
                         <button class="btn-deny" onclick="location.reload()">Try Again</button>

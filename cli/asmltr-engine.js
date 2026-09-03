@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * `asmltr <engine> [args…]` (engine = claude | gemini | codex) — launch an interactive session of a
+ * `asmltr <engine> [args…]` (engine = claude | gemini | codex | grok) — launch an interactive session of a
  * reasoning-engine CLI harness inside a multiplexer (tmux/screen), so it is monitored in the asmltr
  * dashboard and can be steered / attached ("taken over"). Generalizes the original `asmltr claude`.
  *
@@ -53,6 +53,7 @@ function profile(id, cwd) {
   const model = engines.modelFor(id);
   if (id === 'gemini') return { surface: 'gemini-cli', envPrefix: '', args: ['--yolo', ...(model ? ['-m', model] : []), ...extra], tailer: null };
   if (id === 'codex') return { surface: 'codex-cli', envPrefix: '', args: [...(model ? ['-m', model] : []), ...extra], tailer: null };
+  if (id === 'grok') return { surface: 'grok-cli', envPrefix: '', args: ['--always-approve', ...(model ? ['-m', model] : []), ...extra], tailer: null };
   return { surface: id + '-cli', envPrefix: '', args: extra, tailer: null };
 }
 
@@ -68,7 +69,7 @@ async function main() {
   const bin = engines.resolveBin(id);
   if (!bin) {
     console.error(`asmltr ${id}: could not find the \`${id}\` executable on PATH.`);
-    console.error(`  Install it (${engines.ENGINES[id].install}) or set ${engines.ENGINES[id].binEnv} to its full path, then retry.`);
+    console.error(`  Install it (${engines.ENGINES[id].installHint || engines.ENGINES[id].pkg || engines.ENGINES[id].install || id}) or set ${engines.ENGINES[id].binEnv} to its full path, then retry.`);
     process.exit(127);
   }
 

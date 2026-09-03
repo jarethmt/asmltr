@@ -125,7 +125,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </header>
 
       <!-- body (fills remaining height; child manages its own scroll) -->
-      <div class="flex min-h-0 flex-1 flex-col px-4 py-3">
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
         <slot />
       </div>
 

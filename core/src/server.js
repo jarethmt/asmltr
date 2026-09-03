@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 'use strict';
+const { healthPayload } = require('./health-payload');
+const { policyFor, isDiscordVoice } = require('../../shared/media-allow');
 require('../../shared/loadenv'); // load <repo>/.env before anything reads config
 const { settleDelivery } = require('../../shared/send-result'); // unify send HTTP status ↔ body `ok`
 /**
@@ -38,12 +40,15 @@ const { EventEmitter } = require('events');
 const { randomUUID } = require('crypto');
 
 const env = require('./envelope');
+// Load openai (moderation) BEFORE any better-sqlite3 module so Node 24 GC during that import cannot collect Statements.
+const moderation = require('./moderation');
+const injectSteer = require('./inject-steer');
 const trust = require('./trust/store'); // unified auth/trust/capability framework (replaces resolver)
 const deviceStore = require('./devices/store'); // device registry — the machines asmltr drives (docs/DEVICE-REGISTRY.md)
 const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
-const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
+const channelAwareness = require('./channel-awareness'); // medium/runtime block (engine-aware; Claude Code stays Claude Code)
 const drafts = require('./drafts'); // shared hold-for-approval queue (any connector can opt in)
 const selfUpdate = require('../../shared/update'); // self-update: detect + run (spawns an agent update session)
 const { createSpeaker } = require('../../shared/speech/speaker'); // core speech layer: reply stream → TTS audio
@@ -61,6 +66,18 @@ const identity = require('../../shared/identity'); // Self identity anchor (Like
 const vault = require('../../shared/vault'); // TRUST vault (credential broker + KMS) — hard dependency
 const integrations = require('../../integrations/registry'); // third-party service links (storage, …)
 const silo = require('../../shared/silo'); // data silos — the Self silo is memory + the default artifact home
+const transcripts = require('../../shared/transcripts'); // Self-silo memory/transcripts write path (ask/grok turns)
+const { isNoReplySentinel } = require('../../shared/silence'); // [[NO_REPLY]]: exact or last line, not a mention
+// [[REACT:emoji]] is introduced with Discord (#155 / shared/react-token). Optional so this
+// commit and email load standalone when that file is not in the tree yet.
+function parseReact(text) {
+  try {
+    return require('../../shared/react-token').parseReact(text);
+  } catch (err) {
+    if (err && err.code === 'MODULE_NOT_FOUND') return { text: String(text == null ? '' : text), emoji: null };
+    throw err;
+  }
+}
 // Ensure the Self silo exists (created from the `self` template) — the default home for artifacts.
 let SELF_SILO_DIR = null;
 try { SELF_SILO_DIR = silo.ensureSelf(identity.name()).dir; } catch (_) { /* non-fatal */ }
@@ -76,6 +93,7 @@ const _vaultTimer = setInterval(refreshVaultLocked, 30000); if (_vaultTimer.unre
 const { runTurn, generateTitle, generateStatus, generateSelfAssessment, generateNotifyTriage, generateRecordingSummary, getLastModel } = require('./runner');
 const emitter = require('./emitter');
 const { redactSecrets } = require('../../shared/redact'); // public-surface output redaction
+const { quietReplyFromResult } = require('../../shared/step-public'); // email/mcp: no thought chips in the body
 
 const PORT = Number(process.env.ASMLTR_CORE_PORT || 3023);
 const HOST = '127.0.0.1';
@@ -171,30 +189,6 @@ function toolResultText(content) {
   return '';
 }
 
-// Channel/medium self-awareness — prepended to every system prompt so the model
-// knows the USER's channel (vs its own Claude Code runtime).
-const NAME = process.env.ASSISTANT_NAME || 'the assistant';
-const CHANNEL_LABELS = {
-  discord: 'Discord', telegram: 'Telegram', github: 'GitHub (issue thread)',
-  mcp: 'an MCP client', core: 'a direct API call',
-  'assistant-web': 'a web assistant app', 'assistant-native': 'a mobile assistant app',
-  'eve-assistant-web': 'a web assistant app', 'eve-assistant-native': 'a mobile assistant app', // legacy ids
-};
-function buildChannelAwareness(e, resolved) {
-  const NAME = identity.name(); // live (GUI-editable) — not the module-load env const
-  const who = (resolved && resolved.display_name) || (e.sender && e.sender.raw_username) || 'a user';
-  const scope = e.context && e.context.scope_name ? ` in "${e.context.scope_name}"` : '';
-  const label = CHANNEL_LABELS[e.channel] || e.channel;
-  // The android assistant is voice-first — replies are read aloud (TTS). Nudge toward speakable prose so
-  // markdown/symbols don't get vocalized. (Markdown is also stripped at the TTS layer as a safety net.)
-  const spoken = e.channel === 'android'
-    ? `\n\nSPOKEN OUTPUT: your replies here are READ ALOUD. Write the way you'd say it — natural, conversational sentences. Do NOT use markdown or decorative characters: no asterisks/bold/italics, headers, backticks or code fences, bullet or numbered lists, tables, or emoji. Say symbols as words ("and" not "&", "percent" not "%"). Prefer a short spoken list ("first… second…") over bullets. Keep it concise; the person is listening, not reading.`
-    : '';
-  return `MEDIUM AWARENESS — READ FIRST:
-This message reached you through the asmltr "${e.channel}" connector. You are talking with ${who} over ${label}${scope}; from their side they are messaging ${NAME} on ${label}, NOT sitting in a terminal with you.
-Your underlying runtime is Claude Code, but that is an internal implementation detail and is NOT the medium of this conversation. If asked what app/medium/channel/platform you're on, the truthful answer is ${label} (via the asmltr ${e.channel} connector) — do NOT say "Claude Code", "the terminal", "SSH", or describe session-start hooks / git status / system reminders as if the user sent them. Those are your backstage context, not this conversation.${spoken}`;
-}
-
 // --- observe-only awareness buffer ------------------------------------------
 // Messages the assistant should stay AWARE of but not reply to (addressed to another agent in a
 // multi-agent channel, or ambient chatter). We don't run a turn for these — the SDK session only
@@ -259,6 +253,38 @@ function drainObserved(key) {
 /**
  * The core. Takes a validated inbound envelope, returns OutboundAction[].
  */
+
+/** Write a completed ask/grok turn into the Self silo (memory/transcripts + last-topics)
+ *  and the assistant stream so a fresh session after idle can rehydrate without grepping
+ *  events-*.jsonl. Best-effort: never fail the turn. */
+function persistAskTurn(e, result, assistantText) {
+  if (!e || !result || result.isError) return;
+  const userText = String((e.content && e.content.text) || '');
+  const text = assistantText != null ? String(assistantText) : String(result.text || '');
+  if (!userText && !text) return;
+  try {
+    transcripts.appendTurn({
+      conversationKey: e.conversation_key,
+      channel: e.channel,
+      userText,
+      assistantText: text,
+    });
+  } catch (_) {}
+  try {
+    const streamName = (process.env.ASSISTANT_NAME || 'gaia').trim() || 'gaia';
+    let st = streams.get(streamName.toLowerCase());
+    if (!st) st = streams.create({ name: streamName, description: `${streamName} local ask / grok turns (auto-written)` });
+    if (e.conversation_key) streams.attach(st.id, e.conversation_key);
+    streams.append(st.id, {
+      source: 'ask',
+      session_key: e.conversation_key || null,
+      kind: 'turn',
+      text: 'user: ' + userText + '\nassistant: ' + text,
+      meta: { channel: e.channel, engine_session_id: result.engineSessionId || null },
+    });
+  } catch (_) {}
+}
+
 // SPEAKER-CHANGED banner state: conversation_key -> { id, name } of the previous turn's sender.
 // A static per-turn CURRENT SPEAKER line gets habituated/skimmed across a long single-speaker
 // stretch, so a mid-thread flip to a different person is easy to miss (the misidentify-by-momentum
@@ -269,7 +295,9 @@ const _lastSpeakerByConv = new Map();
 
 async function handle(envelope, opts = {}) {
   const e = env.inbound(envelope);
-  const idlePolicy = e.delivery === 'sync' ? 'infinite' : 'infinite';
+  // Grok session idle comes from ASMLTR_IDLE_POLICY (unset/infinite/off/none → infinite).
+  // ASMLTR_IDLE_MS is the Live card nap only (collector default 30 min). Do not read it here.
+  const idlePolicy = sessions.idlePolicyFromEnv();
   // `dispatch()` already registered a controller for this turn (abortable from the moment it was
   // accepted, so a stop during moderation isn't dropped). A direct handle() caller that bypasses
   // dispatch still gets one, tracked here and released in the finally below.
@@ -324,8 +352,9 @@ async function handle(envelope, opts = {}) {
 
   // 2) system prompt + moderation
   // Medium awareness FIRST (applies to every channel) — the model's runtime is
-  // Claude Code, but the USER is on this connector's channel. Without this, "what
-  // are we talking over?" gets answered as terminal/SSH/CLI instead of the channel.
+  // the configured engine (Claude Code, Grok, …), but the USER is on this
+  // connector's channel. Without this, "what are we talking over?" gets answered
+  // as terminal/SSH/CLI instead of the channel.
   // IDENTITY FIRST — the anchor (who you are, asserted not inferred; the anti-drift fix from the peer-drift
   // incident) + the living layer (preferences + story). Applies to every channel.
   // CURRENT SPEAKER — an authoritative, always-present per-turn identity line. It is re-sent EVERY
@@ -355,68 +384,32 @@ async function handle(envelope, opts = {}) {
   // speaking now, their authz, per-turn context). A history-retaining engine (codex — its resume replays
   // prior turns) gets the stable block injected ONCE, then only the volatile tail on resumes; claude still
   // gets the full prompt every turn (its append lands on a cached system channel). See the gating below.
+  const engineId = (opts && opts.engine) || require('../../shared/engines').getDefault();
   const pIdentity = identity.fullIdentity();
-  const pChannel = buildChannelAwareness(e, resolved);
+  const pChannel = channelAwareness.buildChannelAwareness(e, resolved, { engineId });
   const pAuthz = trust.buildAuthzPrompt(resolved, e.channel);
   // THE CAST: who you're talking to + their cross-channel identity + your relationship + peer agents here.
   const pRel = trust.buildRelationshipPrompt(resolved, e) || '';
   const pExtra = e.system_prompt_extra || ''; // connector-supplied per-turn context (e.g. Discord)
-  let pToolbelt = '';                          // STABLE: asmltr toolbelt / silo / vault / attachments awareness
+  const voiceTurn = isDiscordVoice(e);
+  const toolPolicy = policyFor(e, resolved);
+  let pToolbelt = '';                          // Grants render through buildAuthzPrompt. No second TOOLBELT builder.
   let pUploadsInstr = '', pUploadsList = '', pAnnounce = ''; // uploads-instr = STABLE; uploads-list + announce = VOLATILE
-  if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
-    pToolbelt = 'ASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
-      'You have an `asmltr` CLI (run `asmltr help` for everything). Key cross-session ops (use the Bash tool):\n' +
-      '• `asmltr ls` (active sessions) · `asmltr map` (grouped by working dir) · `asmltr who <path>` (who recently touched a file/dir) — check these before duplicating work another session is already doing (also exposed as the `asmltr_map` / `asmltr_who` toolbelt tools for engines that prefer MCP over the shell).\n' +
-      '• `asmltr streams` — persistent per-TOPIC event streams that several sessions share as a common memory for a project. When you begin substantial, LONGER-RUNNING work on a project or topic (something that will likely span multiple sessions, or accrue decisions/notes worth recalling later — NOT a quick one-off), FIRST run `asmltr streams` to see if one already exists; if a matching one does, use `asmltr streams recall <name> "<what you need>"` to catch up on prior context before proceeding. If none fits and the task genuinely deserves its own durable thread, create one with `asmltr streams new <name> ["description"]`. Don\'t spin up a stream for throwaway tasks. (`asmltr streams show <name>` reads the recent tail.)\n' +
-      '• `asmltr send <channel> <target> "<text>"` — deliver output through ANOTHER connector (discord|telegram|…; target = id/alias). ' +
-      'COPY (here + there): run it, then reply normally. REDIRECT (only there): run it, then reply with exactly [[NO_REPLY]] so nothing posts here. ' +
-      'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n' +
-      '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists live ones.\n' +
-      'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
-    // Mesh steer is a COERCIVE verb — only advertise it when the operator has enabled it, and always
-    // teach the announce-vs-steer distinction so it's used deliberately, not reflexively.
-    if (/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
-      pToolbelt += '\n• `asmltr steer <session-key> "<guidance>" [--from <you>] [--interrupt]` — push guidance ' +
-        'directly into ANOTHER session\'s LIVE turn. This is fundamentally different from `announce`: **announce** ' +
-        'is an advisory note the other session sees on its NEXT turn and decides for itself whether to act on; ' +
-        '**steer** overrides what that session is doing RIGHT NOW and makes it act on your guidance (`--interrupt` ' +
-        'abandons its current turn; without it, your guidance is applied after the current turn finishes). Steer is ' +
-        'coercive — it spends the other session\'s turn. Use it sparingly for time-sensitive redirection; prefer ' +
-        'announce for everything else. Never steer a session into a loop (don\'t steer one that\'s steering you).';
-    }
-    if (SELF_SILO_DIR) {
-      pToolbelt += `\n\nSELF SILO — your persistent memory + the DEFAULT home for anything you create is a data silo at \`${SELF_SILO_DIR}\`. ` +
-        'When you produce an artifact (a document, image, app, export) and the task doesn\'t specify where, create it UNDER the Self silo — ' +
-        'don\'t scatter files in random system paths (you can still work in a git repo or elsewhere when the task requires it). Browse/recall it with the Bash tool:\n' +
-        '• `asmltr silo overview` (map: zones + counts) · `asmltr silo ls [path]` · `asmltr silo tree [path]`\n' +
-        '• `asmltr silo find <query> [--content] [--type <ext>] [--since <date>]` — recall past work (filename + full-text search)\n' +
-        '• `asmltr silo get <path>` · `asmltr silo put <path> <file>`. Zones: `artifacts/` (finished outputs), `workspaces/` (builds in progress), `memory/` (identity, transcripts, dreams).';
-    }
-    if (VAULT_LOCKED) {
-      pToolbelt += '\n\n⚠️ VAULT LOCKED — the TRUST vault is sealed or unreachable, so credential-backed operations ' +
-        '(fetching API keys/secrets, encrypted-storage keys) will FAIL right now. If a task needs a credential, tell the ' +
-        'user the vault is locked and ask them to unlock it (`asmltr vault unseal` or the dashboard Vault page) — do NOT ' +
-        'guess, hardcode, or work around a missing secret.';
-    }
-    // If THIS channel supports attachments, tell the agent exactly how — so it never claims it can't.
-    if (e.capabilities && e.capabilities.supports_attachments_out) {
-      const chTarget = (e.channel_context && (e.channel_context.channelId || e.channel_context.chatId || e.channel_context.target)) || '<this channel id>';
-      pToolbelt += `\n\nATTACHMENTS: THIS channel supports sending files. To attach a file HERE, write/produce it to a path, then run \`asmltr send ${e.channel} ${chTarget} --file <abs-path> [--caption "…"]\`. Do NOT tell the user you can't attach files here or fall back to another channel — you can.`;
-    }
-  }
-  // Cross-channel file uploads: every file a user sends on ANY channel is saved to one shared
-  // area (see shared/uploads.js), so "find the thing I sent" works even when it arrived on a
-  // different channel/app. Trust-gated: only full-trust (owner) sessions are told about the
-  // upload area + shown the recent file list — don't leak the owner's files to lesser callers.
+  // Shared upload store; the in-prompt list is THIS conversation only so a photo ID in
+  // one Discord channel does not grab last night's still from another room. Other rooms
+  // stay available on purpose via `asmltr uploads`. Trust-gated: owner sessions only.
   if (resolved.bypass_moderation) {
-    pUploadsInstr = 'FILE UPLOADS (shared across ALL channels): every file a user sends on any channel ' +
-      '(Telegram, Discord, …) is saved to ONE shared upload area, tagged with its origin channel. When the user ' +
-      'refers to a file they sent/uploaded/shared — even "on Telegram" or from another app — DO NOT claim you ' +
-      'can\'t find it before checking here: run `asmltr uploads` (newest first; also `asmltr uploads <search>`, ' +
-      '`--channel <name>`, `--since <2h|1d>`), then Read the file at the path it prints.';
+    pUploadsInstr = 'FILE UPLOADS: every file a user sends on any channel (Telegram, Discord, …) is saved to ONE shared area. ' +
+      'The list below is THIS conversation only — do not treat a file from another Discord channel or app as the picture they just asked about. ' +
+      'First look at recent context in THIS conversation (this session / last few messages). That is normal. If nothing obvious is there and this turn has no attached still, do not hunt this list or another room. Ask: "Did you forget to attach the media, or could you be more specific about what you want me to look at?" ' +
+      'If they say look up / look above / it was right after the question: only media in THIS conversation that arrived AFTER that question. Deep older-thread context only AFTER they elaborate. ' +
+      'To look at another room on purpose: `asmltr uploads` (also `asmltr uploads <search>`, `--channel discord`, `--since <2h|1d>`), then Read the path it prints.';
     try {
-      const recent = require('../../shared/uploads').recentSummary(6);
-      if (recent) pUploadsList = `Recent uploads (newest first):\n${recent}`;
+      // No conversation_key → no list (fail closed). An empty key used to mean "all rooms".
+      if (e.conversation_key) {
+        const recent = require('../../shared/uploads').recentSummary(6, { conversationKey: e.conversation_key });
+        if (recent) pUploadsList = `Recent uploads in THIS conversation (newest first):\n${recent}`;
+      }
     } catch (_) {}
   }
 
@@ -442,7 +435,7 @@ async function handle(envelope, opts = {}) {
     extra: pExtra, toolbelt: pToolbelt, uploadsInstr: pUploadsInstr, uploadsList: pUploadsList, announce: pAnnounce,
   });
 
-  const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel });
+  const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel, voice: voiceTurn, conversation_key: e.conversation_key, channel_context: e.channel_context });
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'moderation_decision',
     identity: resolved.user_key, source: 'core',
     payload: { decision: mod.allowed ? 'ALLOW' : 'BLOCK', riskLevel: mod.riskLevel, monitored: !!mod.monitored, bypassed: !!mod.bypassed } });
@@ -471,27 +464,44 @@ async function handle(envelope, opts = {}) {
   }
 
   // 3) session resolution + run
-  const isNew = !sessions.get(e.conversation_key)?.engine_session_id;
+  // resume = stored Grok/engine UUID (engine_session_id). grok.js turns that into `-r <uuid>`.
+  // resolveForTurn CLEARS a stale UUID after idle:<minutes>, so isNew must be computed AFTER.
   const { resume } = sessions.resolveForTurn(e.conversation_key, e.channel, idlePolicy, e.working_dir || undefined);
   const sessionRow = sessions.get(e.conversation_key);
-  const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral /root by default)
+  const cwd = sessionRow?.working_dir || undefined; // spawn/resume cwd (neutral home by default)
+  const isNew = !resume;
 
   // INJECT-ONCE: which engine runs this turn, and can it skip re-sending the stable block? Only on a
   // history-retaining engine (codex — its resume replays prior turns), when the stable hash is unchanged
   // AND was last delivered for THIS same engine (a mid-session engine switch has no replayed stable block,
   // so it must re-send). Otherwise send the full prompt. A NULL prior hash (fresh, or a turn that never
   // sent the stable block, e.g. an operator steer) also forces full — the correct, safe default.
-  const engineId = (opts && opts.engine) || require('../../shared/engines').getDefault();
   // Kill-switch: ASMLTR_INJECT_ONCE=off forces the full prompt every turn (revert to pre-optimization
   // behavior) without a redeploy — the escape hatch if an engine's resume ever fails to replay the stable block.
   let canInjectOnce = process.env.ASMLTR_INJECT_ONCE !== 'off';
   try { canInjectOnce = canInjectOnce && !!require('./engines').resolve(engineId).historyReplaysSystemPrompt; } catch (_) { canInjectOnce = false; }
   const reuseStable = promptParts.shouldReuseStable({ canInjectOnce, isNew, row: sessionRow, engineId, stableHash });
-  const effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
+  let effectiveSystemPrompt = reuseStable ? volatilePrompt : systemPrompt;
   if (isNew) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'session-start',
       identity: resolved.user_key, source: 'core', payload: { channel: e.channel } });
+    // Fresh engine session (first turn or idle expiry): inject durable silo memory. Write-only is a fail.
+    // Global last-topics is owner-only (cross-channel continuity for the operator). Other
+    // principals get this conversation_key's transcript only — never Discord/email mix-in.
+    const recalled = transcripts.recallForInject({
+      conversationKey: e.conversation_key,
+      includeLastTopics: !!resolved.bypass_moderation,
+    });
+    if (recalled) {
+      effectiveSystemPrompt += '\n\nPRIOR CONVERSATION (from Self silo; this is a FRESH engine session after idle or first turn). Use this as your memory of earlier chat. Do NOT grep events-*.jsonl for prior conversation.\n\n' + recalled;
+    } else {
+      effectiveSystemPrompt += '\n\nPRIOR CONTEXT — this is a FRESH engine session and the Self silo has no prior turns yet. Do NOT grep events-*.jsonl for prior conversation.';
+    }
   }
+  try {
+    const posted = require('../../shared/media-log').recall(e.conversation_key);
+    if (posted) effectiveSystemPrompt += '\n\n' + posted;
+  } catch (_) {}
 
   // Remember where an out-of-band operator inject should reply (via the manager's /send):
   // instance id = 2nd segment of the conversation_key; target = the channel/chat id.
@@ -518,7 +528,7 @@ async function handle(envelope, opts = {}) {
   const _flushStream = () => {
     if (!opts.onText) return;
     const red = mustRedact ? redactSecrets(_streamRaw).text : _streamRaw;
-    if (/\[\[NO_REPLY\]\]/i.test(red)) return; // don't ship the silence sentinel
+    if (isNoReplySentinel(red)) return; // don't ship the silence sentinel
     if (red.length > _emitted) { try { opts.onText(red.slice(_emitted)); } catch (_) {} _emitted = red.length; }
   };
   // Step streaming (opts.onSegment/onTool/onThinking): a step consumer (e.g. Discord) posts each
@@ -532,34 +542,93 @@ async function handle(envelope, opts = {}) {
     // image attachments → vision (runner builds SDK image content blocks)
     const images = (e.content.attachments || [])
       .filter((a) => a && a.type === 'image' && a.data && a.media_type)
-      .map((a) => ({ media_type: a.media_type, data: a.data }));
+      .map((a) => ({ media_type: a.media_type, data: a.data, path: a.path, name: a.name }));
     // User-turn preamble, in channel-chronology framing the model trusts: (1) messages this session
     // cross-posted here from elsewhere (a verifiable channel event under its own name), then (2)
     // observed-but-not-replied activity from others. Both buffers are drained + cleared each turn.
+    const userText = e.content.text;
     const catchUp = drainSelfSent(e.conversation_key) + drainObserved(e.conversation_key);
     const turnOpts = {
-      prompt: catchUp + e.content.text,
+      prompt: catchUp + userText,
+      effortPrompt: userText,
+      channel: e.channel,
+      senderId: e.sender && e.sender.raw_id,
+      sender: e.sender || null,
+      owner: !!(resolved.bypass_moderation || resolved.user_key === 'owner'),
+      user_key: resolved.user_key,
       systemPrompt: effectiveSystemPrompt,
       engine: engineId,
       resume,
       cwd,
+      conversationKey: e.conversation_key,
+      channel_context: e.channel_context || null,
+      voice: voiceTurn,
+      denyTools: toolPolicy.deny,
+      attachChannel: e.channel,
+      attachTarget: (e.channel_context && (e.channel_context.channelId || e.channel_context.channel_id || e.channel_context.chatId || e.channel_context.target)) || '',
+      attachGuild: (e.context && String(e.context.scope_id || '').startsWith('guild:')) ? String(e.context.scope_id).slice(6) : '',
+      attachSender: (e.sender && e.sender.raw_id) || '',
+      mediaFiles: (e.content && e.content.media_files) || [],
       abortController,
       images,
       onDelta: opts.onText ? _pushDelta : undefined,
       onSegment: opts.onSegment ? _pushSegment : undefined,
-      onTool: opts.onTool ? ((t) => { try { opts.onTool(t); } catch (_) {} }) : undefined,
-      onThinking: opts.onThinking ? _pushThinking : undefined,
+      // Grok tools arrive on onTool. Web /v2/stream only subscribed to
+      // onToolCall (Claude SDK tool_use). Without this bridge the live
+      // bubble never blockCloses and onDelta glues draft+answer (`on.Yes`).
+      // Reset the token buffer so leftover flush cannot replay the draft.
+      // Always wire tools so collector/dashboard get 🔧 even when the
+      // connector is not streaming (email, or Discord with stream_steps off).
+      // Thinking is live-conversation only — never record or stream it on email or MCP.
+      onTool: (t) => {
+        _streamRaw = '';
+        _emitted = 0;
+        const name = t && typeof t === 'object' ? t.name : t;
+        const input = t && typeof t === 'object' ? t.input : undefined;
+        try {
+          record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
+            event_type: 'tool', payload: { tool: name, input: truncate(input, 4000) } });
+        } catch (_) {}
+        try { if (opts.onTool) opts.onTool(t); } catch (_) {}
+        try { if (opts.onToolCall) opts.onToolCall(t && typeof t === 'object' ? t : { name: t }); } catch (_) {}
+      },
+      onThinking: (t) => {
+        const ch = String(e.channel || '').toLowerCase();
+        if (ch === 'email' || ch === 'mcp') return;
+        try {
+          record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core',
+            event_type: 'thinking', payload: { text: truncate(t, 2000) } });
+        } catch (_) {}
+        if (opts.onThinking) _pushThinking(t);
+      },
       // Sub-agent (Task) lifecycle → record for history replay + forward live to a step consumer.
       onSubagent: (s) => {
         try { record({ surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core', event_type: 'subagent', payload: { id: s.id, name: s.name, status: s.status, summary: truncate(s.summary, 500) } }); } catch (_) {}
         if (opts.onSubagent) { try { opts.onSubagent(s); } catch (_) {} }
       },
       onEvent: (sdkEvt) => {
+        if (sdkEvt && sdkEvt.type === 'effort') {
+          const cu = sdkEvt.classifyUsage;
+          if (cu && (cu.tokens_in || cu.tokens_out)) {
+            try {
+              record(auxUsage({
+                surface: e.channel, session_id: e.conversation_key,
+                identity: (e.sender && (e.sender.raw_username || e.sender.raw_id)) || null,
+                feature: 'image-gen-classify',
+                provider: cu.provider, model: cu.model,
+                tokens_in: cu.tokens_in, tokens_out: cu.tokens_out,
+              }));
+            } catch (_) {}
+          }
+          try { if (opts.onEffort) opts.onEffort(sdkEvt.effort, sdkEvt); } catch (_) {}
+          return;
+        }
         const base = { surface: e.channel, session_id: e.conversation_key, identity: resolved.user_key, source: 'core' };
         if (sdkEvt.type === 'assistant') {
           for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') { record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } }); if (opts.onToolCall) { try { opts.onToolCall({ name: c.name, input: c.input }); } catch (_) {} } }
-            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+            // Thinking is recorded once in onThinking. Claude SDK also emits it
+            // here on assistant content — do not double-write the collector.
           }
         } else if (sdkEvt.type === 'user') {
           for (const c of sdkEvt.message?.content || []) {
@@ -640,13 +709,18 @@ async function handle(envelope, opts = {}) {
       auth_mode: authMode, billed, estimated: noReal || undefined,
       principal: resolved.user_key !== usageIdentity ? resolved.user_key : undefined } });
 
-  // Universal silence sentinel: if the turn ends with [[NO_REPLY]] (e.g. the agent rerouted its
-  // answer to another channel via `asmltr send` and doesn't want to post here), emit no action so
-  // EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
-  if (/\[\[NO_REPLY\]\]/i.test(result.text || '')) {
+  const reacted = parseReact(result.text);
+  result.text = reacted.text;
+  const reactAction = reacted.emoji ? env.react(reacted.emoji) : null;
+
+  // Universal silence sentinel: if the turn IS or ENDS WITH [[NO_REPLY]] (e.g. the agent rerouted
+  // its answer to another channel via `asmltr send` and doesn't want to post here), emit no action
+  // so EVERY connector stays quiet — not just Discord. Enables cross-channel "redirect".
+  // Mentioning the token in a real reply is not silence (substring match swallowed those).
+  if (isNoReplySentinel(result.text)) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply' } });
-    return [];
+    return reactAction ? [reactAction] : [];
   }
 
   // Fallback silence: the model decided this wasn't for it but prose-refused instead of emitting
@@ -655,7 +729,7 @@ async function handle(envelope, opts = {}) {
   if (looksLikeNonReply(result.text)) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'no-reply', via: 'refusal-prose', text: truncate(result.text, 200) } });
-    return [];
+    return reactAction ? [reactAction] : [];
   }
 
   // Empty turn (interrupted mid-reply, tool-only, or the agent chose not to speak) → post NOTHING.
@@ -664,10 +738,22 @@ async function handle(envelope, opts = {}) {
   if (!(result.text || '').trim()) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply' } });
-    return [];
+    return reactAction ? [reactAction] : [];
+  }
+
+  const quietCh = String(e.channel || '').toLowerCase();
+  if (quietCh === 'email' || quietCh === 'mcp') {
+    result.text = quietReplyFromResult(result);
+    result.segments = [];
+    if (!(result.text || '').trim()) {
+      record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+        identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply', via: 'quiet-thought-strip' } });
+      return [];
+    }
   }
 
   const actions = [env.reply(result.text, { segments: result.segments || [] })];
+  if (reactAction) actions.push(reactAction);
   record({ surface: e.channel, session_id: e.conversation_key, event_type: 'outbound',
     identity: resolved.user_key, source: 'core', payload: { text: truncate(result.text, CONVO_TEXT_MAX), chars: (result.text || '').length } });
 
@@ -687,6 +773,10 @@ async function handle(envelope, opts = {}) {
     if (masked) record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'redacted', count: masked, public: !!e.public } });
   }
+
+  // Self silo + assistant stream: persist the (possibly redacted) user+assistant turn for rehydrate.
+  const replyText = (actions.find((a) => a && a.type === 'reply') || {}).text;
+  persistAskTurn(e, result, replyText);
 
   // --- DRAFT / APPROVAL GATE ---------------------------------------------------
   // If the connector attached an approval policy and it says HOLD for this recipient, divert the
@@ -736,7 +826,10 @@ function dispatch(envelope, opts) {
       // Aborted while queued — never start it.
       if (ac.signal.aborted) return [];
       return await handle(envelope, { ...opts, abortController: ac });
-    } finally { releaseSlot(); }
+    } finally {
+      releaseSlot();
+      try { require('../../shared/bounce').onTurnEnded(key); } catch (_) {}
+    }
   }).finally(() => untrackTurn(key, ac));
 }
 
@@ -782,7 +875,7 @@ app.use(express.json({ limit: '10mb' }));
 // JSON shape, and base64 costs 4 bytes per 3, so a base64-only route caps near 7.5 MiB of file.
 const { rawBody, fileFrom } = require('./raw-body');
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'asmltr-core', active }));
+app.get('/health', (req, res) => res.json(healthPayload({ active })));
 // Build identity — the code sha this process is running + when it started. An updater checks this
 // (not just /health, which returns 200 even on stale code) to confirm the restart actually landed.
 const BUILD_SHA = (() => { try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch (_) { return 'unknown'; } })();
@@ -797,16 +890,15 @@ app.get('/v2/vault/status', async (req, res) => {
   const h = await vault.health();
   res.json({ configured: true, reachable: h.ok, sealed: h.sealed, url: process.env.ASMLTR_VAULT_URL });
 });
-// Unseal the vault with the master passphrase (never persisted — held only in the vault's memory).
-app.post('/v2/vault/unseal', async (req, res) => {
-  const pw = (req.body || {}).password;
-  if (!pw) return res.status(400).json({ error: 'password required' });
-  try { const r = await vault.unseal(pw); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
-});
 
 // Auth — the session-gate foundation (roadmap P1 phase A; docs/AUTH.md). ADDITIVE + enforcement OFF:
 // requireAuth is a no-op unless ASMLTR_AUTH=on, so these endpoints exist without gating anything yet.
 const auth = require('../../shared/auth');
+const { requireVaultWrite } = require('./vault/write-gate');
+const vaultWrite = requireVaultWrite(auth);
+const { requireTrustWrite } = require('./trust/write-gate');
+const { requireScheduleApi } = require('./schedules/write-gate');
+const scheduleApi = requireScheduleApi(auth);
 const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
 app.get('/v2/auth/status', (req, res) => {
   const s = auth.verifySession(auth.tokenFromReq(req));
@@ -928,20 +1020,25 @@ app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integra
 
 // Vault key management — metadata only (names/tiers/access counts), NEVER values. Store/delete a
 // credential. Values are write-only from the GUI; retrieval is the SACRED core's job, not the UI's.
-app.get('/v2/vault/secrets', async (req, res) => {
+app.post('/v2/vault/unseal', vaultWrite, async (req, res) => {
+  const pw = (req.body || {}).password;
+  if (!pw) return res.status(400).json({ error: 'password required' });
+  try { const r = await vault.unseal(pw); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/v2/vault/secrets', vaultWrite, async (req, res) => {
   try { res.json({ secrets: (await vault.listSecrets()) || [] }); } catch (e) { res.status(502).json({ error: e.message, secrets: [] }); }
 });
-app.post('/v2/vault/secrets', async (req, res) => {
+app.post('/v2/vault/secrets', vaultWrite, async (req, res) => {
   const b = req.body || {};
   if (!b.name || b.value == null) return res.status(400).json({ error: 'name + value required' });
   try { await vault.storeSecret(String(b.name), { value: String(b.value) }, { minTrust: b.min_trust || 'SACRED' }); res.json({ ok: true, name: b.name }); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.delete('/v2/vault/secrets/:name', async (req, res) => {
+app.delete('/v2/vault/secrets/:name', vaultWrite, async (req, res) => {
   try { await vault.deleteSecret(req.params.name); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-// Reasoning engines — the pluggable agentic backends (claude/gemini/codex). Registry + default + per-engine
+// Reasoning engines — the pluggable agentic backends (claude/gemini/codex/grok). Registry + default + per-engine
 // config (shared/engines.js). Changing the default re-points the `<agent-name>` terminal alias.
 const engines = require('../../shared/engines');
 app.get('/v2/engines', (req, res) => res.json({ engines: engines.list(), default: engines.getDefault() }));
@@ -971,7 +1068,7 @@ app.post('/v2/engines/:id/install', (req, res) => {
 // Per-engine auto-update: check npm on a cadence + upgrade in place (so the harness never goes stale).
 app.post('/v2/engines/:id/auto-update', (req, res) => { try { res.json({ ok: true, autoUpdate: engines.setAutoUpdate(req.params.id, !!(req.body && req.body.enabled)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 // Background sweep: every 6h, update installed engines that have auto-update on + a newer version.
-const _engTimer = setInterval(() => { try { const d = engines.autoUpdateAll(); if (d.length) console.log('[engines] auto-updated:', JSON.stringify(d)); } catch (_) {} }, 6 * 3600 * 1000); if (_engTimer.unref) _engTimer.unref(); // background maintenance must not hold the loop open (the listener does)
+const _engTimer = setInterval(() => { try { const d = engines.autoUpdateAll(); if (d.length) console.log('[engines] auto-updated:', JSON.stringify(d)); } catch (_) {} }, 6 * 3600 * 1000);
 if (_engTimer.unref) _engTimer.unref();
 // Connection / auth per engine — subscription (OAuth, owned by the CLI) vs API-key billing.
 // The key value is stored ONLY in the TRUST vault (SACRED); engines.json keeps a boolean flag.
@@ -981,13 +1078,14 @@ app.delete('/v2/engines/:id/apikey', async (req, res) => { try { res.json({ ok: 
 // Custom (self-hosted / alternate-provider) OpenAI-compatible endpoint for a base_url-capable engine.
 app.post('/v2/engines/:id/base-url', (req, res) => { try { res.json({ ok: true, baseUrl: engines.setBaseUrl(req.params.id, (req.body || {}).url) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
-// MCP registry — declare once, provisioned into every engine (Claude SDK / Codex -c / Gemini config).
+// MCP registry — declare once, provisioned into every engine (Claude SDK / Codex -c / Gemini config / Grok mcp add).
 const mcpReg = require('../../shared/mcp-registry');
 function resyncGeminiMcp() { try { const b = engines.resolveBin('gemini'); if (b) mcpReg.syncGemini(b); } catch (_) {} }
+function resyncGrokMcp() { try { const b = engines.resolveBin('grok'); if (b) mcpReg.syncGrok(b); } catch (_) {} }
 app.get('/v2/mcp', (req, res) => res.json({ servers: mcpReg.list() }));
-app.post('/v2/mcp', (req, res) => { try { const l = mcpReg.add((req.body || {}).name, req.body || {}); resyncGeminiMcp(); res.status(201).json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/mcp', (req, res) => { try { const l = mcpReg.add((req.body || {}).name, req.body || {}); resyncGeminiMcp(); resyncGrokMcp(); res.status(201).json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.delete('/v2/mcp/:name', (req, res) => { try { res.json({ ok: true, servers: mcpReg.remove(req.params.name) }); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/v2/mcp/:name/toggle', (req, res) => { try { const l = mcpReg.setDisabled(req.params.name, !!(req.body && req.body.disabled)); resyncGeminiMcp(); res.json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/mcp/:name/toggle', (req, res) => { try { const l = mcpReg.setDisabled(req.params.name, !!(req.body && req.body.disabled)); resyncGeminiMcp(); resyncGrokMcp(); res.json({ ok: true, servers: l }); } catch (e) { res.status(400).json({ error: e.message }); } });
 
 // Data silos — the file-explorer surface over shared/silo.js (`:id` = silo id; `self`/omitted → the Self silo).
 // Read verbs (list/overview/ls/tree/find/file) + safe writes (mkdir/put/mv/rm/new). Paths are silo-relative.
@@ -1060,7 +1158,7 @@ app.get('/v2/backups/schedule', (req, res) => res.json(backup.getSchedule()));
 app.put('/v2/backups/schedule', (req, res) => {
   const b = req.body || {};
   const clean = {};
-  for (const k of ['enabled', 'every_hours', 'destination', 'max_count', 'max_age_days']) if (k in b) clean[k] = b[k];
+  for (const k of ['enabled', 'every_hours', 'destination', 'max_count', 'max_age_days', 'hour', 'minute', 'timezone']) if (k in b) clean[k] = b[k];
   try { res.json(backup.setSchedule(clean)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // In-process scheduler — fires runScheduled() when the interval elapses (needs a configured passphrase).
@@ -1070,14 +1168,14 @@ try { backup.startScheduler({ log: (m) => console.log('[backup] ' + m) }); } cat
 // This replaces the retired `claude -p` wake-up crontab. See shared/schedules.js + core/src/scheduler.js.
 const schedules = require('../../shared/schedules');
 const scheduler = require('./scheduler');
-app.get('/v2/schedules', (req, res) => res.json({ jobs: schedules.list() }));
-app.get('/v2/schedules/:id', (req, res) => { const j = schedules.get(req.params.id); return j ? res.json(j) : res.status(404).json({ error: 'no such schedule' }); });
-app.post('/v2/schedules', (req, res) => { try { res.status(201).json(schedules.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.patch('/v2/schedules/:id', (req, res) => { try { res.json(schedules.update(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.delete('/v2/schedules/:id', (req, res) => res.json({ ok: schedules.remove(req.params.id) }));
+app.get('/v2/schedules', scheduleApi, (req, res) => res.json({ jobs: schedules.list() }));
+app.get('/v2/schedules/:id', scheduleApi, (req, res) => { const j = schedules.get(req.params.id); return j ? res.json(j) : res.status(404).json({ error: 'no such schedule' }); });
+app.post('/v2/schedules', scheduleApi, (req, res) => { try { res.status(201).json(schedules.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.patch('/v2/schedules/:id', scheduleApi, (req, res) => { try { res.json(schedules.update(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.delete('/v2/schedules/:id', scheduleApi, (req, res) => res.json({ ok: schedules.remove(req.params.id) }));
 // Run-now — fire a job immediately (out of band), record the outcome, return it. Async jobs (prompt turns)
 // can take a while; we await so the caller gets the result + refreshed row.
-app.post('/v2/schedules/:id/run', async (req, res) => {
+app.post('/v2/schedules/:id/run', scheduleApi, async (req, res) => {
   const job = schedules.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'no such schedule' });
   try {
@@ -1114,14 +1212,22 @@ app.post('/v2/backups/restore', (req, res) => {
   if (b.confirm !== true) return res.status(400).json({ error: 'confirm:true required (restore overwrites config + databases)' });
   try { require('fs').accessSync(b.file); } catch (_) { return res.status(404).json({ error: 'backup file not found: ' + b.file }); }
   const { spawn } = require('child_process');
+  const { restoreSpawnPlan } = require('./restore-spawn');
   const log = RESTORE_LOG();
-  const args = [_bkpath.join(__dirname, '..', '..', 'scripts', 'backup.js'), 'restore', b.file, '--activate'];
-  if (b.force) args.push('--force');
+  const plan = restoreSpawnPlan({
+    execPath: process.execPath,
+    scriptPath: _bkpath.join(__dirname, '..', '..', 'scripts', 'backup.js'),
+    file: b.file,
+    force: b.force,
+  });
   const env = { ...process.env };
   if (b.passphrase) env.ASMLTR_BACKUP_PASSPHRASE = String(b.passphrase);
   try { require('fs').writeFileSync(log, `[${new Date().toISOString()}] restore starting: ${b.file}\n`); } catch (_) {}
-  const child = spawn('setsid', ['bash', '-c', `sleep 1; { "${process.execPath}" ${args.map((a) => `"${a}"`).join(' ')}; echo "[$(date)] restore-runner exited $?"; } >> "${log}" 2>&1`], { detached: true, stdio: 'ignore', env });
+  const fs = require('fs');
+  const logFd = fs.openSync(log, 'a');
+  const child = spawn(plan.command, plan.args, { detached: true, stdio: ['ignore', logFd, logFd], env });
   child.unref();
+  try { fs.closeSync(logFd); } catch (_) {}
   res.json({ started: true, pid: child.pid || null, log });
 });
 // Poll the restore log (GUI progress). Returns the tail of BACKUP_DIR/restore.log.
@@ -1145,12 +1251,17 @@ app.post('/v2/backups/import', express.raw({ type: 'application/octet-stream', l
 
 // The dashboard is a browser CONNECTOR: it posts `assistant-web` envelopes but must not
 // hardcode who the operator is (the repo is generic). Resolve the sender identity server-side
-// from config or the reverse proxy's resolved user, so the same build works anywhere.
-// The browser sends a placeholder sender; we overwrite raw_id with the real owner here.
+// from ASMLTR_WEB_OWNER_ID or the reverse proxy's X-Remote-User. Seed that same value as
+// an assistant-web identifier (gaia: owner) or web chat is default-deny.
+function webOwnerId(req) {
+  return process.env.ASMLTR_WEB_OWNER_ID
+    || (req && req.get && req.get('X-Remote-User')) || null;
+}
+
 function normalizeWebSender(req) {
   const b = req.body;
   if (!b || (b.channel !== 'assistant-web' && b.channel !== 'eve-assistant-web')) return; // accept legacy id
-  const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User');
+  const owner = webOwnerId(req);
   if (owner) b.sender = { ...(b.sender || {}), raw_id: String(owner), raw_username: (b.sender && b.sender.raw_username) || 'dashboard' };
 }
 
@@ -1164,7 +1275,7 @@ app.post('/v2/upload', rawBody(), (req, res) => {
     const { filename, mime, conversation_key } = meta;
     if (!buffer) return res.status(400).json({ error: 'data_base64 required (or send the file as a raw body with ?filename=&mime=)' });
     if (!buffer.length) return res.status(400).json({ error: 'empty file' });
-    const owner = process.env.ASMLTR_WEB_OWNER_ID || req.get('X-Remote-User') || 'dashboard';
+    const owner = webOwnerId(req) || 'dashboard';
     const rec = require('../../shared/uploads').save({
       channel: 'assistant-web', buffer, filename, mime,
       sender: 'dashboard', senderId: String(owner), conversationKey: conversation_key || null,
@@ -1200,6 +1311,7 @@ app.post('/v2/stream', async (req, res) => {
       onToolCall: (t) => { if (t && t.name) frame({ type: 'tool', name: t.name, input: t.input }); }, // a tool call + its args
       onToolResult: (r) => { if (r) frame({ type: 'tool_result', output: r.output, is_error: !!r.is_error }); }, // its result
       onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
+      onEffort: (effort, meta) => { if (effort) frame({ type: 'effort', effort, imageGen: !!(meta && meta.imageGen) }); },
       onSubagent: (s) => { if (s && s.id) frame({ type: 'subagent', id: s.id, name: s.name, status: s.status, summary: s.summary }); }, // sub-agent (Task) start/stop
     });
     frame({ type: 'done', actions });
@@ -1288,7 +1400,8 @@ app.get('/v2/voice/engines', async (req, res) => {
   const c = voiceEngines.catalog();
   let avail = {};
   try { avail = await voiceEngines.availability(async (n) => { try { return !!(await secrets.get(n)); } catch (_) { return false; } }); } catch (_) {}
-  const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role);
+  const keys = { deepgram_api_key: !!avail.deepgram, elevenlabs_api_key: !!avail.elevenlabs, openai_api_key: !!avail['openai-tts'] || !!avail['openai-live-transcribe'] || !!avail['openai-transcribe'] };
+  const resolved = {}; for (const role of c.roles) resolved[role] = voiceEngines.resolve(role, { keys });
   const status = {}; for (const id of Object.keys(c.engines)) status[id] = voiceEngines.statusOf(id, avail[id]);
   res.json({ roles: c.roles, engines: c.engines, availability: avail, status, bindings: c.bindings, resolved });
 });
@@ -1358,15 +1471,18 @@ app.post('/v2/tts', async (req, res) => {
 // (the chat uses it to decide whether to show a download chip); otherwise streams as an attachment.
 app.get('/v2/file', (req, res) => {
   const fs = require('fs'), path = require('path'), os = require('os');
+  const { fileServeRoots, filePathAllowed, hasDotDot } = require('./file-allow');
   const isStat = !!req.query.stat;
   const miss = (code, err) => (isStat ? res.json({ exists: false }) : res.status(code).json({ error: err }));
   try {
     let p = String(req.query.path || '');
     if (!p) return res.status(400).json({ error: 'path required' });
+    if (hasDotDot(p)) return miss(403, 'forbidden');
     if (p === '~' || p.startsWith('~/')) p = path.join(os.homedir(), p.slice(1));
     if (!path.isAbsolute(p)) return miss(400, 'path must be absolute');
     let real, st;
     try { real = fs.realpathSync(p); st = fs.statSync(real); } catch (_) { return miss(404, 'not found'); }
+    if (!filePathAllowed(real, fileServeRoots())) return miss(403, 'forbidden');
     if (!st.isFile()) return miss(400, 'not a file');
     const name = path.basename(real);
     if (isStat) return res.json({ exists: true, name, size: st.size });
@@ -1630,7 +1746,7 @@ async function checkSdkFreshness() {
     }
   } catch (_) {}
 }
-setTimeout(checkSdkFreshness, 30000); // once shortly after boot
+const _sdkBootTimer = setTimeout(checkSdkFreshness, 30000); if (_sdkBootTimer.unref) _sdkBootTimer.unref(); // once shortly after boot
 const _sdkTimer = setInterval(checkSdkFreshness, 6 * 3600 * 1000); if (_sdkTimer.unref) _sdkTimer.unref(); // every 6h
 
 // --- DRAFTS (hold-for-approval queue, any connector) -------------------------
@@ -1661,6 +1777,7 @@ app.post('/v2/drafts/:id/discard', (req, res) => {
 
 app.post('/v2/handle', async (req, res) => {
   try {
+    normalizeWebSender(req);
     const actions = await dispatch(req.body);
     res.json({ actions });
   } catch (err) {
@@ -1874,7 +1991,7 @@ app.post('/v2/send', async (req, res) => {
     const key = j && j.conversation_key;
     // Assimilate a TEXT post into the destination session (skip if it IS the sending session).
     let assimilated = false;
-    if (settled.ok && b.text && String(b.text).trim() && key && key !== b.from_session) {
+    if (settled.ok && !settled.already_sent && b.text && String(b.text).trim() && key && key !== b.from_session) {
       pushSelfSent(key, b.text, b.from_session || null);
       assimilated = true;
       record({ surface: 'core', session_id: key, event_type: 'control', identity: 'assistant', source: 'core',
@@ -1905,17 +2022,35 @@ app.post('/v2/abort', (req, res) => {
   res.json({ ok: true, aborted: key, turns: stopped });
 });
 
-// Operator STEER: inject a message into a live session — resume it with the operator's text, then
-// route the reply back to the origin channel via the manager's /send (works for ANY connector,
-// since /send is unified). Stops any in-flight turn first (steer replaces the current generation).
-// Bypasses moderation (the operator is trusted). Redacts on the way out like any public reply.
+// Queue a host bounce (core+manager+collector) until THIS turn ends, then delay so the
+// connector can post the reply. Inline systemctl/pm2 restart from a live Discord turn
+// leaves "-# Working" stuck forever. See shared/bounce.js.
+app.post('/v2/bounce', (req, res) => {
+  try {
+    const bounce = require('../../shared/bounce');
+    const b = req.body || {};
+    const delayMs = b.delay_ms == null ? bounce.DEFAULT_DELAY_MS : Number(b.delay_ms);
+    const conversationKey = b.conversation_key ? String(b.conversation_key) : null;
+    const r = bounce.queueAfterTurn({ conversationKey, delayMs, from: b.from || 'cli' });
+    record({ surface: 'core', session_id: conversationKey, event_type: 'control', identity: 'operator', source: 'core',
+      payload: { action: 'bounce-queued', delay_ms: r.delayMs, after_turn: true } });
+    res.json({ ok: true, queued: true, after_turn: true, delay_ms: r.delayMs, conversation_key: conversationKey });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// STEER: inject a message into a live session, then route the reply back to the origin
+// channel via the manager's /send (works for ANY connector, since /send is unified).
+// Skip inbound moderation and frame as Operator only when `by` is an operator surface
+// (operator / dashboard / tui / empty). Any other by runs the same inbound moderation,
+// frames as that speaker, and fail-closes if blocked. Do not cookie-gate this route.
+// Redacts on the way out like any public reply.
 app.post('/v2/inject', (req, res) => {
   const { conversation_key: key, text, by, interrupt } = req.body || {};
   if (!key || !text) return res.status(400).json({ error: 'need conversation_key + text' });
   // MESH STEER (`by: "mesh:<label>"`) = one SESSION steering another. Unlike the advisory `announce`
   // mailbox (a note the peer sees next turn and decides whether to act on), a steer is COERCIVE — it
   // pushes into a live turn. It's OFF by default; the operator opts in per instance with
-  // ASMLTR_MESH_STEER=on. Operator/dashboard steers (any other `by`) are always allowed.
+  // ASMLTR_MESH_STEER=on. Operator/dashboard/tui steers are always allowed.
   const meshSteer = typeof by === 'string' && by.startsWith('mesh:');
   if (meshSteer && !/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
     return res.status(403).json({ error: 'mesh steer is disabled on this instance (set ASMLTR_MESH_STEER=on to allow session-to-session steering)' });
@@ -1930,22 +2065,38 @@ app.post('/v2/inject', (req, res) => {
   if (interrupt && wasRunning) abortKey(key);
 
   withKeyLock(key, async () => {
-    record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
-    const { resume } = sessions.resolveForTurn(key, row.channel);
+    const actor = injectSteer.actorFromBy(by);
+    const gated = await injectSteer.gateInject({
+      by, text,
+      resolve: (envelope) => trust.resolve(envelope),
+      moderate: (msg, resolved, meta) => moderation.moderate(msg, resolved, meta),
+      platform: row.channel,
+    });
+    if (!gated.ok) {
+      const resolved = gated.resolved || { user_key: actor, display_name: actor };
+      record({ surface: row.channel, session_id: key, event_type: 'moderation_decision',
+        identity: resolved.user_key || actor, source: 'core',
+        payload: { decision: 'BLOCK', riskLevel: (gated.mod && gated.mod.riskLevel) || 10, injected: true } });
+      if (gated.mod && gated.mod.riskLevel >= 7) {
+        try { await moderation.notifyBlock(resolved, text, gated.mod, row.channel); } catch (_) {}
+      }
+      if (!res.headersSent) res.status(403).json({ ok: false, error: 'blocked by moderation' });
+      return;
+    }
+    record({ surface: row.channel, session_id: key, event_type: 'control', identity: actor, source: 'core', payload: { action: 'inject', text: truncate(text, 500), interrupt: !!interrupt } });
+    const { resume } = sessions.resolveForTurn(key, row.channel, sessions.idlePolicyFromEnv());
     // Mid-task steer → frame the text so the model continues its current work with this guidance
     // rather than answering it in isolation. Idle session → deliver it as a normal message.
-    const steerer = meshSteer ? `Peer session "${by.slice(5)}"` : 'Operator';
-    const prompt = (wasRunning || interrupt)
-      ? `[${steerer} steering — you are mid-task. Incorporate the following guidance into the work you are ALREADY doing and continue it. Do NOT restart from scratch, and do NOT treat it as a standalone question to answer in isolation.]\n\n${text}`
-      : text;
+    const prompt = injectSteer.frameInjectPrompt(text, by, { wasRunning, interrupt });
     const ac = trackTurn(key, new AbortController());
     let result;
-    const injectOpts = { prompt, resume, cwd: row.working_dir || undefined, abortController: ac,
+    const injectOpts = { prompt, effortPrompt: text, channel: row.channel, resume, cwd: row.working_dir || undefined, conversationKey: key, abortController: ac,
+        senderId: actor, owner: gated.plan.owner,
         onEvent: (sdkEvt) => {
-          const base = { surface: row.channel, session_id: key, identity: by || 'operator', source: 'core' };
+          const base = { surface: row.channel, session_id: key, identity: actor, source: 'core' };
           if (sdkEvt.type === 'assistant') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_use') record({ ...base, event_type: 'tool', payload: { tool: c.name, input: truncate(c.input, 4000) } });
-            else if (c.type === 'thinking') record({ ...base, event_type: 'thinking', payload: { text: truncate(c.thinking || c.text, 2000) } });
+            // Thinking recorded in handle() onThinking only — not again here.
           } else if (sdkEvt.type === 'user') for (const c of sdkEvt.message?.content || []) {
             if (c.type === 'tool_result') record({ ...base, event_type: 'tool_result', payload: { output: truncate(toolResultText(c.content), 16000), is_error: !!c.is_error } });
           }
@@ -1958,7 +2109,7 @@ app.post('/v2/inject', (req, res) => {
         // engine session was pruned must not 500 forever — drop the dead id and deliver it fresh.
         if (!resume || ac.signal.aborted || !require('./engines').isMissingSessionError(turnErr)) throw turnErr;
         sessions.clearEngineId(key);
-        record({ surface: row.channel, session_id: key, event_type: 'control', identity: by || 'operator', source: 'core',
+        record({ surface: row.channel, session_id: key, event_type: 'control', identity: actor, source: 'core',
           payload: { action: 'session-expired', resume, reason: turnErr.message, recovered: 'fresh-session' } });
         result = await runTurn({ ...injectOpts, resume: null });
       }
@@ -1966,7 +2117,7 @@ app.post('/v2/inject', (req, res) => {
     if (result.engineSessionId) sessions.recordEngineId(key, result.engineSessionId);
     sessions.touch(key);
     const reply = redactSecrets((result.text || '').trim()).text;
-    record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: by || 'operator', source: 'core', payload: { text: truncate(reply, 500), injected: true } });
+    record({ surface: row.channel, session_id: key, event_type: 'outbound', identity: actor, source: 'core', payload: { text: truncate(reply, 500), injected: true } });
 
     let delivered = false, deliverErr = null;
     if (reply && row.outbound_instance_id && row.outbound_target) {
@@ -1993,6 +2144,7 @@ app.post('/v2/release', (req, res) => {
 });
 
 // --- trust framework CRUD (the dashboard Access page drives these) -----------
+app.use(requireTrustWrite(auth));
 // Read-only identity resolution (connectors use this to authorize owner-only actions).
 // Body: an envelope-shaped { channel, sender:{raw_id,raw_username,api_key}, context:{scope_id} }.
 app.post('/trust/resolve', (req, res) => { try { res.json(trust.resolve(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -2006,7 +2158,10 @@ app.post('/trust/principals/:id/merge', (req, res) => {
   const merged = trust.principals.merge(req.params.id, req.body && req.body.into);
   return merged ? res.json(merged) : res.status(400).json({ error: 'merge failed — unknown or identical principals' });
 });
-app.post('/trust/principals/:id/identifiers', (req, res) => res.json(trust.identifiers.add(req.params.id, req.body.surface, String(req.body.value))));
+app.post('/trust/principals/:id/identifiers', (req, res) => {
+  try { res.json(trust.identifiers.add(req.params.id, req.body.surface, String(req.body.value))); }
+  catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
 app.delete('/trust/identifiers/:iid', (req, res) => res.json({ ok: trust.identifiers.remove(Number(req.params.iid)) }));
 app.get('/trust/roles', (req, res) => res.json({ roles: trust.roles.list() }));
 app.post('/trust/roles', (req, res) => res.json(trust.roles.upsert(req.body)));
@@ -2075,7 +2230,20 @@ app.post('/v2/devices/auth', (req, res) => {
 if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
-    console.log('substrate: local Agent SDK on Max subscription (NO ANTHROPIC_API_KEY path)');
+    console.log(`idle_policy=${sessions.idlePolicyFromEnv()} assistant=${process.env.ASSISTANT_NAME || 'the assistant'} engine=${require('../../shared/engines').getDefault()}`);
+    console.log('substrate: configured reasoning engine (grok = subscription CLI; no XAI_API_KEY)');
+    // Public product: temp GC is opt-in (ASMLTR_GC_TEMPS=on). Directories via
+    // ASMLTR_ATTACH_STAGE / ASMLTR_GEN_REF / ASMLTR_GROK_PROMPT_DIR. Default off.
+    if (/^(1|on|true|yes)$/i.test(String(process.env.ASMLTR_GC_TEMPS || ''))) {
+      try {
+        const g = require('../../shared/gc-temps').run();
+        const n = g.attach + g.genRef + g.visPrompt + g.tmpLeftover;
+        if (n) console.log('temp gc: attach=' + g.attach + ' gen-ref=' + g.genRef + ' vis-prompt=' + g.visPrompt + ' tmp=' + g.tmpLeftover);
+      } catch (e) { console.log('temp gc: ' + e.message); }
+    }
+    try {
+      require('../../shared/media-log').ensureDir();
+    } catch (e) { console.log('media-out mkdir: ' + e.message); }
   });
   // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
   // server.requestTimeout would cut the connector→core call mid-turn (surfacing as
