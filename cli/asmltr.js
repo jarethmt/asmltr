@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 'use strict';
+try { require('../shared/loadenv'); } catch (_) {}
+const { exitIfDenied } = require('../shared/media-allow');
 /**
  * asmltr — terminal client + TUI (plan §B9).
  *
@@ -41,7 +43,7 @@ const A = {
   mag: (s) => `\x1b[35m${s}\x1b[0m`,
 };
 const SURFACE_COLOR = {
-  discord: A.mag, telegram: A.cyn, github: A.grn, mcp: A.yel,
+  discord: A.mag, telegram: A.cyn, github: A.grn, mcp: A.yel, cli: A.cyn,
   'assistant-web': A.cyn, 'assistant-native': A.cyn, 'eve-assistant-web': A.cyn, 'eve-assistant-native': A.cyn, 'claude-code': A.bold, core: A.bold, system: A.dim,
 };
 const paint = (surface, s) => (SURFACE_COLOR[surface] || ((x) => x))(s);
@@ -246,26 +248,115 @@ async function cmdRelease(key) {
   console.log(A.grn('released — channel resumes'));
 }
 
+async function deliverSameGuildPost({ target, text, title, replyTo }) {
+  exitIfDenied('guildPost');
+  const gp = require('../shared/discord-targets');
+  const source_guild = process.env.ASMLTR_ATTACH_GUILD || '';
+  const on_behalf_of = process.env.ASMLTR_ATTACH_SENDER || '';
+  const here = process.env.ASMLTR_ATTACH_TARGET || '';
+  if (!source_guild) throw new Error('same-guild send only from a Discord server channel (no DMs, no email)');
+  if (!on_behalf_of) throw new Error('same-guild send needs the asker id (ASMLTR_ATTACH_SENDER)');
+  if (!gp.looksLikeSnowflake(target)) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    const r = await fetch(MANAGER_BASE + '/send', {
+      method: 'POST', headers,
+      body: JSON.stringify({ channel: 'discord', target, kind: 'guild_resolve', query: target, source_guild, text }),
+    }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+    if (!r || !r.ok) {
+      console.log(A.red('guild-resolve failed: ' + ((r && r.error) || JSON.stringify(r))));
+      return;
+    }
+    const matches = r.matches || [];
+    if (!matches.length) {
+      console.log('No channel/thread matched ' + JSON.stringify(target) + '. Ask them to be more specific. NOT POSTED.');
+      return;
+    }
+    console.log('NOT POSTED — confirm with them first, then send discord <id> with the same text.');
+    for (const m of matches) {
+      const where = m.kind === 'thread' ? ('thread in #' + (m.parent || '?')) : m.kind === 'forum' ? 'forum (new post)' : 'channel (not a thread)';
+      console.log((m.score || 0) + '  ' + m.id + '  ' + (m.name || '') + '  [' + where + ']');
+    }
+    return;
+  }
+  if (here && String(target) === String(here)) {
+    console.log('same channel — skipped send; answer here normally');
+    return;
+  }
+  const body = {
+    channel: 'discord', target, kind: 'guild_post', text,
+    source_guild, on_behalf_of, source_channel: here || undefined,
+    title: title || undefined, reply_to: replyTo || undefined,
+    from_session: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || undefined,
+  };
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  if (r && r.skipped && r.reason === 'same_channel') {
+    console.log('same channel — skipped send; answer here normally');
+    return;
+  }
+  if (!r || !r.ok) {
+    console.log(A.red('send failed: ' + ((r && r.error) || JSON.stringify(r))));
+    return;
+  }
+  if (here) {
+    const ack = { channel: 'discord', target: here, kind: 'text', text: 'Post complete.' };
+    await fetch(MANAGER_BASE + '/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(MANAGER_TOKEN ? { Authorization: 'Bearer ' + MANAGER_TOKEN } : {}) },
+      body: JSON.stringify(ack),
+    }).catch(() => null);
+  }
+  console.log('Posted. Reply [[NO_REPLY]] now — do not repeat the body.');
+}
+
 async function cmdSend(rest) {
-  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."]
-  let file = null, caption = null, subject = null;
+  // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."] [--cc "..."]
+  let file = null, caption = null, subject = null, cc = null, force = false, drop = null, noReplyAll = false, newThread = false;
   const words = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === '--file') file = rest[++i];
     else if (t === '--caption') caption = rest[++i];
     else if (t === '--subject') subject = rest[++i]; // email subject (ignored by channels without one)
+    else if (t === '--cc') cc = rest[++i]; // email Cc (comma-separated ok)
+    else if (t === '--drop') drop = rest[++i]; // email: omit these chain addrs from reply-all
+    else if (t === '--no-reply-all') noReplyAll = true;
+    else if (t === '--new-thread') newThread = true;
+    else if (t === '--force') force = true;
     else words.push(t);
   }
   const channel = words[0], target = words[1], text = words.slice(2).join(' ');
   if (!channel || !target || (!text && !file)) {
     throw new Error('usage: asmltr send <channel> <target> "<text>"\n' +
-      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"]\n' +
-      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@b.com "the body" --subject "Hello" --file /root/report.pdf');
+      '       asmltr send <channel> <target> --file <path> [--caption "<text>"] [--subject "<subj>"] [--cc "<addr>"] [--drop "<addr>"] [--no-reply-all] [--new-thread] [--force]\n' +
+      '  e.g.  asmltr send discord 123 "shipping now"   ·   asmltr send email a@example.com "the body" --subject "Hello" --cc "boss@example.com" --file /root/report.pdf');
   }
+  // Same-guild Discord post folds into send (confirm first, on-behalf-of, fuzzy name).
+  if (String(channel).toLowerCase() === 'discord' && process.env.ASMLTR_ATTACH_GUILD && !file) {
+    return await deliverSameGuildPost({ target, text, title: null, replyTo: null });
+  }
+  exitIfDenied('send');
   const body = file
-    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject }
-    : { channel, target, kind: 'text', text, subject };
+    ? { channel, target, kind: 'file', path: file, caption: caption != null ? caption : (text || undefined), subject, cc }
+    : { channel, target, kind: 'text', text, subject, cc };
+  if (force) body.force = true;
+  if (channel === 'email') {
+    const conv = process.env.ASMLTR_ATTACH_CONVERSATION_KEY;
+    // --new-thread omits ref so even an older /out path cannot staple this conversation's quote.
+    if (conv && !newThread) body.ref = conv;
+    if (drop) body.drop = drop;
+    if (noReplyAll) body.reply_all = false;
+    if (newThread) {
+      body.new_thread = true;
+      body.reply_all = false;
+    }
+  }
   // Route through the CORE (/v2/send) so a cross-channel post is ASSIMILATED into the destination
   // session's context (it learns it "said" this, instead of it looking foreign on the next read).
   // Fall back to the manager's /send if the core is unreachable — delivery still works, just no assimilation.
@@ -277,6 +368,129 @@ async function cmdSend(rest) {
     r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   }
   console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
+}
+
+async function cmdGuildPost(rest) {
+  let title = null, replyTo = null;
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i];
+    if (tok === '--title') title = rest[++i];
+    else if (tok === '--reply-to') replyTo = rest[++i];
+    else words.push(tok);
+  }
+  const target = words[0], text = words.slice(1).join(' ');
+  if (!target) {
+    throw new Error('usage: asmltr guild-post <channel-or-thread-id-or-name> "<text>" [--title "forum title"] [--reply-to <messageId>] (alias of asmltr send discord …)');
+  }
+  return await deliverSameGuildPost({ target, text, title, replyTo });
+}
+
+async function deliverFile(channel, target, filePath, caption) {
+  const body = { channel, target, kind: 'file', path: filePath, caption: caption || undefined };
+  let r = await fetch(CORE_BASE + '/v2/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => null);
+  if (!r || (r.error && /unreachable|ECONNREFUSED|fetch failed/i.test(r.error))) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (MANAGER_TOKEN) headers.Authorization = 'Bearer ' + MANAGER_TOKEN;
+    r = await fetch(MANAGER_BASE + '/send', { method: 'POST', headers, body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+  return r || { ok: false, error: 'no response' };
+}
+
+function attachHere() {
+  const channel = process.env.ASMLTR_ATTACH_CHANNEL;
+  const target = process.env.ASMLTR_ATTACH_TARGET;
+  const sendDenied = require('../shared/media-allow').parseDenyEnv(process.env.ASMLTR_DENY_TOOLS).send;
+  return { channel, target, sendDenied };
+}
+
+async function postStaged(rec, channel, target, caption) {
+  const r = await deliverFile(channel, target, rec.path, caption);
+  if (!r.ok) {
+    console.log(A.red('post failed: ' + (r.error || JSON.stringify(r)) + ' — staged as ' + rec.name + ' (asmltr post retry ' + rec.name + ')'));
+    return 1;
+  }
+  const stage = require('../shared/attach-stage');
+  stage.markPosted(rec.name, { messageId: r.messageId || r.message_id || null, channel, target });
+  try {
+    require('../shared/media-log').appendPosted({
+      conversationKey: process.env.ASMLTR_ATTACH_CONVERSATION_KEY || '',
+      channel, target, name: rec.name, caption,
+      kind: rec.name && rec.name.replace(/^.*\./, ''), bytes: rec.bytes,
+      messageId: r.messageId || r.message_id || null,
+    });
+  } catch (_) {}
+  const rm = stage.removePostedFile(rec.name);
+  if (!rm.ok) console.log(A.yel('posted but staged copy still on disk: ' + (rm.error || rec.name)));
+  else console.log(A.grn('✓ posted ' + rec.name + ' to ' + channel + ':' + target + (r.messageId || r.message_id ? ' · ' + (r.messageId || r.message_id) : '') + ' · staged copy removed'));
+  return 0;
+}
+
+async function cmdPost(rest) {
+  exitIfDenied('attach');
+  const fs = require('fs');
+  const path = require('path');
+  const stage = require('../shared/attach-stage');
+  const verb = rest[0];
+  if (verb === 'list') {
+    const rows = stage.listUnposted();
+    if (!rows.length) return console.log(A.dim('no unposted staged files'));
+    for (const r of rows) console.log(r.name + '  ' + r.bytes + 'b  ' + r.path);
+    return;
+  }
+  if (verb === 'gc') {
+    const r = stage.gc();
+    console.log(A.dim('gc ' + r.dir + ' removed ' + r.removed.length));
+    return;
+  }
+  if (verb === 'retry') {
+    const { channel, target, sendDenied } = attachHere();
+    if (!channel || !target) throw new Error('asmltr post retry needs this-channel env (ASMLTR_ATTACH_CHANNEL + ASMLTR_ATTACH_TARGET)');
+    if (sendDenied && (!process.env.ASMLTR_ATTACH_CHANNEL || !process.env.ASMLTR_ATTACH_TARGET)) {
+      throw new Error('send is denied this turn — post is this channel only');
+    }
+    const want = rest[1];
+    const rows = want ? [stage.get(want)].filter(Boolean) : stage.listUnposted();
+    if (!rows.length) {
+      console.log(A.yel(want ? 'not staged or already posted: ' + want : 'nothing unposted to retry'));
+      return 1;
+    }
+    let code = 0;
+    for (const rec of rows) {
+      if (!rec.complete || rec.posted || !rec.path || !fs.existsSync(rec.path)) {
+        console.log(A.yel('skip ' + rec.name + ' — not a complete unposted file'));
+        continue;
+      }
+      rec.path = stage.assertStagedPath(rec.path);
+      code = Math.max(code, await postStaged(rec, channel, target, rest[2]));
+    }
+    return code;
+  }
+  let file = null, caption = null, channel = process.env.ASMLTR_ATTACH_CHANNEL, target = process.env.ASMLTR_ATTACH_TARGET;
+  const { sendDenied } = attachHere();
+  const words = [];
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === '--file') file = rest[++i];
+    else if (t === '--caption') caption = rest[++i];
+    else if (t === '--channel' || t === '--target') {
+      if (sendDenied) throw new Error('send is denied this turn — cannot redirect; posting to this channel only');
+      if (t === '--channel') channel = rest[++i];
+      else target = rest[++i];
+    } else words.push(t);
+  }
+  if (!file && words[0] && words[0] !== 'retry') file = words[0];
+  if (!file) {
+    throw new Error('usage: asmltr post --file <path> [--caption "<text>"]\n' +
+      '       asmltr post retry [name]\n' +
+      '       asmltr post list · asmltr post gc\n' +
+      '  Stages a safe filename, posts to THIS channel, deletes the staged copy only after Discord confirms.');
+  }
+  if (!channel || !target) throw new Error('no this-channel bind (ASMLTR_ATTACH_CHANNEL / ASMLTR_ATTACH_TARGET) — grok turns set these');
+  const rec = stage.preparePost(file, { name: path.basename(file), channel, target });
+  rec.path = stage.assertStagedPath(rec.path);
+  return await postStaged(rec, channel, target, caption);
 }
 async function cmdMap() {
   // WHAT each currently-active agent is doing + WHERE — grouped by repo (collision radar).
@@ -308,6 +522,7 @@ async function cmdWho(rest) {
   }
 }
 async function cmdAnnounce(rest) {
+  exitIfDenied('announce');
   // asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <seconds>]
   // Parse flags out of the args so the remaining words are the announcement text.
   const opts = { target: '*', priority: 'normal', from: ACTOR, ttl: null };
@@ -328,7 +543,7 @@ async function cmdAnnounce(rest) {
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   console.log(r.id ? A.grn(`📢 announced #${r.id} → ${r.target}  (${new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC)`) : A.red('announce failed: ' + (r.error || '')));
 }
-// asmltr notify "<text>" [--title T] [--force] [--silent] [--file <path>]  — proactive read-aloud /
+// asmltr notify "<text>" [--title T] [--silent] [--file <path>]  — proactive read-aloud /
 // delivery ladder (Part A). Any session/schedule calls this to REACH the user (android read-aloud → push
 // → text). --file attaches a file (android → inline media; text fallback → sent as a channel attachment).
 async function cmdNotify(rest) {
@@ -342,7 +557,7 @@ async function cmdNotify(rest) {
     else words.push(t);
   }
   const text = words.join(' ');
-  if (!text && !opts.file) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--force] [--silent] [--file <path>]');
+  if (!text && !opts.file) throw new Error('usage: asmltr notify "<text>" [--title <t>] [--silent] [--file <path>]');
   const r = await fetch(CORE_BASE + '/v2/notify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...opts }) })
     .then((x) => x.json()).catch((e) => ({ error: e.message }));
   if (r && r.delivered) console.log(A.grn(`✓ notified via ${r.via}`));
@@ -356,6 +571,7 @@ function _parseSince(s) {
 async function cmdUploads(rest) {
   // asmltr uploads [search words] [--channel x] [--sender s] [--since 2h|1d] [--limit N]
   // asmltr uploads get <id>   → print just the stored path (for piping into Read/tools)
+  exitIfDenied('uploads');
   const uploads = require('../shared/uploads');
   if (rest[0] === 'get') {
     const rec = uploads.get(rest[1]);
@@ -385,6 +601,7 @@ async function cmdUploads(rest) {
 // Topic/project event streams (roadmap §A). `asmltr streams` [·show·recall·new·rm]. Sessions check the
 // list before starting longer-running work and create a stream when a task deserves its own thread.
 async function cmdStreams(rest) {
+  exitIfDenied('streams');
   const sub = rest[0];
   if (sub === 'new' || sub === 'create') {
     const name = rest[1]; if (!name) { console.error(A.red('usage: asmltr streams new <name> ["description"]')); return process.exit(1); }
@@ -447,12 +664,13 @@ async function cmdMail(rest) {
   // asmltr mail [list] [-n N] [--unseen] | read <uid> [--seen] | search "<query>" [-n N]
   const sub = rest[0] === 'read' || rest[0] === 'search' || rest[0] === 'list' ? rest[0] : 'list';
   const args = ['read', 'search', 'list'].includes(rest[0]) ? rest.slice(1) : rest;
-  let n = 20, unseen = false, markSeen = false; const words = [];
+  let n = 20, unseen = false, markSeen = true; const words = [];
   for (let i = 0; i < args.length; i++) {
     const t = args[i];
     if (t === '-n' || t === '--limit') n = Number(args[++i]) || 20;
     else if (t === '--unseen') unseen = true;
     else if (t === '--seen') markSeen = true;
+    else if (t === '--keep-unread') markSeen = false;
     else words.push(t);
   }
   const post = (body) => {
@@ -463,7 +681,7 @@ async function cmdMail(rest) {
   };
 
   if (sub === 'read') {
-    if (!words[0]) throw new Error('usage: asmltr mail read <uid> [--seen]');
+    if (!words[0]) throw new Error('usage: asmltr mail read <uid> [--keep-unread]');
     const r = await post({ op: 'read', uid: Number(words[0]), markSeen });
     if (!r.ok) return console.log(A.red(r.error || 'read failed'));
     const m = r.message;
@@ -548,10 +766,69 @@ async function cmdDiff(id) {
   console.log(A.dim(`# ${r.worktree}`)); console.log(r.diff || A.dim('(no changes)'));
 }
 
+function webOwnerId() {
+  return process.env.ASMLTR_WEB_OWNER_ID || 'owner';
+}
+
+/**
+ * Local one-shot turn against asmltr-core. CLI is NOT a trust channel — this
+ * posts the same assistant-web envelope the dashboard does. Core stamps
+ * sender.raw_id from ASMLTR_WEB_OWNER_ID (gaia: owner). conversation_key is
+ * stable so grok `-r` resume works. No Discord. Needs asmltr-core on 127.0.0.1.
+ */
+async function cmdAsk(rest) {
+  const text = rest.join(' ').trim();
+  if (!text) throw new Error('usage: asmltr ask "<text>"\n       asmltr chat            local gaia REPL (no Discord, no TUI grok)');
+  const owner = webOwnerId();
+  const conversation_key = process.env.ASMLTR_CLI_SESSION || `assistant-web:local:${owner}`;
+  const envelope = {
+    channel: 'assistant-web',
+    conversation_key,
+    message_id: String(Date.now()),
+    sender: { raw_id: owner, raw_username: 'dashboard' },
+    content: { text },
+    delivery: 'sync',
+    public: false,
+  };
+  const r = await fetch(CORE_BASE + '/v2/handle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(envelope),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `${r.status} — /v2/handle (is asmltr-core up on ${CORE_BASE}?)`);
+  const reply = (j.actions || []).find((a) => a && a.type === 'reply');
+  const out = reply && reply.text != null ? reply.text
+    : (j.actions && j.actions.length ? JSON.stringify(j.actions, null, 2) : '(no reply)');
+  console.log(out);
+}
+
+/** Tiny readline loop over cmdAsk. Not the grok TUI — each line is one core turn. */
+async function cmdChat() {
+  const readline = require('readline');
+  const owner = webOwnerId();
+  const key = process.env.ASMLTR_CLI_SESSION || `assistant-web:local:${owner}`;
+  const chatName = (process.env.ASSISTANT_NAME || 'gaia').trim() || 'gaia';
+  console.log(A.dim(`${chatName} local chat · ${key} as ${owner} · empty line / quit to exit`));
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const prompt = () => new Promise((res) => rl.question(A.cyn('you> '), res));
+  try {
+    for (;;) {
+      const line = await prompt();
+      if (line == null) break;
+      const t = line.trim();
+      if (!t || /^(quit|exit)$/i.test(t)) break;
+      try { await cmdAsk([t]); } catch (e) { console.error(A.red(e.message)); }
+    }
+  } finally { rl.close(); }
+}
+
 function cmdHelp() {
   console.log(`${A.bold('asmltr')} — asmltr insights terminal client
 
   asmltr                 live TUI dashboard
+  asmltr ask "<text>"    one local turn with gaia (core / grok, no Discord)
+  asmltr chat            local gaia REPL over the same session (resume UUID)
   asmltr ls              list active sessions
   asmltr map             active sessions grouped by working dir (collision radar)
   asmltr who <path>      which sessions recently touched a file/dir
@@ -564,10 +841,16 @@ function cmdHelp() {
   asmltr system          current system metrics
   ${A.bold('cross-channel:')}
   asmltr notify "<text>"               REACH the owner out-of-band (read-aloud → push → text ladder;
-       [--title T] [--force] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
+       [--title T] [--silent]  honors quiet hours). Use this for scheduled briefs & alerts.
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
+       ... --new-thread                 email: blank new letter (no quote, no In-Reply-To)
+  asmltr send discord <id-or-name> "…"  same Discord server (trusted role / resolve allow).
+       guild-post is an alias. A name looks up (does not post) until they confirm.
+  asmltr post --file <path>            post a file to THIS channel (no Bash). Safe staged name,
+       [--caption T]                   delete only after Discord confirms. retry / list / gc
        ... --subject "<subj>"           set the subject (email)
+       ... --cc "<addr>"                Cc (email; comma-separated ok)
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr steer <key> "<guidance>"      push guidance into another session's LIVE turn (COERCIVE;
@@ -575,6 +858,8 @@ function cmdHelp() {
   asmltr announcements                 list live announcements (with timestamps)
   asmltr uploads [search]              files users sent on ANY channel (--channel --since 2h|1d --sender --limit)
        uploads get <id>                print the stored path of one upload
+  asmltr gc-temps                      drop attach-stage / gen-ref / vis-prompt leftovers older than 1 day
+                                       (same as core bounce; also run by Sunday 03:00 timer)
   asmltr drafts                        replies held for your approval (any connector)
        drafts show <id> · send <id> · discard <id>
   asmltr mail [list]                   browse the mailbox (-n N, --unseen)
@@ -587,12 +872,17 @@ function cmdHelp() {
   asmltr diff <id>       git diff of a session's worktree
   ${A.bold('sessions:')}
   asmltr claude [args]   launch a monitored, identity-anchored claude session (screen; takeover-able)
+  asmltr gemini|codex|grok [args]  same, for those engine CLIs
   asmltr provision-alias create a \`<agent-name>\` → \`asmltr claude\` command (from ASSISTANT_NAME;
-       [name] [--force]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
+       [name]  conflict-checked — won't shadow an existing command). \`unalias\` to remove
   ${A.bold('version & updates:')}
   asmltr version         installed + per-service versions; whether an update is available
   asmltr update          pull + install the latest & restart (deterministic; verifies, auto-rolls-back)
-       [--dry-run] [--channel stable|edge] [--force] [--agent]
+       [--dry-run] [--channel stable|edge] [--agent]
+  asmltr bounce          restart core+manager+collector AFTER this turn (never inline)
+       [--delay SEC]     extra wait after the turn so the reply can post (default 20)
+       [--now]           human terminal only — refused inside a live turn
+       [--dry-run]       print the plan, do not queue
   asmltr help
 
   collector: ${BASE}   core: ${CORE_BASE}   ${TOKEN ? '(token set)' : A.dim('(no token — dev mode)')}`);
@@ -612,6 +902,22 @@ async function cmdVersion() {
     if (u && u.available) console.log(A.yel(`\n  update available: ${u.behind} commit(s) behind on ${u.channel} (${u.target}) — run: asmltr update`));
     else if (u && u.ok) console.log(A.dim(`\n  up to date on the ${u.channel} channel`));
   } catch (_) {}
+}
+
+async function cmdBounce(rest) {
+  const bounce = require('../shared/bounce');
+  const r = await bounce.runCli(rest, {
+    coreBase: CORE_BASE,
+    isTTY: !!(process.stdout && process.stdout.isTTY),
+  });
+  const line = r.message || (r.dryRun ? 'dry-run' : (r.queued ? 'queued' : 'ok'));
+  console.log((r.ok === false ? A.red(line) : A.grn(line)));
+  if (r.command || r.supervisor) {
+    console.log(A.dim('  ' + (r.command || (r.supervisor + ' ' + (r.services || []).join(' ')))));
+  }
+  if (r.afterTurn || r.queued) {
+    console.log(A.dim('  bounce is LAST — finish the reply; do not systemctl/pm2 restart asmltr from this turn.'));
+  }
 }
 
 async function cmdUpdate(rest, f) {
@@ -634,10 +940,12 @@ async function cmdUpdate(rest, f) {
 
 // asmltr silo <verb> — browse/search/read/write a data silo (default: the Self silo).
 async function cmdSilo(rest, f) {
+  exitIfDenied('silo');
   const fs = require('fs');
   const silo = require('../shared/silo');
   const identity = require('../shared/identity');
   const verb = rest[0] || 'overview';
+  if (['put', 'mkdir', 'rm', 'mv', 'new', 'create'].includes(verb)) exitIfDenied('siloWrite');
   const pos = rest.slice(1).filter((a) => !a.startsWith('--')); // positional args (flags stripped)
   const has = (name) => rest.includes('--' + name);            // boolean-flag presence
 
@@ -713,7 +1021,7 @@ async function cmdBackup(rest, f) {
       return;
     }
     case 'restore': { await backup.restoreBackup(pos[0], { ...opts, dryRun: f['dry-run'] || f.n, activate: f.activate, force: f.force }); return; }
-    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--activate] [--force] [--out path]');
+    default: console.log('asmltr backup <create|list|verify|restore> [file] [--label x] [--passphrase x] [--dry-run] [--activate] [--out path]');
   }
 }
 
@@ -804,7 +1112,7 @@ async function cmdVault(rest, f) {
     switch (cmd) {
       case undefined:
       case 'top': return require('./tui').run(BASE, CORE_BASE, TOKEN, A, { base: MANAGER_BASE, token: MANAGER_TOKEN });
-      case 'claude': case 'gemini': case 'codex': { // launch an interactive reasoning-engine session (monitored + takeover-able)
+      case 'claude': case 'gemini': case 'codex': case 'grok': { // launch an interactive reasoning-engine session (monitored + takeover-able)
         const r = spawnSync(process.execPath, [require('path').join(__dirname, 'asmltr-engine.js'), cmd, ...rest], { stdio: 'inherit' });
         return process.exit(r.status || 0);
       }
@@ -824,6 +1132,8 @@ async function cmdVault(rest, f) {
         console.log(r.ok ? A.grn('✓ removed ' + r.removed) : A.yel('· ' + r.error));
         return;
       }
+      case 'ask': return await cmdAsk(rest);
+      case 'chat': return await cmdChat();
       case 'ls': return await cmdLs();
       case 'map': return await cmdMap();
       case 'who': return await cmdWho(rest);
@@ -834,10 +1144,17 @@ async function cmdVault(rest, f) {
       case 'watch': return liveStream(rest[0]);
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
+      case 'guild-post': return await cmdGuildPost(rest);
+      case 'post': return await cmdPost(rest);
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
       case 'uploads': return await cmdUploads(rest);
+      case 'gc-temps': {
+        const g = require('../shared/gc-temps').run();
+        console.log(A.dim(`temp gc: attach=${g.attach} gen-ref=${g.genRef} vis-prompt=${g.visPrompt} tmp=${g.tmpLeftover}`));
+        return;
+      }
       case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
@@ -848,6 +1165,7 @@ async function cmdVault(rest, f) {
       case 'stop': return await cmdStop(rest[0]);
       case 'diff': return await cmdDiff(rest[0]);
       case 'update': return await cmdUpdate(rest, f);
+      case 'bounce': return await cmdBounce(rest);
       case 'silo': return await cmdSilo(rest, f);
       case 'backup': return await cmdBackup(rest, f);
       case 'vault': return await cmdVault(rest, f);

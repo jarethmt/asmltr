@@ -4,6 +4,17 @@ Makes **interactive Claude Code terminal sessions** first-class asmltr sessions 
 title, a live "what it's doing" overview, token/tool counts, and attach info in the dashboard —
 using Claude Code's native **hooks**, not pane-scraping or polling.
 
+This folder is **Claude Code only** (`claude` binary / `~/.claude/settings.json`). It is not a
+startable Node connector (no `index.js`) — the manager skips it on boot.
+
+Other reasoning engines — do **not** copy this hook into Grok `--prompt-file` or the Claude SDK:
+
+| Engine | Interactive CLI | Binary | Native hooks like this file |
+| --- | --- | --- | --- |
+| Grok | `asmltr grok` | `grok` (`~/.grok/bin/grok`) | Not wired. Dashboard card is `grok-cli` via `asmltr-engine.js`. |
+| Gemini | `asmltr gemini` | `gemini` | **Must be added by a Gemini implementer** if they want SessionStart/Stop → collector. |
+| Codex | `asmltr codex` | `codex` | **Must be added by a Codex implementer** if they want SessionStart/Stop → collector. |
+
 ## How it works
 
 `hook.py` is a Claude Code hook. Claude fires it with a JSON payload on stdin; the script turns each

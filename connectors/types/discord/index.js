@@ -868,6 +868,13 @@ RESPONSE RULES:
 
     if (voiceMuted.has(guildId)) return; // MUTED (P2): addressed, but stay quiet — transcript already posted
     if (voiceBusy.has(guildId)) return;  // don't stack replies
+    // Immutable Discord user id is the trust key. A display-name fallback matches no mapping
+    // and silently resolves to default / tier 0 — refuse the turn instead.
+    const speakerId = meta.userId != null && meta.userId !== '' ? String(meta.userId) : '';
+    if (!speakerId) {
+      ctx.log(`[voice] skip turn: missing Discord userId (will not use display name as raw_id)`);
+      return;
+    }
     voiceBusy.add(guildId);
     voice.startSpeech(guildId);              // open a cancellable reply session (barge-in / stop can interrupt)
     voiceReplyStart.set(guildId, Date.now()); // start the barge-in grace window
@@ -906,7 +913,7 @@ RESPONSE RULES:
         // Identity = the SPEAKER who said her name. Pass their immutable Discord user ID as raw_id (same
         // key the text path uses) so the core resolves the RIGHT principal + trust per turn, instead of a
         // display name that matches no identity mapping (that's what made Eve address everyone as one person).
-        sender: { raw_id: meta.userId ? String(meta.userId) : name, raw_username: name },
+        sender: { raw_id: speakerId, raw_username: name },
         content: { text },
         delivery: 'sync',
         capabilities: { max_message_chars: 700, supports_markdown: false },
