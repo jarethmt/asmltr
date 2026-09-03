@@ -80,7 +80,7 @@ to understand how it's built — or run and hack on it yourself — start here:
 **Understand it**
 - [How it works](https://jarethmt.github.io/asmltr/how-it-works/) — the ideas, plainly
 - [Architecture](https://jarethmt.github.io/asmltr/architecture/) — the pipeline, end to end
-- [Reasoning engines](https://jarethmt.github.io/asmltr/engines/) — swap Claude / Gemini / Codex / self-hosted
+- [Reasoning engines](https://jarethmt.github.io/asmltr/engines/) — swap Claude / Grok / Gemini / Codex / self-hosted
 
 </td>
 <td width="33%" valign="top">
@@ -122,10 +122,10 @@ The name maps to what it does:
 ## Reasoning engines — pick your brain
 
 asmltr's thinking is a **swappable layer**. Run it on **Claude Code** (on your subscription, the
-default), **Gemini CLI**, **Codex CLI**, or your own **self-hosted model** behind an OpenAI-compatible
-endpoint. Pick one as the default and *every* channel uses it — subscription login or a vaulted API
-key, your choice. The core loads only the engine you use, so a Gemini-only or Codex-only box never
-touches the Claude SDK. → [Reasoning engines](https://jarethmt.github.io/asmltr/engines/)
+default), **Grok Build**, **Gemini CLI**, **Codex CLI**, or your own **self-hosted model** behind an
+OpenAI-compatible endpoint. Pick one as the default and *every* channel uses it — subscription login
+or a vaulted API key, your choice. The core loads only the engine you use, so a Grok-only, Gemini-only,
+or Codex-only box never touches the Claude SDK. → [Reasoning engines](https://jarethmt.github.io/asmltr/engines/)
 
 ## How it works
 
@@ -168,7 +168,7 @@ envelope and renders a reply. → [How it works](https://jarethmt.github.io/asml
 
 | Area | Highlights | Docs |
 |------|-----------|------|
-| **Reasoning engines** | Pluggable agentic backends — **Claude Code, Gemini CLI, Codex CLI, or a self-hosted model**. One default drives every channel (subscription or vaulted API key); per-engine model, one-click install/update + auto-update; an [MCP registry](https://jarethmt.github.io/asmltr/engines-mcp/) provisioned into every harness. | [Engines](https://jarethmt.github.io/asmltr/engines/) |
+| **Reasoning engines** | Pluggable agentic backends — **Claude Code, Grok Build, Gemini CLI, Codex CLI, or a self-hosted model**. One default drives every channel (subscription or vaulted API key); per-engine model, one-click install/update + auto-update; an [MCP registry](https://jarethmt.github.io/asmltr/engines-mcp/) provisioned into every harness. | [Engines](https://jarethmt.github.io/asmltr/engines/) |
 | **Channels** | Discord (+ autonomous participation, multi-agent, voice), Telegram, Email (SMTP/IMAP), GitHub issues, MCP (OAuth 2.1), OpenAI-compatible API, web chat, CLI. | [Connectors](https://jarethmt.github.io/asmltr/connectors/discord/) |
 | **Identity & memory** | Self anchor + aesthetic injected every turn; the *Cast* (cross-channel relationships); **data silos** — the assistant's memory and the default home for its artifacts, with layered search. | [Silos](https://jarethmt.github.io/asmltr/silos/) |
 | **Credentials** | A [TRUST-Protocol vault](https://jarethmt.github.io/asmltr/security/trust-vault/): use-but-never-see credential broker + KMS envelope encryption; storage integrations (WebDAV / S3 / local) with encryption-at-rest. | [Vault](https://jarethmt.github.io/asmltr/security/trust-vault/) · [Integrations](https://jarethmt.github.io/asmltr/integrations/) |
@@ -209,7 +209,7 @@ Download https://raw.githubusercontent.com/jarethmt/asmltr/main/UPDATE-WITH-AGEN
 | `connectors/` | The connector **manager** (supervisor + config API) and **types** (`discord`, `telegram`, `email`, `github`, `mcp`, `openai`). Each enabled instance is its own child process. | Host (PM2), `127.0.0.1` |
 | `insights/collector/` | Telemetry collector — ingests the shared event stream, samples metrics, serves REST + socket.io. | Host (PM2), `127.0.0.1` |
 | `insights/dashboard/` | Vue 3 dashboard: sessions, timeline, usage, silos explorer, vault + integrations, engines, security (login/2FA/passkeys/OIDC clients), settings. | Static build (behind asmltr's own auth) |
-| `cli/` | **`asmltr`** — terminal client + TUI, plus `claude`/`gemini`/`codex`, `silo`, `backup`, and `vault` subcommands. | Host CLI |
+| `cli/` | **`asmltr`** — terminal client + TUI, plus `claude`/`grok`/`gemini`/`codex`, `silo`, `backup`, and `vault` subcommands. | Host CLI |
 | `shared/` | Cross-cutting: events, secrets provider, `.env` loader, redaction, **vault** client, **storage** drivers, **silo** construct, **engines** registry, **mcp-registry**, **auth**, speech (STT/TTS). | — |
 | `mcp/` | The built-in **asmltr-toolbelt** MCP server — asmltr's own tools, exposed to every engine. | Spawned per engine |
 | `scripts/` | Deterministic updater, release cutter, and **backup** (create / verify / restore). | — |
@@ -249,8 +249,9 @@ for d in core connectors insights/collector cli; do (cd "$d" && npm install); do
 cp .env.example .env                 # then edit: ASSISTANT_NAME, secrets, ports
 
 # 3. Seed the trust store (DEFAULT-DENY — nobody has access until seeded)
-cp core/src/trust/seed.example.json core/src/trust/seed.json   # add yourself as owner
+cp core/src/trust/seed.example.json core/src/trust/seed.json   # add yourself as owner; grant trusted/send to posters
 node core/src/trust/seed.js
+mkdir -p ~/.asmltr && cp shared/media-allow.example.json ~/.asmltr/media-allow.json  # stills/video/code locally
 
 # 4. Start the host services
 pm2 start core/ecosystem.config.js

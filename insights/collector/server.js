@@ -197,7 +197,9 @@ app.post('/ingest', requireToken, (req, res) => {
 
 // --- read API ----------------------------------------------------------------
 app.get('/api/sessions', requireToken, (req, res) => {
-  const rows = req.query.active === '1' ? dbmod.q.activeSessions.all() : dbmod.q.sessions.all({ limit: Number(req.query.limit) || 200 });
+  const rows = req.query.active === '1'
+    ? dbmod.listLiveActive()
+    : dbmod.q.sessions.all({ limit: Number(req.query.limit) || 200 });
   res.json({ sessions: rows, count: rows.length });
 });
 app.get('/api/update-status', requireToken, (req, res) => res.json(_updateStatus));
@@ -372,7 +374,7 @@ app.get('/api/notifications', requireToken, (req, res) => {
 
 // --- brief: compact summary (replaces stdout-only morning brief data) --------
 app.get('/api/brief', requireToken, (req, res) => {
-  const active = dbmod.q.activeSessions.all();
+  const active = dbmod.listLiveActive();
   const since = Math.floor((Date.now() - 24 * 3600000) / 3600000) * 3600000;
   const usage = dbmod.q.usage.all({ since });
   const bySurface = {};

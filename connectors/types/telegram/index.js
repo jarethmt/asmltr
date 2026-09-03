@@ -20,6 +20,7 @@ const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { isImage } = require('../../../shared/mimeguess');
 const { MediaGroupCoalescer } = require('./media-group'); // batch album photos into one turn
+const { requireConnectorToken } = require('../../../shared/connector-http-auth');
 
 const meta = {
   type: 'telegram',
@@ -203,20 +204,20 @@ async function start(ctx) {
   app.use(express.json({ limit: '10mb' }));
   const target = () => (allowed.size ? [...allowed][0] : learnedChat);
   app.get('/health', (req, res) => res.json({ status: 'healthy', type: 'telegram', instance: ctx.instanceId }));
-  app.post('/send', async (req, res) => {
+  app.post('/send', requireConnectorToken, async (req, res) => {
     try { const m = await bot.sendMessage(target(), req.body.message, req.body.options || {}); res.json({ ok: true, messageId: m.message_id }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
-  app.post('/send-photo', async (req, res) => {
+  app.post('/send-photo', requireConnectorToken, async (req, res) => {
     try { const m = await bot.sendPhoto(target(), req.body.photoPath, { caption: req.body.caption || '' }); res.json({ ok: true, messageId: m.message_id }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
-  app.post('/send-document', async (req, res) => {
+  app.post('/send-document', requireConnectorToken, async (req, res) => {
     try { const m = await bot.sendDocument(target(), req.body.documentPath, { caption: req.body.caption || '' }); res.json({ ok: true, messageId: m.message_id }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
   // Unified outbound endpoint (the manager /send router calls this).
-  app.post('/out', async (req, res) => {
+  app.post('/out', requireConnectorToken, async (req, res) => {
     try {
       const { kind = 'text', target: tg, text, path: filePath, caption } = req.body || {};
       const to = tg || target();
@@ -224,6 +225,13 @@ async function start(ctx) {
       // 'file' is the standard attachment kind: route by MIME — an image/* goes as a Telegram photo
       // (inline preview), anything else as a document. Previously 'file' fell through to sendMessage
       // with an undefined body → "message text is empty". 'photo'/'document' force a specific send.
+      if (kind === 'file' || kind === 'photo' || kind === 'document') {
+        if (!filePath) return res.status(400).json({ ok: false, error: 'file kind requires a `path`' });
+        const stage = require('../../../shared/attach-stage');
+        if (!stage.outboundFileAllowed(filePath)) {
+          return res.status(403).json({ ok: false, error: 'path not allowed (attach-stage, gen-ref, uploads, or silo)' });
+        }
+      }
       if (kind === 'file') {
         m = isImage(filePath)
           ? await bot.sendPhoto(to, filePath, { caption: caption || '' })

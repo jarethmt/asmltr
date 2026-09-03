@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to ~/.asmltr/media-allow.json (or set ASMLTR_MEDIA_ALLOW_FILE). Principal ids must match trust store principals.id — placeholders only, never real names. discordIds are numeric Discord user ids; leave empty in git and fill locally. photoAllow / imageAllow: stills + asmltr post, not video. videoAllow: clips AND stills. mediaAllow: both. codeAllow: write-a-program for that caller. Empty list = owner/bypass only. photoAllow / imageAllow here are example format only (not a public stills gate). leave videoAllow empty unless you want clips. Same-guild Discord post is NOT this file — that is trusted role or resolve() allow (see seed.example.json).",
+  "photoAllow": {
+    "principals": ["friend"],
+    "discordIds": []
+  },
+  "videoAllow": {
+    "principals": [],
+    "discordIds": []
+  },
+  "codeAllow": {
+    "principals": [],
+    "discordIds": []
+  },
+  "siloAllow": {
+    "guilds": [],
+    "channels": []
+  }
+}

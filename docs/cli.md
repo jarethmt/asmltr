@@ -10,6 +10,8 @@ set of one-shot subcommands.
 
 ```
 asmltr                 live TUI dashboard
+asmltr ask "<text>"    one local turn with the default engine (ivy: grok)
+asmltr chat            local readline REPL over the same session (resume UUID)
 asmltr ls              list active sessions
 asmltr map             active sessions grouped by working dir (collision radar)
 asmltr who <path>      which sessions recently touched a file/dir
@@ -29,12 +31,13 @@ asmltr diff <id>       git diff of a session's worktree
 asmltr claude [args]   launch a monitored session on the Claude engine
 asmltr gemini [args]   … on the Gemini engine
 asmltr codex  [args]   … on the Codex engine
+asmltr grok   [args]   … on the Grok engine
 asmltr version         installed + per-service versions; whether an update is available
 asmltr update          pull + install the latest & restart (verifies; auto-rolls-back)
 ```
 
 !!! tip "Reasoning engines"
-    `asmltr claude|gemini|codex` each launch a wrapped, monitored, takeover-able session on that
+    `asmltr claude|gemini|codex|grok` each launch a wrapped, monitored, takeover-able session on that
     [reasoning engine](REASONING-ENGINES.md) (whichever CLI harnesses are installed). The `<agent-name>`
     command points at the **default** engine, chosen in Settings → Engines. `asmltr silo`, `asmltr backup`,
     and `asmltr vault` round out the toolbelt.
@@ -46,7 +49,7 @@ asmltr update          pull + install the latest & restart (verifies; auto-rolls
     | Service | Default | Used by |
     |---|---|---|
     | collector | `http://127.0.0.1:3017` | reads (`ls`, `brief`, `events`, `tail`, `watch`, `system`, `map`, `who`) + control (`kill`, `stop`, `diff`) |
-    | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` |
+    | core | `http://127.0.0.1:3023` | takeover (`attach`, `release`) + `announce` / `announcements` + `ask` / `chat` |
     | connector manager | `http://127.0.0.1:3024` | `send` (outbound to any channel) |
 
 ---
