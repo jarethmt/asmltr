@@ -8,6 +8,11 @@ that resolves an inbound envelope to effective capabilities on every turn.
     The trust store is **default-deny**. An unknown sender — one whose identifier matches no
     principal — gets **no capabilities at all**. Until you seed the store, nobody has access.
 
+
+!!! warning "Discord is invite-only"
+    The current Discord path (silo on, `observe_only` context on the next @, `announce *`) is for
+    servers you invite people into. A truly public/open Discord is not trusted yet.
+
 ## The trust store (SQLite)
 
 A single SQLite database (`trust.db`, path via `ASMLTR_TRUST_DB`) with four tables:
@@ -91,19 +96,20 @@ Seed file shape (`seed.example.json`):
       "forbidden": ["write", "deploy", "credentials"] }
   ],
   "principals": [
-    { "id": "owner", "display_name": "Owner",
+    { "id": "owner", "display_name": "Owner", "default_tier": 5,
       "identifiers": [
-        { "surface": "discord", "value": "000000000000000000" },
-        { "surface": "telegram", "value": "your_telegram_username" },
-        { "surface": "mcp", "value": "owner" }
+        { "surface": "assistant-web", "value": "owner" },
+        { "surface": "discord", "value": "000000000000000000" }
       ],
       "grants": [ { "bypass_moderation": true, "allow": ["*"] } ] },
-    { "id": "teammate", "display_name": "Teammate",
+    { "id": "friend", "display_name": "Friend", "default_tier": 3,
       "identifiers": [ { "surface": "discord", "value": "111111111111111111" } ],
       "grants": [ { "role_id": "readonly" } ] }
   ]
 }
 ```
+
+Same-guild Discord post is `asmltr send discord` (alias `asmltr guild-post`): trusted role or `resolve()` allow (`guild-post` / `send` / `*`). Not other servers, not DMs/email. Owner (`bypass_moderation`) always can. `default_tier` is a schema field, not the send gate. Discord ids in the example are placeholders — replace locally; never commit real snowflakes. Stills/video/code example allowlists are `shared/media-allow.example.json` (copy locally).
 
 !!! note "Identifier surfaces"
     `surface` is the connector channel (`discord`, `telegram`, `mcp`, `github`) or `apikey`;

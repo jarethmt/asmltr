@@ -1,0 +1,17 @@
+[Unit]
+Description=asmltr-insights-collector (127.0.0.1:3017)
+After=network-online.target
+# Optional. Needed for the insights TUI / dashboard, not for asmltr ask.
+
+[Service]
+Type=simple
+WorkingDirectory=/home/adjutant/src/asmltr/insights/collector
+EnvironmentFile=-/home/adjutant/src/asmltr/.env
+Environment=HOME=/home/adjutant
+Environment=PATH=/home/adjutant/.local/bin:/usr/bin:/bin
+ExecStart=/home/adjutant/.local/bin/node server.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -15,7 +15,11 @@
 
 import { randomBytes, createHash } from 'crypto';
 import { randomUUID } from 'crypto';
+import { createRequire } from 'module';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+
+const require = createRequire(import.meta.url);
+const { PKCE_METHODS, isPkceMethodSupported, verifyPKCE } = require('./pkce.js');
 
 // Configuration
 const BASE_URL = process.env.BASE_URL || 'https://mcp.example.com';
@@ -99,21 +103,7 @@ function sha256(data) {
   return createHash('sha256').update(data).digest('base64url');
 }
 
-/**
- * Verify PKCE code challenge
- */
-function verifyPKCE(codeVerifier, codeChallenge, codeChallengeMethod = 'S256') {
-  if (codeChallengeMethod === 'plain') {
-    return codeVerifier === codeChallenge;
-  }
-
-  if (codeChallengeMethod === 'S256') {
-    const computedChallenge = sha256(codeVerifier);
-    return computedChallenge === codeChallenge;
-  }
-
-  return false;
-}
+// verifyPKCE / isPkceMethodSupported: S256 only (see ./pkce.js)
 
 /**
  * Parse Authorization header for Bearer token
@@ -428,7 +418,7 @@ export function getAuthorizationServerMetadata() {
     authorization_endpoint: `${BASE_URL}/oauth/authorize`,
     token_endpoint: `${BASE_URL}/oauth/token`,
     registration_endpoint: `${BASE_URL}/oauth/register`,
-    code_challenge_methods_supported: ['S256', 'plain'],
+    code_challenge_methods_supported: PKCE_METHODS,
     grant_types_supported: ['authorization_code'],
     response_types_supported: ['code'],
     token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
@@ -523,10 +513,10 @@ export function handleAuthorizationRequest(params) {
     };
   }
 
-  if (!code_challenge_method || !['S256', 'plain'].includes(code_challenge_method)) {
+  if (!code_challenge_method || !isPkceMethodSupported(code_challenge_method)) {
     return {
       error: 'invalid_request',
-      error_description: 'Invalid or missing code_challenge_method (must be S256 or plain)',
+      error_description: 'Invalid or missing code_challenge_method (must be S256)',
     };
   }
 
@@ -729,6 +719,7 @@ export default {
   handleAuthorizationRequest,
   handleTokenRequest,
   generateWWWAuthenticateHeader,
+  isRedirectUriAllowed,
 
   // Initialization
   initializeOAuthServer,

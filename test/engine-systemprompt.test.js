@@ -27,7 +27,7 @@ test('composePrompt keeps the system text when the user prompt is empty', () => 
 // runner.js dispatches to must accept the systemPrompt key server.js composes, or the identity +
 // trust-authz block is silently dropped. Reading the source text keeps this robust with no
 // module-load or engine-dependency requirements.
-for (const engineId of ['claude', 'codex', 'gemini']) {
+for (const engineId of ['claude', 'codex', 'gemini', 'grok']) {
   test(`${engineId} runTurn accepts a systemPrompt param`, () => {
     const src = fs.readFileSync(
       path.join(__dirname, '..', 'core', 'src', 'engines', `${engineId}.js`), 'utf8');

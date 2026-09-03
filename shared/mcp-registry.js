@@ -2,7 +2,7 @@
 /**
  * MCP registry — ONE place to declare MCP servers, provisioned into whichever reasoning-engine
  * harness runs a turn (docs/REASONING-ENGINES.md). Declare a server once here and Claude (SDK
- * mcpServers), Codex (`-c mcp_servers.*`), and Gemini (`gemini mcp add`) all get it.
+ * mcpServers), Codex (`-c mcp_servers.*`), Gemini (`gemini mcp add`), and Grok (`grok mcp add`) all get it.
  *
  * A built-in **asmltr-toolbelt** stdio server (mcp/toolbelt-server.js) is always included (unless
  * disabled), so every engine gets asmltr's cross-session tools (sessions/send/announce/uploads) —
@@ -110,5 +110,19 @@ function syncGemini(bin) {
   }
   return { ok: true, added: done };
 }
+/** Grok: reconcile the registry into grok's MCP config via `grok mcp add` (best-effort; mirrors Gemini). */
+function syncGrok(bin) {
+  if (!bin) return { ok: false, reason: 'grok not installed' };
+  const done = [];
+  for (const [name, v] of Object.entries(enabled())) {
+    if (v.url) continue; // http/SSE add differs per grok version; stdio is the portable path
+    try {
+      const envFlags = Object.entries(v.env || {}).flatMap(([k, val]) => ['-e', `${k}=${val}`]);
+      execFileSync(bin, ['mcp', 'add', ...envFlags, name, '--', v.command, ...(v.args || [])], { stdio: 'ignore', timeout: 15000 });
+      done.push(name);
+    } catch (_) {}
+  }
+  return { ok: true, added: done };
+}
 
-module.exports = { list, add, remove, setDisabled, all, enabled, forClaude, codexArgs, syncGemini, TOOLBELT, DEVICE };
+module.exports = { list, add, remove, setDisabled, all, enabled, forClaude, codexArgs, syncGemini, syncGrok, TOOLBELT, DEVICE };
