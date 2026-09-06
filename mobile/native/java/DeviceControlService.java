@@ -43,6 +43,7 @@ public class DeviceControlService extends Service {
     if (intent != null && ACTION_STOP.equals(intent.getAction())) { running = false; stopSelf(); return START_NOT_STICKY; }
     if (!running) { running = true; worker = new Thread(this::loop, "asmltr-control"); worker.start(); }
     try { WakeWord.refresh(this); } catch (Throwable t) {} // (re)configure always-on wake word if enabled
+    try { NotifBadgeOverlay.restore(this); } catch (Throwable t) {} // re-raise the held-notification badge after a restart
     return START_STICKY; // Android restarts us if killed → the link is meant to be always-on
   }
 
@@ -76,9 +77,16 @@ public class DeviceControlService extends Service {
             String type = o.optString("type");
             if ("device_rpc".equals(type)) handleRpc(base, token, device, o);
             else if ("speak".equals(type)) {
-              String text = o.optString("text");
-              NotifEyesOverlay.show(this, text);   // float the eyes over the screen while an asmltr-notify frame is read aloud
-              Speech.speak(this, base, token, text, o.optBoolean("require_headphones", false));
+              final String text = o.optString("text");
+              final boolean hp = o.optBoolean("require_headphones", false);
+              // Off the SSE thread: ReadAloud blocks (it may wait out a nav prompt, then speak a whole
+              // clip) and stalling the reader here would freeze the control link for the duration.
+              // respectDnd=false — the notify ladder already applies its own quiet hours server-side, so
+              // this only defers for a live call / another voice on the route, badging it if it can't speak.
+              new Thread(() -> {
+                if (hp && !Speech.headphonesConnected(this)) return;
+                ReadAloud.deliver(this, base, token, text, false, "asmltr");
+              }, "asmltr-speak").start();
             }
           } catch (Exception ignore) {}
         }

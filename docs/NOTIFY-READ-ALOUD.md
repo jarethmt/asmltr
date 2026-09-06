@@ -77,6 +77,37 @@ of the Android app.
 - If it clears your threshold, the app reads the synopsis aloud
   (*"You've got a direct message on Discord — they're done with the project"*).
 - A burst of notifications is summarized together rather than read one by one.
+- **It waits for a gap rather than talking over you** — see below.
+
+### It won't talk over you
+
+A synopsis is only ever spoken into a free ear. Before anything is read, the app asks whether this is
+actually a good moment:
+
+| Situation | What happens |
+|---|---|
+| **You're on a call** — cellular or VoIP (WhatsApp, Meet, Discord…) | Held. Nothing is spoken. |
+| **Do Not Disturb is on** | Held. DND means quiet, and the assistant is not exempt. |
+| **Navigation is speaking**, or an alarm/other assistant is | Waits it out (~20s), then holds if it's still going. |
+| **Music or a podcast is playing** | Spoken — but the music **ducks** to a murmur underneath, then comes back. |
+| **A call starts mid-sentence** | Playback stops immediately and the rest is held. |
+
+"Held" never means "lost". The synopsis goes into a backlog and the **eyes appear in a corner of the
+screen wearing a "!"**:
+
+- **Tap them** → the whole backlog is read aloud in one go, in order, in your voice. If five things
+  arrived during a twenty-minute call, you hear all five when you're ready.
+- **Drag them to the ✕** (it fades in at the bottom of the screen while you drag) → discard the
+  backlog unheard.
+- **Fling them off any edge** → same thing, faster.
+- **Drag them anywhere else** → they snap to the nearest side and stay there; the app remembers.
+
+The backlog survives the app being restarted by the system, and entries older than three hours expire
+on their own — a synopsis from this morning is noise, not news.
+
+The same gate covers `asmltr notify`'s spoken step, so a proactive message from the assistant can't
+barge into a call either. (Do Not Disturb is *not* applied there: that path already has its own quiet
+hours, and the notify ladder decides its own timing.)
 
 ### Gating & settings (app → **⚙ Notifications**)
 
@@ -86,6 +117,15 @@ of the Android app.
 - **Per-app allow/deny** and a **sender allow-list**; ongoing/transport/foreground-service noise is
   filtered out automatically.
 - **Verbosity** — headline vs. full synopsis — and **burst-summarize** on/off.
+- **Hold instead of interrupting** — on by default. Turning it off restores barge-in behavior (still
+  ducked, still respecting the headphones gate).
+- **Respect Do Not Disturb** — on by default.
+- **Wait out navigation prompts and alarms** — on by default. Turn it off if you'd rather hear
+  notifications while a route is being narrated.
+
+The settings screen also shows the live gate state (*"Right now: free to speak"* / *"a call is in
+progress"* / *"3 held"*) and a **Test held badge** button, so the corner UI can be tried without
+staging a phone call.
 
 ### Privacy
 

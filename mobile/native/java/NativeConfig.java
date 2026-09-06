@@ -157,14 +157,42 @@ public class NativeConfig {
   // ── Notification reader (Part B) config bridge ───────────────────────────────
   /** Persist the notification-reader settings (written from the app's Notifications settings UI). */
   @JavascriptInterface
-  public void saveNotifyConfig(boolean enabled, boolean headphonesOnly, int threshold, String deniedCsv, String btCsv) {
+  public void saveNotifyConfig(boolean enabled, boolean headphonesOnly, int threshold, String deniedCsv, String btCsv,
+                               boolean holdWhenBusy, boolean respectDnd, boolean holdForNav) {
     SharedPreferences.Editor e = ctx.getSharedPreferences("asmltr", Context.MODE_PRIVATE).edit();
     e.putBoolean("notif_enabled", enabled);
     e.putBoolean("notif_headphones_only", headphonesOnly);
     e.putInt("notif_threshold", threshold);
     e.putString("notif_apps_denied", deniedCsv == null ? "" : deniedCsv);
     e.putString("notif_bt_devices", btCsv == null ? "" : btCsv);
+    // Interruption policy: hold rather than barge in, and what counts as "busy".
+    e.putBoolean("notif_hold_busy", holdWhenBusy);
+    e.putBoolean("notif_respect_dnd", respectDnd);
+    e.putBoolean("notif_hold_nav", holdForNav);
     e.apply();
+  }
+
+  /** Drop a sample line into the held queue and raise the badge — so the corner UI (tap to read, drag
+   *  to the ✕ to discard) can be exercised without staging a real phone call. */
+  @JavascriptInterface
+  public void testHeldBadge() {
+    try { ReadAloud.hold(ctx, "This is a held notification. Tap the eyes to hear what came in, or drag them to the X to dismiss.", "asmltr"); }
+    catch (Throwable t) {}
+  }
+
+  /** Why the reader would hold right now ("clear", "a call is in progress", "Do Not Disturb is on", …).
+   *  Shown in Settings so the gate is legible instead of mysterious. */
+  @JavascriptInterface
+  public String speakGateStatus() {
+    try {
+      SharedPreferences p = ctx.getSharedPreferences("asmltr", Context.MODE_PRIVATE);
+      int g = SpeakGate.check(ctx, p.getBoolean("notif_respect_dnd", true), p.getBoolean("notif_hold_nav", true));
+      JSONObject o = new JSONObject();
+      o.put("state", g == SpeakGate.OK ? "ok" : g == SpeakGate.WAIT ? "wait" : "hold");
+      o.put("reason", SpeakGate.reason());
+      o.put("held", NotifQueue.size(ctx));
+      return o.toString();
+    } catch (Throwable t) { return "{}"; }
   }
 
   @JavascriptInterface
@@ -177,6 +205,10 @@ public class NativeConfig {
       o.put("threshold", p.getInt("notif_threshold", 40));
       o.put("apps_denied", p.getString("notif_apps_denied", ""));
       o.put("bt_devices", p.getString("notif_bt_devices", ""));
+      o.put("hold_when_busy", p.getBoolean("notif_hold_busy", true));
+      o.put("respect_dnd", p.getBoolean("notif_respect_dnd", true));
+      o.put("hold_for_nav", p.getBoolean("notif_hold_nav", true));
+      o.put("held", NotifQueue.size(ctx));
       o.put("access_granted", isNotificationAccessGranted());
       return o.toString();
     } catch (Exception ex) { return "{}"; }

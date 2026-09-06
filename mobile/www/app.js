@@ -835,7 +835,11 @@ function loadNotifSettings() {
   if ($('cfgNotifHp')) $('cfgNotifHp').checked = c.headphones_only !== false;
   if ($('cfgNotifThreshold')) $('cfgNotifThreshold').value = c.threshold != null ? c.threshold : 40;
   if ($('cfgNotifDenied')) $('cfgNotifDenied').value = c.apps_denied || '';
+  if ($('cfgNotifHold')) $('cfgNotifHold').checked = c.hold_when_busy !== false;
+  if ($('cfgNotifDnd')) $('cfgNotifDnd').checked = c.respect_dnd !== false;
+  if ($('cfgNotifNav')) $('cfgNotifNav').checked = c.hold_for_nav !== false;
   if ($('cfgNotifAccessMsg')) $('cfgNotifAccessMsg').textContent = c.access_granted ? '✓ access granted' : '⚠ not granted — tap to grant';
+  showGateStatus(c.held || 0);
   // BT/wired device picker: which routes may trigger readout (empty selection = any headphones)
   const wrap = $('cfgNotifDevices'); if (!wrap) return;
   let devs = []; try { devs = JSON.parse((n.listAudioDevices && n.listAudioDevices()) || '[]'); } catch (_) {}
@@ -853,11 +857,24 @@ async function saveNotifSettings() {
   const denied = ($('cfgNotifDenied').value || '').trim();
   const bt = [...document.querySelectorAll('.notif-dev:checked')].map((e) => e.value).join(',');
   try {
-    n.saveNotifyConfig(enabled, hp, threshold, denied, bt);
+    const hold = $('cfgNotifHold') ? $('cfgNotifHold').checked : true;
+    const dnd = $('cfgNotifDnd') ? $('cfgNotifDnd').checked : true;
+    const nav = $('cfgNotifNav') ? $('cfgNotifNav').checked : true;
+    n.saveNotifyConfig(enabled, hp, threshold, denied, bt, hold, dnd, nav);
     // enabling requires the one-off system Notification-access consent
     if (enabled && n.isNotificationAccessGranted && !n.isNotificationAccessGranted()) { if (m) m.textContent = 'grant notification access to finish →'; if (n.openNotificationAccessSettings) n.openNotificationAccessSettings(); return; }
     if (m) m.textContent = '✓ saved';
   } catch (e) { if (m) m.textContent = '✗ ' + e.message; }
+}
+// Show why the reader would (or wouldn't) speak right now, plus anything already held. Makes the
+// interruption gate legible — otherwise "it went quiet" is indistinguishable from "it broke".
+function showGateStatus(held) {
+  const el = $('cfgNotifGate'); if (!el) return;
+  const n = NC(); let g = {};
+  try { g = JSON.parse((n && n.speakGateStatus && n.speakGateStatus()) || '{}'); } catch (_) {}
+  const h = held != null ? held : (g.held || 0);
+  const now = g.state === 'ok' ? 'free to speak' : (g.reason || 'busy');
+  el.textContent = `Right now: ${now}${h ? ` · ${h} held` : ''}`;
 }
 function closeSheet() { $('sheet').classList.add('hidden'); reportPanelHeight(); }
 // Start a fresh conversation: stop anything running, ask the connector to forget the core session, wipe the log.
@@ -1028,6 +1045,13 @@ function init() {
   if ($('cfgVoiceSave')) $('cfgVoiceSave').addEventListener('click', saveVoice);
   if ($('cfgNotifSave')) $('cfgNotifSave').addEventListener('click', saveNotifSettings);
   if ($('cfgNotifAccess')) $('cfgNotifAccess').addEventListener('click', () => { const n = NC(); if (n && n.openNotificationAccessSettings) n.openNotificationAccessSettings(); });
+  if ($('cfgNotifTest')) $('cfgNotifTest').addEventListener('click', () => {
+    const n = NC(); const m = $('cfgNotifMsg');
+    if (!n || !n.testHeldBadge) { if (m) m.textContent = 'needs the native app'; return; }
+    n.testHeldBadge();
+    if (m) m.textContent = '✓ badge raised — find the eyes in the corner';
+    setTimeout(() => showGateStatus(), 300);
+  });
   if ($('cfgNewSession')) $('cfgNewSession').addEventListener('click', newSession);
   if ($('cfgRemoteDesktop')) $('cfgRemoteDesktop').addEventListener('click', () => { location.href = 'remote-desktop.html'; });
   $('cfgTest').addEventListener('click', testConn);

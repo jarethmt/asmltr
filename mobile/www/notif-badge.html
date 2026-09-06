@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>held</title>
+<style>
+  :root{ --v:139 92 246; --p:236 72 153; --c:34 211 238; }
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;
+    -webkit-user-select:none;user-select:none;pointer-events:none}
+  /* Same presence as the read-aloud eyes, shrunk into a corner and wearing a "!" — it is waiting, not
+     talking. Native owns the window (position, drag, tap); this is purely the face. */
+  #badge{position:fixed;inset:0;display:grid;place-items:center;opacity:0;transform:scale(.5);
+    transition:transform .5s cubic-bezier(.2,1.5,.4,1), opacity .35s ease}
+  #badge.show{opacity:1;transform:scale(1)}
+  #orb{position:relative;width:76px;height:76px;display:grid;place-items:center}
+  .halo{position:absolute;inset:-6px;border-radius:50%;filter:blur(18px);opacity:.85;
+    background:radial-gradient(circle at 50% 45%, rgb(var(--v)/.85), rgb(var(--p)/.42) 54%, transparent 72%)}
+  .halo.b{inset:6px;filter:blur(11px);opacity:.65;animation:spin 9s linear infinite;
+    background:radial-gradient(circle at 55% 55%, rgb(var(--c)/.5), transparent 68%)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .eyes{position:relative;z-index:2;display:flex;gap:15px}
+  .eye{width:19px;height:34px;border-radius:50% / 46%;transition:height .09s ease, transform .18s ease;
+    background:radial-gradient(ellipse 44% 30% at 50% 34%, rgba(255,255,255,.2), transparent 72%),
+      radial-gradient(ellipse 96% 96% at 50% 50%, rgb(var(--v)) 0%, rgb(var(--v)/.82) 44%, rgb(var(--v)/0) 100%);
+    filter:blur(1.1px);
+    box-shadow:0 0 22px 2px rgb(var(--v)/.6), 0 0 46px 6px rgb(var(--p)/.26)}
+
+  /* the "!" chip — violet→magenta, with the backlog count when there's more than one */
+  #bang{position:absolute;z-index:3;top:2px;right:0;min-width:22px;height:22px;padding:0 6px;
+    border-radius:999px;display:flex;align-items:center;justify-content:center;gap:3px;
+    font:700 13px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#fff;
+    background:linear-gradient(135deg,rgb(var(--v)),rgb(var(--p)));
+    box-shadow:0 2px 10px rgb(var(--p)/.5), inset 0 1px 0 rgba(255,255,255,.28);
+    border:1px solid rgba(255,255,255,.22)}
+  #bang .n{font-size:11px;opacity:.95}
+
+  /* reading: the halo swells and the eyes widen, so a glance says "it's talking now" */
+  #badge.reading .halo{animation:pulse 1.1s ease-in-out infinite}
+  #badge.reading #bang{opacity:0;transform:scale(.6)}
+  #bang{transition:opacity .2s ease, transform .2s ease}
+  @keyframes pulse{0%,100%{opacity:.8;transform:scale(1)}50%{opacity:1;transform:scale(1.12)}}
+
+  /* dragging: eyes glance down toward the ✕ target */
+  #badge.drag .eye{transform:translateY(4px)}
+  #badge.drag{transform:scale(1.08)}
+
+  /* busy: you tapped, but the call is still up — a small refusal shake */
+  #badge.busy{animation:shake .45s ease}
+  @keyframes shake{10%,90%{transform:translateX(-3px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-4px)}}
+</style></head>
+<body>
+  <div id="badge">
+    <div id="orb">
+      <span class="halo"></span><span class="halo b"></span>
+      <span class="eyes"><i class="eye" id="eyeL"></i><i class="eye" id="eyeR"></i></span>
+      <span id="bang">!<span class="n" id="cnt"></span></span>
+    </div>
+  </div>
+<script>
+  const badge = document.getElementById('badge');
+  const cnt = document.getElementById('cnt');
+  const eyes = [document.getElementById('eyeL'), document.getElementById('eyeR')];
+  const qs = new URLSearchParams(location.search);
+
+  requestAnimationFrame(() => requestAnimationFrame(() => badge.classList.add('show')));
+
+  // Blink + a slow look-around, so it reads as waiting rather than as a static icon.
+  let t = 0, nextBlink = 60;
+  (function loop(){
+    t++;
+    let h = badge.classList.contains('reading') ? 32 : 28;
+    if (--nextBlink <= 0) { h = 4; if (nextBlink < -4) nextBlink = 90 + Math.random()*160; }
+    for (const e of eyes) e.style.height = h + 'px';
+    requestAnimationFrame(loop);
+  })();
+
+  // Count of 1 shows a bare "!" — the number only earns its space once there's a backlog.
+  window.setCount = (n) => { cnt.textContent = (n > 1) ? String(n) : ''; };
+
+  let busyTimer = null;
+  window.setState = (s) => {
+    badge.classList.remove('reading', 'drag', 'busy');
+    if (s === 'busy') {
+      badge.classList.add('busy');
+      clearTimeout(busyTimer);
+      busyTimer = setTimeout(() => badge.classList.remove('busy'), 500);
+      return;
+    }
+    if (s === 'reading' || s === 'drag') badge.classList.add(s);
+  };
+
+  window.setCount(parseInt(qs.get('n') || '1', 10) || 1);
+</script>
+</body></html>

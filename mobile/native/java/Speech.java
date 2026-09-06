@@ -3,8 +3,10 @@ package com.asmltr.assistant;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.os.Build;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
 
@@ -16,6 +18,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Native read-aloud that uses the ASSISTANT's configured voice. Headless speak paths (the control link
@@ -23,20 +27,71 @@ import java.util.Locale;
  * TTS — ElevenLabs / OpenAI voice + model — not Android's built-in robot engine. So we synthesize through
  * the connector's `/gw/tts` (which honors the persisted provider/voice/model) and play the returned clip;
  * the OS TextToSpeech engine is only a fallback when the server can't be reached (offline / no key).
+ *
+ * **Audio focus.** Every spoken clip is bracketed by a TRANSIENT_MAY_DUCK focus request, which is what
+ * makes music drop to a murmur underneath instead of fighting the synopsis. It is also the last line of
+ * the politeness gate: if the system refuses focus, something is using the audio route in a way we must
+ * not interrupt, and the caller queues the text instead of speaking it. Losing focus mid-clip (an
+ * incoming call, a navigation prompt) aborts playback and reports BUSY so the text can be held.
  */
 public class Speech {
   private static TextToSpeech tts;               // lazy fallback engine
   private static volatile boolean ttsReady = false;
 
-  /** Speak `text` in the configured voice. `requireHeadphones` gates on a BT/wired route being present. */
+  /** Result of a blocking speak. */
+  public static final int SPOKE = 0;    // it was read aloud, start to finish
+  public static final int BUSY = 1;     // focus denied or lost — nothing (useful) was heard
+  public static final int FAILED = 2;   // nothing to say / no way to say it
+
+  private static volatile MediaPlayer playing;   // the clip currently on the speaker
+  private static volatile boolean aborted;       // set when focus is lost under us
+  /** One voice at a time. Several paths can speak (the reader, the control link's notify frame, the
+   *  badge flushing a backlog) and without this they overlap into an unintelligible duet — each one
+   *  holds its own audio focus, so the system happily lets both through. */
+  private static final ReentrantLock VOICE = new ReentrantLock(true);
+
+  /** Fire-and-forget speak in the configured voice. `requireHeadphones` gates on a BT/wired route. */
   public static void speak(final Context ctx, final String base, final String token, final String text, final boolean requireHeadphones) {
     if (text == null || text.trim().isEmpty()) return;
     if (requireHeadphones && !headphonesConnected(ctx)) return;
-    new Thread(() -> {
-      byte[] audio = synth(base, token, text);
-      if (audio != null && audio.length > 0 && playClip(ctx, audio)) return; // configured voice
-      nativeSpeak(ctx, text);                                                 // fallback: OS engine
-    }, "asmltr-speech").start();
+    new Thread(() -> speakBlocking(ctx, base, token, text), "asmltr-speech").start();
+  }
+
+  /**
+   * Speak and wait. MUST be called off the main thread. Returns SPOKE / BUSY / FAILED so the caller can
+   * decide whether the message was actually delivered or needs holding.
+   */
+  public static int speakBlocking(Context ctx, String base, String token, String text) {
+    if (text == null || text.trim().isEmpty()) return FAILED;
+    // Wait for whoever is already talking. A minute is generous for one synopsis; past that, something
+    // is wedged and the caller is better off holding this line than queueing behind it forever.
+    boolean held = false;
+    try { held = VOICE.tryLock(60, TimeUnit.SECONDS); } catch (InterruptedException e) { return BUSY; }
+    if (!held) { android.util.Log.d("AsmltrNotif", "speech: another utterance is still playing — holding"); return BUSY; }
+    try {
+      Object focus = requestFocus(ctx);
+      if (focus == null) { android.util.Log.d("AsmltrNotif", "speech: audio focus DENIED — holding instead of speaking"); return BUSY; }
+      aborted = false;
+      try {
+        byte[] audio = synth(base, token, text);
+        if (aborted) return BUSY;
+        if (audio != null && audio.length > 0) {
+          boolean played = playClip(ctx, audio);
+          if (aborted) return BUSY;
+          if (played) return SPOKE;
+        }
+        if (aborted) return BUSY;
+        return nativeSpeakBlocking(ctx, text) ? SPOKE : FAILED;   // fallback: OS engine
+      } finally { abandonFocus(ctx, focus); }
+    } finally { VOICE.unlock(); }
+  }
+
+  /** Cut a clip short (focus loss, or the user interrupting). */
+  public static void stop() {
+    aborted = true;
+    MediaPlayer mp = playing;
+    try { if (mp != null) mp.stop(); } catch (Throwable t) {}
+    try { if (tts != null) tts.stop(); } catch (Throwable t) {}
   }
 
   public static boolean headphonesConnected(Context ctx) {
@@ -52,6 +107,49 @@ public class Speech {
     } catch (Throwable t) {}
     return false;
   }
+
+  // ── audio focus ─────────────────────────────────────────────────────────────
+
+  private static final AudioManager.OnAudioFocusChangeListener FOCUS_LISTENER = change -> {
+    // CAN_DUCK is us being asked to duck — we're a short spoken line, let it ride. A real LOSS (a call
+    // takes over) or LOSS_TRANSIENT (a navigation prompt) means stop talking immediately.
+    if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+      android.util.Log.d("AsmltrNotif", "speech: lost audio focus mid-clip — stopping");
+      stop();
+    }
+  };
+
+  /** Take TRANSIENT_MAY_DUCK focus (so music quiets under us). Returns a token to hand back, or null. */
+  private static Object requestFocus(Context ctx) {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return null;
+      AudioAttributes attrs = new AudioAttributes.Builder()
+          .setUsage(AudioAttributes.USAGE_MEDIA)                      // keep the A2DP media route
+          .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+      if (Build.VERSION.SDK_INT >= 26) {
+        AudioFocusRequest req = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(attrs)
+            .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener(FOCUS_LISTENER)
+            .build();
+        return am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED ? req : null;
+      }
+      int r = am.requestAudioFocus(FOCUS_LISTENER, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
+      return r == AudioManager.AUDIOFOCUS_REQUEST_GRANTED ? Boolean.TRUE : null;
+    } catch (Throwable t) { return null; }
+  }
+
+  private static void abandonFocus(Context ctx, Object token) {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      if (am == null) return;
+      if (Build.VERSION.SDK_INT >= 26 && token instanceof AudioFocusRequest) am.abandonAudioFocusRequest((AudioFocusRequest) token);
+      else am.abandonAudioFocus(FOCUS_LISTENER);
+    } catch (Throwable t) {}
+  }
+
+  // ── synthesis + playback ────────────────────────────────────────────────────
 
   /** POST /gw/tts { token, text } → { ok, mime, b64 }. Returns decoded audio bytes, or null on failure. */
   private static byte[] synth(String base, String token, String text) {
@@ -93,20 +191,31 @@ public class Speech {
       mp.setOnCompletionListener(m -> { synchronized (lock) { done[0] = true; lock.notifyAll(); } });
       mp.setOnErrorListener((m, w, e) -> { synchronized (lock) { done[0] = true; lock.notifyAll(); } return true; });
       mp.prepare();
+      playing = mp;
+      if (aborted) { try { mp.release(); } catch (Throwable t) {} playing = null; return false; }
       mp.start();
       synchronized (lock) { while (!done[0]) { try { lock.wait(30000); } catch (InterruptedException e) { break; } if (!mp.isPlaying()) break; } }
+      playing = null;
       try { mp.release(); } catch (Throwable t) {}
       return true;
-    } catch (Throwable t) { return false; }
+    } catch (Throwable t) { playing = null; return false; }
     finally { if (f != null) try { f.delete(); } catch (Throwable t) {} }
   }
 
-  private static synchronized void nativeSpeak(Context ctx, final String text) {
+  /** OS-engine fallback, blocking so the caller keeps audio focus (and the ducking) until it finishes. */
+  private static synchronized boolean nativeSpeakBlocking(Context ctx, final String text) {
     if (tts == null) tts = new TextToSpeech(ctx.getApplicationContext(), s -> {
       if (s == TextToSpeech.SUCCESS) { try { tts.setLanguage(Locale.getDefault()); } catch (Throwable t) {} ttsReady = true; }
     });
     for (int i = 0; i < 20 && !ttsReady; i++) { try { Thread.sleep(100); } catch (InterruptedException e) { break; } }
-    if (!ttsReady) return;
-    try { tts.speak(text, TextToSpeech.QUEUE_ADD, null, "asmltr-" + System.currentTimeMillis()); } catch (Throwable t) {}
+    if (!ttsReady) return false;
+    try { tts.speak(text, TextToSpeech.QUEUE_ADD, null, "asmltr-" + System.currentTimeMillis()); } catch (Throwable t) { return false; }
+    // Wait it out (cap ~60s) so focus is held for the whole utterance rather than dropped immediately.
+    for (int i = 0; i < 600; i++) {
+      if (aborted) return false;
+      try { if (!tts.isSpeaking() && i > 3) break; } catch (Throwable t) { break; }
+      try { Thread.sleep(100); } catch (InterruptedException e) { break; }
+    }
+    return !aborted;
   }
 }

@@ -41,6 +41,18 @@ public class AsmltrNotificationService extends NotificationListenerService {
 
   private SharedPreferences prefs() { return getSharedPreferences("asmltr", Context.MODE_PRIVATE); }
 
+  /** The interruption filter (Do Not Disturb) is only legible to a bound notification listener, so we
+   *  cache it here for SpeakGate — which runs from the badge and the control link too. */
+  @Override public void onListenerConnected() {
+    try { SpeakGate.cacheInterruptionFilter(getCurrentInterruptionFilter()); } catch (Throwable t) {}
+    try { NotifBadgeOverlay.restore(this); } catch (Throwable t) {}   // backlog survived a process restart
+  }
+
+  @Override public void onInterruptionFilterChanged(int interruptionFilter) {
+    android.util.Log.d(TAG, "interruption filter → " + interruptionFilter + " (DND " + (interruptionFilter >= 2 ? "ON" : "off") + ")");
+    SpeakGate.cacheInterruptionFilter(interruptionFilter);
+  }
+
   @Override public void onNotificationPosted(StatusBarNotification sbn) {
     try {
       // Every gate says WHY it dropped a notification. Without this the reader is a black box: it
@@ -99,6 +111,9 @@ public class AsmltrNotificationService extends NotificationListenerService {
   }
 
   private void triageAndSpeak(List<Item> batch) {
+    // Refresh the Do Not Disturb cache from the one component allowed to read it. onInterruptionFilterChanged
+    // covers live changes, but a filter set while we were unbound would otherwise go unnoticed.
+    try { SpeakGate.cacheInterruptionFilter(getCurrentInterruptionFilter()); } catch (Throwable t) {}
     SharedPreferences p = prefs();
     String base = p.getString("baseUrl", ""), token = p.getString("token", "");
     if (base.isEmpty()) { android.util.Log.w(TAG, "drop: no baseUrl configured — can't reach triage"); return; }
@@ -140,9 +155,12 @@ public class AsmltrNotificationService extends NotificationListenerService {
       android.util.Log.d(TAG, "triage result: speak=" + speak + " priority=" + priority
           + " (threshold=" + threshold + ") synopsis=" + (synopsis.isEmpty() ? "<empty>" : synopsis));
       if (speak && priority >= threshold && !synopsis.isEmpty()) {
-        android.util.Log.d(TAG, "SPEAKING");
-        NotifEyesOverlay.show(this, synopsis);   // float the eyes over the screen while it's read aloud
-        Speech.speak(this, base, token, synopsis, false);
+        // Hand off to the shared read-aloud door: it speaks now if the ear is free (ducking music),
+        // waits out a navigation prompt, or holds the synopsis behind the corner badge during a call
+        // or Do Not Disturb. We're already on a worker thread, so blocking here is fine.
+        android.util.Log.d(TAG, "DELIVERING");
+        ReadAloud.deliver(this, base, token, synopsis, true,
+            batch.size() == 1 ? batch.get(0).app : "multiple");
       } else {
         android.util.Log.d(TAG, "not speaking — gate not met");
       }

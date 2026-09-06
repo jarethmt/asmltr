@@ -86,7 +86,14 @@
       <label>Read only if priority ≥ <input id="cfgNotifThreshold" type="number" min="0" max="100" placeholder="40" /></label>
       <label>Skip these apps (comma-separated package names)<input id="cfgNotifDenied" placeholder="com.spam.app, com.other" /></label>
       <div id="cfgNotifDevices"></div>
-      <div class="row"><button id="cfgNotifSave" class="primary">Save notifications</button></div>
+
+      <h3 style="margin:16px 0 4px;font-size:14px">Don't talk over me</h3>
+      <p class="msg" style="margin:0 0 8px">When the moment is wrong, the synopsis is held instead of spoken and the eyes appear in the corner with a "!". Tap them to hear everything at once; drag them to the ✕ (or fling them off-screen) to discard.</p>
+      <label class="check"><input id="cfgNotifHold" type="checkbox" /> Hold instead of interrupting (calls, Do Not Disturb)</label>
+      <label class="check"><input id="cfgNotifDnd" type="checkbox" /> Respect Do Not Disturb</label>
+      <label class="check"><input id="cfgNotifNav" type="checkbox" /> Wait out navigation prompts and alarms</label>
+      <p id="cfgNotifGate" class="msg"></p>
+      <div class="row"><button id="cfgNotifSave" class="primary">Save notifications</button><button id="cfgNotifTest" class="secondary">Test held badge</button></div>
       <p id="cfgNotifMsg" class="msg"></p>
 
       <h2 style="margin-top:18px">Session</h2>

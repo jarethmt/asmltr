@@ -10,6 +10,21 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **The Android notification reader no longer talks over you** (mobile app 0.9.0). It asks whether the
+  ear is actually free before reading a synopsis: a live call (cellular or VoIP), Do Not Disturb, a
+  navigation prompt, an alarm or another assistant all mean "not now". Music and podcasts are the
+  exception — those **duck** under the synopsis via a `TRANSIENT_MAY_DUCK` audio-focus request instead
+  of competing with it, and losing focus mid-clip stops playback rather than shouting through it.
+  Do Not Disturb was previously ignored entirely; it is now respected, read from the notification
+  listener (the only component the platform lets see the interruption filter).
+- **Held notifications, and a badge to release them.** Anything the gate defers is queued rather than
+  dropped, and the read-aloud eyes reappear in a screen corner wearing a "!": tap to hear the whole
+  backlog in one go, drag to the ✕ (which fades in while you drag) or fling off-screen to discard it,
+  drag anywhere else to reposition. The backlog persists across process restarts and expires after
+  three hours. `asmltr notify`'s spoken step goes through the same door, so a proactive message can't
+  barge into a call either. New settings: hold-instead-of-interrupt, respect-DND, wait-out-navigation,
+  a live gate readout, and a **Test held badge** button.
+
 - **Integrations are now the home for outward-facing capability**, defined as an *optional,
   per-install capability the agent reaches outward to use* — see
   [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md). Plugin types load from two trees under one contract:
