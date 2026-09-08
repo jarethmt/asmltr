@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>asmltr eyes — design preview</title>
+<style>
+  :root{ --a:139 92 246; --b:236 72 153; --bg:#0b0b10; --panel:#15151d; --line:#26262f; --ink:#e9e9f0; --mut:#8a8a99; }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:28px 20px 64px}
+  h1{font-size:20px;margin:0 0 4px;letter-spacing:-.01em}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);margin:30px 0 10px;font-weight:600}
+  p.sub{color:var(--mut);margin:0 0 22px;font-size:14px}
+  .stage{background:radial-gradient(120% 90% at 50% 0%,#1a1a26,#0d0d13);border:1px solid var(--line);
+    border-radius:20px;display:grid;place-items:center;padding:10px;position:relative;overflow:hidden}
+  #main{width:min(340px,72vw);aspect-ratio:1}
+  canvas{display:block;width:100%;height:100%}
+  .row{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
+  button{font:600 13px/1 system-ui,sans-serif;color:var(--ink);background:#1d1d27;border:1px solid var(--line);
+    border-radius:999px;padding:9px 15px;cursor:pointer;transition:.15s}
+  button:hover{border-color:#3a3a48}
+  button.on{background:linear-gradient(135deg,rgb(var(--a)),rgb(var(--b)));border-color:transparent;color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
+  .card h3{margin:0 0 2px;font-size:13px;font-weight:600}
+  .card .note{color:var(--mut);font-size:12px;margin:0 0 12px}
+  .sizes{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap}
+  .size{text-align:center}
+  .size .lab{color:var(--mut);font-size:11px;margin-top:8px}
+  .size .frame{background:radial-gradient(120% 90% at 50% 20%,#1a1a26,#0d0d13);
+    border:1px dashed #2e2e3a;border-radius:14px;display:grid;place-items:center}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cmp .lab{color:var(--mut);font-size:12px;text-align:center;margin-top:8px}
+  .old{position:relative;width:210px;height:210px;margin:0 auto;
+    border:1px dashed #3a2a3a;border-radius:12px;overflow:hidden;display:grid;place-items:center}
+  .old .face{position:relative;width:200px;height:200px;display:grid;place-items:center}
+  .old .halo{position:absolute;inset:0;border-radius:50%;filter:blur(26px);opacity:.9;
+    background:radial-gradient(circle at 50% 45%,rgb(var(--a)/.85),rgb(var(--b)/.4) 52%,transparent 70%)}
+  .old .eyes{position:relative;z-index:2;display:flex;gap:22px}
+  .old .eye{width:28px;height:50px;border-radius:50% / 46%;filter:blur(1.4px);
+    background:radial-gradient(ellipse 44% 30% at 50% 34%,rgba(255,255,255,.18),transparent 72%),
+      radial-gradient(ellipse 96% 96% at 50% 50%,rgb(var(--a)) 0%,rgb(var(--a)/.82) 44%,rgb(var(--a)/0) 100%);
+    box-shadow:0 0 30px 3px rgb(var(--a)/.62),0 0 62px 8px rgb(var(--b)/.28);animation:blinkold 3.4s infinite}
+  @keyframes blinkold{0%,92%,100%{height:50px}95%{height:5px}}
+  .new-cmp{width:210px;height:210px;margin:0 auto;border:1px dashed #2a3a2e;border-radius:12px}
+  code{background:#1d1d27;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12px}
+  .legend{color:var(--mut);font-size:12.5px;margin:10px 0 0}
+  .legend b{color:var(--ink);font-weight:600}
+</style></head>
+<body>
+<div class="wrap">
+  <h1>asmltr eyes — design preview</h1>
+  <p class="sub">Same face on every surface: the assistant drawer, the read-aloud toast, and the held-notification badge.</p>
+
+  <div class="stage"><canvas id="main"></canvas></div>
+
+  <div class="row" id="states"></div>
+  <div class="row" id="moods"></div>
+  <div class="row">
+    <button id="speechBtn">▶ Simulate speech</button>
+    <button id="palBtn">Palette: Eve</button>
+    <button id="glowBtn" class="on">Glow on</button>
+  </div>
+  <p class="legend"><b>Simulate speech</b> drives it with a synthetic envelope — syllable bursts with clause gaps —
+  so you can see the accent flicks and the between-clause glances without waiting for real TTS.</p>
+
+  <h2>At real on-screen size</h2>
+  <div class="sizes" id="sizes"></div>
+
+  <h2>Old vs new — the crop</h2>
+  <div class="cmp">
+    <div>
+      <div class="old"><div class="face"><span class="halo"></span>
+        <span class="eyes"><i class="eye"></i><i class="eye"></i></span></div></div>
+      <p class="lab">Old — 200px face + <code>blur(26px)</code> in a 210dp window.<br>The halo is cut off on all four sides.</p>
+    </div>
+    <div>
+      <canvas class="new-cmp" id="cmpNew"></canvas>
+      <p class="lab">New — glow drawn in canvas with 28% reserved padding.<br>It fades to nothing before the edge.</p>
+    </div>
+  </div>
+
+  <h2>What changed</h2>
+  <div class="grid">
+    <div class="card"><h3>No specular highlight</h3><p class="note">A hard white dot implies a glossy ball lit from outside. These are self-luminous, so the light now comes from inside — a vertical gradient, near-white at the top falling to accent at the bottom.</p></div>
+    <div class="card"><h3>Shape carries emotion</h3><p class="note">Height, width, per-corner radius, bottom arc, lid angle and tilt are all animated. Happy squints by bowing the bottom edge up; concerned cuts the outer top corner down.</p></div>
+    <div class="card"><h3>Speech is gestural</h3><p class="note">Envelope onsets trigger micro-saccades on emphasis; silence gaps between clauses trigger a glance away, a blink or a lean. Amplitude alone just throbs.</p></div>
+    <div class="card"><h3>Springs, not lerps</h3><p class="note">Every value is a damped spring, so blinks snap and state changes overshoot slightly instead of sliding linearly.</p></div>
+    <div class="card"><h3>Never perfectly still</h3><p class="note">A slow noise drift runs under gaze and eye height at all times. Perfect stillness is the strongest "cheap widget" tell there is.</p></div>
+    <div class="card"><h3>One engine, three surfaces</h3><p class="note">The drawer orb, the toast and the badge all mount the same module, so they can't drift apart again.</p></div>
+  </div>
+</div>
+
+<script>/*__EYES_JS__*/</script>
+<script>
+  var PALETTES = {
+    Eve:     ['139,92,246', '236,72,153'],
+    Ice:     ['96,165,250', '34,211,238'],
+    Ember:   ['251,146,60', '236,72,153'],
+    Mint:    ['52,211,153', '96,165,250'],
+    Mono:    ['226,232,240', '148,163,184']
+  };
+  var palNames = Object.keys(PALETTES), palIx = 0;
+
+  var face = AsmltrEyes.mount(document.getElementById('main'), { palette: PALETTES.Eve });
+  var cmp  = AsmltrEyes.mount(document.getElementById('cmpNew'), { palette: PALETTES.Eve });
+
+  // real on-screen sizes, so legibility can be judged honestly rather than at hero scale
+  var SIZES = [
+    { px: 132, lab: 'Badge — 104dp' },
+    { px: 210, lab: 'Read-aloud toast — 210dp' },
+    { px: 128, lab: 'Drawer orb — 128px' }
+  ];
+  var small = [];
+  var sizeWrap = document.getElementById('sizes');
+  SIZES.forEach(function (s) {
+    var d = document.createElement('div'); d.className = 'size';
+    d.innerHTML = '<div class="frame" style="width:' + s.px + 'px;height:' + s.px + 'px">' +
+      '<canvas style="width:' + s.px + 'px;height:' + s.px + 'px"></canvas></div>' +
+      '<div class="lab">' + s.lab + '</div>';
+    sizeWrap.appendChild(d);
+    small.push(AsmltrEyes.mount(d.querySelector('canvas'), { palette: PALETTES.Eve }));
+  });
+
+  var all = function () { return [face, cmp].concat(small); };
+
+  function pills(host, items, onPick, initial) {
+    items.forEach(function (n) {
+      var b = document.createElement('button');
+      b.textContent = n; if (n === initial) b.className = 'on';
+      b.onclick = function () {
+        [].forEach.call(host.children, function (c) { c.className = ''; });
+        b.className = 'on'; onPick(n);
+      };
+      host.appendChild(b);
+    });
+  }
+  pills(document.getElementById('states'), AsmltrEyes.states,
+        function (s) { all().forEach(function (f) { f.setState(s); }); }, 'idle');
+  pills(document.getElementById('moods'), AsmltrEyes.moods,
+        function (m) { all().forEach(function (f) { f.setMood(m); }); }, 'neutral');
+
+  // ── synthetic speech envelope ────────────────────────────────────────────────
+  // Syllables at ~4.5/s grouped into clauses, with real gaps between them — the shape the gesture
+  // scheduler is tuned against.
+  var speaking = false, sT = 0, clause = 0, clauseLen = 0, gap = 0;
+  document.getElementById('speechBtn').onclick = function () {
+    speaking = !speaking;
+    this.className = speaking ? 'on' : '';
+    this.textContent = speaking ? '■ Stop' : '▶ Simulate speech';
+    all().forEach(function (f) { f.setState(speaking ? 'speaking' : 'idle'); });
+    if (speaking) { clauseLen = 90 + Math.random() * 120; clause = 0; gap = 0; }
+  };
+  setInterval(function () {
+    if (!speaking) return;
+    sT++;
+    var amp;
+    if (gap > 0) { gap--; amp = 0.02 + Math.random() * 0.03; }
+    else {
+      // syllable envelope: a raised-cosine burst every ~13 frames, jittered
+      var ph = (sT % 13) / 13;
+      amp = Math.pow(Math.sin(ph * Math.PI), 1.6) * (0.55 + Math.random() * 0.45);
+      if (++clause > clauseLen) { gap = 22 + Math.random() * 30; clause = 0; clauseLen = 90 + Math.random() * 120; }
+    }
+    all().forEach(function (f) { f.setAmp(amp); });
+  }, 16);
+
+  document.getElementById('palBtn').onclick = function () {
+    palIx = (palIx + 1) % palNames.length;
+    var n = palNames[palIx], p = PALETTES[n];
+    this.textContent = 'Palette: ' + n;
+    document.documentElement.style.setProperty('--a', p[0].replace(/,/g, ' '));
+    document.documentElement.style.setProperty('--b', p[1].replace(/,/g, ' '));
+    all().forEach(function (f) { f.setPalette(p); });
+  };
+  document.getElementById('glowBtn').onclick = function () {
+    var on = this.className !== 'on';
+    this.className = on ? 'on' : ''; this.textContent = on ? 'Glow on' : 'Glow off';
+    all().forEach(function (f) { f.showGlow = on; });
+  };
+</script>
+</body></html>
