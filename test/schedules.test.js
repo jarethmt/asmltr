@@ -82,3 +82,22 @@ test('validateComplete rejects incomplete jobs', () => {
   assert.throws(() => sch.create({ name: 'x', type: 'prompt', schedule: { time: '08:00' } }), /need a prompt/);
   assert.throws(() => sch.create({ name: 'y', type: 'shell', schedule: { time: '08:00' } }), /command or script_path/);
 });
+
+test('V37: prompt session cannot steal Discord/email keys', () => {
+  assert.equal(sch.normalizePromptSession(null), 'new');
+  assert.equal(sch.normalizePromptSession('new'), 'new');
+  assert.equal(sch.normalizePromptSession('schedule:sch_abc'), 'schedule:sch_abc');
+  assert.throws(() => sch.normalizePromptSession('discord:guild:1:channel:2'), /cannot target/);
+  assert.throws(() => sch.normalizePromptSession('email:x:thread:abc'), /cannot target/);
+  assert.throws(() => sch.normalizePromptSession('github:i:repo:a/b:issue:1'), /cannot target/);
+  assert.throws(() => sch.create({
+    name: 'steal', type: 'prompt', schedule: { time: '08:00' }, prompt: 'hi',
+    session: 'discord:dm:1',
+  }), /cannot target/);
+});
+
+test('V37: runtime key falls back to schedule:<id> if a stolen key is already stored', () => {
+  assert.equal(sch.promptConversationKey({ id: 'sch_1', session: 'new' }), 'schedule:sch_1');
+  assert.equal(sch.promptConversationKey({ id: 'sch_1', session: 'schedule:sch_1' }), 'schedule:sch_1');
+  assert.equal(sch.promptConversationKey({ id: 'sch_1', session: 'discord:x' }), 'schedule:sch_1');
+});

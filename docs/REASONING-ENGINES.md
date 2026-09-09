@@ -29,6 +29,7 @@ complete({prompt, model}) → string      // cheap one-shot for the title/status
 - **codex.js** — headless `codex exec --json`; native resume via the assigned `thread_id`; `OPENAI_API_KEY`
   injected from the vault (api_key mode).
 - **gemini.js** — headless `gemini -p -o stream-json --skip-trust`; `GEMINI_API_KEY` from the vault.
+- **grok.js** — headless `grok -p --output-format streaming-json`; subscription via `~/.grok/auth.json` (never `XAI_API_KEY`); resume UUID hook (`-s` create / `-r` resume).
 - **self-hosted** — Codex is the OpenAI-compatible vehicle: set a **custom endpoint** (Settings → Engines →
   Codex → Custom endpoint, or `POST /v2/engines/codex/base-url`) and its turns route to that base URL via a
   codex custom provider (`-c model_providers.asmltr_custom.base_url=… wire_api=responses`). The endpoint must
@@ -56,16 +57,19 @@ MCP tools, or `GET/POST /v2/mcp`, `DELETE /v2/mcp/:name`, `POST /v2/mcp/:name/to
 - **Gemini** — spawn/parse/env verified; **stateless per turn** for now (the CLI's resume is index-based, not
   id-addressable — `--session-file` continuity is the planned follow-up). Google deprecated the free OAuth
   tier, so Gemini's practical path is an **API key** (Settings → Engines → Gemini → API key).
+- **Grok** — spawn/argv/parser unit-tested; live turn needs the official CLI logged in (`grok login --device-auth`).
+  Resume UUID is captured and passed as `-r`. `historyReplaysSystemPrompt` is on (live-verified `-r` replays the first-turn system block).
 
 ## Using it today
 
-asmltr ships a **registry** of known agentic-CLI harnesses — **Claude Code, Gemini CLI, Codex CLI** — and
+asmltr ships a **registry** of known agentic-CLI harnesses — **Claude Code, Gemini CLI, Codex CLI, Grok Build CLI** — and
 detects which are installed (with versions). From the terminal:
 
 ```bash
 asmltr claude [args…]     # launch a wrapped, monitored, takeover-able session on any engine
 asmltr gemini [args…]     # (Gemini CLI)
 asmltr codex  [args…]     # (Codex CLI)
+asmltr grok   [args…]     # (Grok Build CLI)
 ```
 
 Each launches that harness inside a multiplexer, tracked in the dashboard (Live) and attachable — exactly
@@ -185,6 +189,22 @@ works in asmltr's own *normalized* feature model, and three pieces bridge the ga
    warnings surface (to the session + the dashboard).
 3. **The adapter serializes** the negotiated request into valid harness commands. That's the **only** place
    harness-specific flags exist (the anti-corruption layer).
+
+### Vision today (Grok is carved here — other engines plug in the same way)
+
+Do **not** put harness flags in the connector or the dispatcher. Ingest is shared; serialize in the adapter.
+
+| Layer | What | Engine-specific? |
+| --- | --- | --- |
+| Discord/Telegram/… | Magic-classify stills/video, save gen-ref, put `content.attachments` (base64 stills) + `content.media_files` (paths) on the envelope | No |
+| `server.js` `runTurn` | Passes `images` + `mediaFiles` through. Extra fields are ignored by engines that don't read them | No |
+| `shared/inbound-media.js` | `classify` / `saveRef` / `promptBlock` | No |
+| `shared/attach-stage.js` | `asmltr post` ingest/stage | No |
+| **`engines/grok.js`** | ACP JSON via `--prompt-file` (never argv `--prompt-json` — ARG_MAX / spawn E2BIG) + ffmpeg downscale. Re-magics before ffmpeg. | **Yes — Grok CLI only** |
+| **`engines/claude.js`** | SDK `{ type: 'image', source: { type: 'base64', … } }` from `images` | **Yes — Claude SDK only** |
+| Gemini / Codex | No vision serialize yet (intentional). Envelope fields are there; adapters ignore them. **This is where a Gemini or Codex implementer should program that harness's image payload** — not Grok `--prompt-file` and not Claude SDK blocks. Comments in `engines/gemini.js` and `engines/codex.js` `runTurn`. | Wire here later |
+
+To add another engine: keep ingest/core as-is; in that engine's `runTurn`, turn `opts.images` / `opts.mediaFiles` into **that harness's** vision payload (same job grok.js `collectVisionImages` + `acpPromptJson` do for Grok). Do not call `--prompt-json` / `--prompt-file` or the Claude SDK from a third adapter.
 
 The runtime is "aware" because the manifest is **machine-readable**: the GUI hides the image-`detail`
 control on a session whose engine has `detail: false`; the core can warn ("this engine caps images at 8 —
