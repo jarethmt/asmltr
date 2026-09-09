@@ -76,7 +76,7 @@
   // anger, and both together as heavy lids. `tilt` rotates each eye about its own centre, mirrored.
   var MOODS = {
     neutral:   { open: 1.00, wide: 1.00, arc: 0.00, lidOut: 0.00, lidIn: 0.00, tilt: 0.00, rTop: 0.46, rBot: 0.46 },
-    happy:     { open: 0.70, wide: 1.08, arc: 0.26, lidOut: 0.00, lidIn: 0.00, tilt: 0.00, rTop: 0.50, rBot: 0.50 },
+    happy:     { open: 0.66, wide: 1.08, arc: 0.15, lidOut: 0.00, lidIn: 0.00, tilt: 0.00, rTop: 0.46, rBot: 0.50 },
     curious:   { open: 1.06, wide: 1.00, arc: 0.00, lidOut: 0.10, lidIn: 0.00, tilt: 0.10, rTop: 0.42, rBot: 0.46 },
     concerned: { open: 0.94, wide: 0.98, arc: 0.00, lidOut: 0.38, lidIn: 0.02, tilt: 0.00, rTop: 0.38, rBot: 0.48 },
     angry:     { open: 0.92, wide: 1.00, arc: 0.00, lidOut: 0.02, lidIn: 0.42, tilt: 0.00, rTop: 0.38, rBot: 0.48 },
@@ -269,8 +269,18 @@
     // across 8% of the eye is invisible — which is why the expressions only ever read as the corners
     // starting at different heights. 0.34 x w keeps roughly a third of the top edge straight.
     var rTop = Math.min(rTopF * Math.min(w, h), w * 0.34, room * 0.5);
-    var rBot = Math.min(rBotF * Math.min(w, h), hw, room * 0.5);
-    var bow  = Math.min(arc * h, room * 0.55);
+
+    // The bottom bow needs WIDTH to spread across, and the bottom corner radius is what eats it. At
+    // rBot ~ hw both tangent points collapse onto the centre, so the bow stops being a gentle curve
+    // across the bottom and becomes a needle: at full speaking amplitude it spanned 5.4px while
+    // reaching 12px deep, punching a thin V — the triangle that flickers under the eye. So the corner
+    // radius yields as the bow grows, and the bow additionally fades out if the span still closes up.
+    // A spring can undershoot past zero too, and a negative bow would bulge the bottom outward.
+    var arcC = Math.max(0, arc);
+    var rBotCap = hw * (1 - 0.62 * Math.min(1, arcC / 0.25));
+    var rBot = Math.min(rBotF * Math.min(w, h), rBotCap, room * 0.5);
+    var span = Math.max(0, (hw - rBot) * 2);
+    var bow  = Math.min(arcC * h, room * 0.55) * Math.min(1, span / (w * 0.45));
 
     var yL = -hh + dL, yR = -hh + dR;        // the lid line, meeting the left and right edges
     var slope = (yR - yL) / w;               // follow the lid when placing its tangent points
