@@ -345,11 +345,7 @@ function drainTTS() {
   }
   if (replyTextDone && ttsNextPlay >= ttsSeq) finishReadout();  // all sentences synthesized + played
 }
-function finishReadout() {
-  resetTTS(); setState('idle');
-  try { voiceOrb.setMood('neutral'); } catch (_) {}   // the expression belonged to that reply, not forever
-  afterReply();
-}
+function finishReadout() { resetTTS(); setState('idle'); afterReply(); }
 function resetTTS() { ttsBuf = ''; ttsSeq = 0; ttsNextPlay = 0; ttsPlaying = false; replyTextDone = false; for (const k in ttsClips) delete ttsClips[k]; }
 
 // ---------- turn ----------
@@ -367,6 +363,10 @@ async function apiGet(path, params) {
   return j;
 }
 async function sendTurn(text) {
+  // An expression belongs to the reply that set it and lasts until you say something new. Resetting it
+  // when the READOUT ends looked equivalent but wasn't: with the speaker muted, flushTTS() calls
+  // finishReadout() immediately, so the mood was set and wiped in the same instant and never showed.
+  try { voiceOrb.setMood('neutral'); } catch (_) {}
   if (state === 'busy') return;
   suppressRestart = false; resetTTS(); lastTool = null; resetSubPanel();
   bubble('user', text); setState('busy');
