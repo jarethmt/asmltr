@@ -85,6 +85,15 @@ Server Settings → Members → kick the bot. Leaving is immediate; the gateway 
 
 ---
 
+## Invite-only servers (trust)
+
+The current Discord path is for **invite-only** servers — people you let in. That includes silo
+access, `observe_only` context on the next @, and `announce *`. A truly public or open Discord
+(anyone can join, no invite gate) is **not trusted yet**. Do not treat this connector as safe on
+an open server.
+
+---
+
 ## Message flow — when does it respond?
 
 Every message runs through this gauntlet in `messageCreate` (first `return` wins). Understanding the
@@ -158,6 +167,32 @@ selected channel, `d` flips that instance's default (blocklist ↔ allowlist), `
 `{channel_id, clear:true}` to drop an override back to default, or `{default_enabled}` to flip the
 mode) on its `http_port`; the manager proxies these as `GET|POST /instances/<id>/channels` so the
 TUI/dashboard can drive any connector uniformly. Changes take effect immediately — no reconnect.
+
+Mute/disable is **inbound only**. The bot will not *listen* in a muted channel (except owner
+`@mention` commands). Outbound same-guild post into that channel still works.
+
+---
+
+## Same-guild post (`asmltr send discord`)
+
+Public Discord **always** denies cross-system `asmltr send` (email, Telegram, other Discord
+servers). Same-server posting uses the same verb:
+
+`asmltr send discord <id-or-name> "<text>"` (MCP `asmltr_send`).
+
+| Rule | What |
+|---|---|
+| Who | Owner, trusted role, or `resolve()` allow (`guild-post` / `send` / `*`). `default_tier` is a schema field, not the send gate. Empty roles cannot. |
+| Where | This Discord server only. No DMs, no email, no other guilds. |
+| Same channel | Skipped — answer in the ask channel instead. |
+| Name vs id | A name (`the 666 degree steak thread`) **looks up** and does not post. Confirm with the person, then call again with the snowflake. |
+| Text channel | Posts **in the channel**, not a thread. |
+| Forum | Thread id = comment on that post. Forum channel id = **new** forum post (pass `--title`). |
+| Mute | Destination mute does not block the post (inbound-only). |
+| Body | Prefixed `Posting on behalf of <@asker>` then two blank lines. No thought chips on the remote post. |
+| After a real post | Ask channel gets `Post complete.` — then `[[NO_REPLY]]`. |
+
+Recommended seed + allowlist (placeholders only): `core/src/trust/seed.example.json` (example `friend` principal) and `shared/media-allow.example.json`.
 
 ---
 

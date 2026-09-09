@@ -7,6 +7,11 @@
  * as engine_session_id and replay via `codex exec resume <thread_id>`. The API key (if the engine
  * is in api_key mode) is pulled from the TRUST vault and injected as OPENAI_API_KEY — never on disk.
  *
+ * Vision is NOT serialized here. Core already forwards `images` / `mediaFiles` on runTurn
+ * (same envelope as Grok/Claude). A Codex implementer should wire those fields into this
+ * CLI's own image payload in runTurn — do not copy Grok `--prompt-file` or the Claude SDK
+ * image blocks into this adapter. See docs/REASONING-ENGINES.md "Vision today".
+ *
  * Event schema (codex exec --json):
  *   {type:"thread.started", thread_id}            → engineSessionId
  *   {type:"item.completed", item:{item_type|type, text, ...}}
@@ -49,7 +54,14 @@ function baseUrlArgs() {
     '-c', `model_providers.${P}.env_key=OPENAI_API_KEY`];
 }
 
-async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent }) {
+/**
+ * VISION (not wired): core already passes `images` (base64 stills) and `mediaFiles`
+ * (gen-ref paths) on runTurn — same envelope Grok/Claude get. If you are adding
+ * Codex vision, serialize those fields HERE into this CLI's image payload.
+ * Do not copy Grok `--prompt-file` / `--prompt-json` or Claude SDK image blocks
+ * into this adapter. See docs/REASONING-ENGINES.md "Vision today".
+ */
+async function runTurn({ prompt, systemPrompt, resume = null, cwd, model, abortController, onDelta, onSegment, onTool, onThinking, onEvent /* images, mediaFiles: not serialized yet */ }) {
   const mdl = model || engines.modelFor('codex');
   const lastMsgFile = path.join(os.tmpdir(), `asmltr-codex-${process.pid}-${Date.now().toString(36)}.txt`);
   const args = ['exec'];

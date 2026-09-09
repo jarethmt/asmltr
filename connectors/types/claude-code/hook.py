@@ -2,6 +2,10 @@
 """
 asmltr claude-code connector — Claude Code hook → asmltr event emitter.
 
+Grok/Gemini/Codex: this file is Claude Code only. Interactive sessions for those engines are
+`asmltr grok|gemini|codex` (cli/asmltr-engine.js). A Gemini or Codex native-hook port belongs
+in its own script, not this one.
+
 Claude Code fires hooks with a JSON payload on stdin (session_id, cwd, transcript_path,
 hook_event_name, and event-specific fields). This script turns those into the SAME shared
 events every other asmltr connector emits, POSTed to the collector's /ingest — so a terminal

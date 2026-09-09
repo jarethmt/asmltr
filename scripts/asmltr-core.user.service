@@ -1,0 +1,15 @@
+[Unit]
+Description=asmltr-core (127.0.0.1)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/asmltr/core
+EnvironmentFile=-%h/asmltr/.env
+Environment=HOME=%h
+ExecStart=node src/server.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

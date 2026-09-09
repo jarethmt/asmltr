@@ -39,8 +39,14 @@ function loadAllMeta(onError) {
     let entries = [];
     try { entries = fs.readdirSync(dir); } catch (_) { continue; } // an absent tree is not an error
     for (const t of entries) {
+      const typeDir = path.join(dir, t);
+      // Hook-only dirs (claude-code/hook.py, no index.js) are not loadable plugins.
+      // Skip silent — do not require() and log "failed to load".
       try {
-        const mod = require(path.join(dir, t));
+        if (!fs.existsSync(path.join(typeDir, 'index.js'))) continue;
+      } catch (_) { continue; }
+      try {
+        const mod = require(typeDir);
         // meta.role wins if a plugin states it; otherwise it is implied by which tree it sits in.
         if (mod && mod.meta) out[mod.meta.type] = { ...mod.meta, role: mod.meta.role || role };
       } catch (e) { if (onError) onError(t, e); }

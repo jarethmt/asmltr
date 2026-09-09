@@ -36,6 +36,11 @@ const ENGINES = {
     // Codex is the OpenAI-compatible vehicle: point it at any custom endpoint (self-hosted vLLM/Ollama/
     // LM Studio, a gateway, or another provider) via a base URL. The model list is then the server's.
     supportsBaseUrl: true, baseUrlHint: 'e.g. http://localhost:8000/v1 (OpenAI Responses-API compatible: vLLM, LiteLLM, a gateway)' },
+  grok: { id: 'grok', label: 'Grok', bin: 'grok', binEnv: 'ASMLTR_GROK_BIN', pkg: null,
+    binPaths: ['/usr/local/bin/grok', '/usr/bin/grok', '~/.grok/bin/grok', '~/.local/bin/grok'],
+    defaultModel: 'grok-4.6', models: [{ id: 'grok-4.6', label: 'Grok 4.6' }, { id: 'grok-4.5', label: 'Grok 4.5' }],
+    installHint: 'curl https://x.ai/cli/install.sh',
+    auth: { modes: ['subscription'], apiKeyEnv: null, loginCmd: 'grok login --device-auth', note: 'Uses your xAI / SuperGrok / X Premium+ subscription via the local Grok CLI login (`~/.grok/auth.json`). API-key billing (XAI_API_KEY) is intentionally unsupported here — it would bypass the subscription and switch to metered billing.' } },
 };
 
 const isExecFile = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
@@ -88,6 +93,7 @@ function list() {
     models: e.models || [], model: config(e.id).model || e.defaultModel || null,
     auth: authInfo(e.id),                    // connection descriptor + selection (never the key value)
     autoUpdate: isAutoUpdate(e.id),
+    pkg: e.pkg || null, installHint: e.installHint || null, // null pkg → GUI hides npm Install (curl-only harnesses)
     supportsBaseUrl: !!e.supportsBaseUrl, baseUrl: config(e.id).base_url || '', baseUrlHint: e.baseUrlHint || '',
     config: config(e.id),
   }));
