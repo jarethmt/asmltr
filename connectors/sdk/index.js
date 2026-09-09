@@ -86,7 +86,7 @@ function makeCoreClient(coreUrl) {
     },
     // Streaming turn: posts to the core /v2/stream (SSE) and resolves with the final actions[].
     // `handlers` is either a function (treated as onDelta — token stream) or an object:
-    //   { onDelta(text), onSegment(text), onTool(name), onThinking(text) }
+    //   { onDelta(text), onSegment(text), onTool(name), onThinking(text), onMood(name) }
     // Token consumers (voice/openai) use onDelta; step consumers (Discord) use onSegment/onTool.
     handleStream(envelope, handlers) {
       const h = typeof handlers === 'function' ? { onDelta: handlers } : (handlers || {});
@@ -118,6 +118,7 @@ function makeCoreClient(coreUrl) {
               else if (obj.type === 'tool_result') { if (h.onToolResult) { try { h.onToolResult(obj); } catch (_) {} } }
               else if (obj.type === 'thinking') { if (h.onThinking && obj.text) { try { h.onThinking(obj.text); } catch (_) {} } }
               else if (obj.type === 'subagent') { if (h.onSubagent && obj.id) { try { h.onSubagent(obj); } catch (_) {} } }
+              else if (obj.type === 'mood') { if (h.onMood && obj.mood) { try { h.onMood(obj.mood); } catch (_) {} } }
               else if (obj.type === 'done') { settled = true; resolve(obj.actions || []); }
               else if (obj.type === 'error') { settled = true; reject(new Error(obj.error || 'stream error')); }
             }

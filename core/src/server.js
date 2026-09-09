@@ -1248,6 +1248,7 @@ app.post('/v2/stream', async (req, res) => {
       onToolResult: (r) => { if (r) frame({ type: 'tool_result', output: r.output, is_error: !!r.is_error }); }, // its result
       onThinking: (text) => { if (text) frame({ type: 'thinking', text }); },      // a completed thinking block
       onSubagent: (s) => { if (s && s.id) frame({ type: 'subagent', id: s.id, name: s.name, status: s.status, summary: s.summary }); }, // sub-agent (Task) start/stop
+      onMood: (m) => { if (m) frame({ type: 'mood', mood: m }); },                 // [[MOOD:x]] → the surface's face
     });
     frame({ type: 'done', actions });
   } catch (err) {
