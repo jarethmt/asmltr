@@ -141,6 +141,25 @@ function nextRun(cron, fromMs, capDays) {
 
 const VALID_TYPES = new Set(['prompt', 'shell']);
 
+/** V37: prompt jobs may only use a fresh schedule session — never Discord/email/other keys. */
+function normalizePromptSession(raw) {
+  if (raw == null) return 'new';
+  const s = String(raw).trim();
+  if (!s || s === 'new') return 'new';
+  if (/^schedule:[A-Za-z0-9_.-]+$/.test(s)) return s;
+  throw new Error('session must be "new" or schedule:<id> — cannot target Discord/email/other conversation keys');
+}
+
+function promptConversationKey(job) {
+  const id = job && job.id ? String(job.id) : 'unknown';
+  try {
+    const s = normalizePromptSession(job && job.session);
+    return s === 'new' ? `schedule:${id}` : s;
+  } catch (_) {
+    return `schedule:${id}`;
+  }
+}
+
 function sanitize(job, existing) {
   const j = { ...(existing || {}) };
   if (job.name != null) j.name = String(job.name).slice(0, 200);
@@ -152,7 +171,7 @@ function sanitize(job, existing) {
   if (job.type === 'prompt' || j.type === 'prompt') {
     if (job.prompt != null) j.prompt = String(job.prompt);
     if (job.engine != null) j.engine = job.engine || null;   // null/'' = default engine
-    if (job.session != null) j.session = String(job.session); // "new" | a conversation_key
+    if (job.session != null) j.session = normalizePromptSession(job.session);
   }
   if (job.type === 'shell' || j.type === 'shell') {
     if (job.command != null) j.command = String(job.command);
@@ -238,4 +257,5 @@ function describe(spec) {
 module.exports = {
   file, list, get, create, update, remove, dueJobs, markRan,
   toCron, validateCron, parseCron, matches, nextRun, describe,
+  normalizePromptSession, promptConversationKey,
 };

@@ -13,7 +13,7 @@
  * verify + roll back. Emits milestones to the collector under a `self-update:<ts>` session so it shows
  * on the dashboard, exactly like the old agent session — just deterministic.
  *
- * Channels: `stable` = newest release tag `vX.Y.Z`; `edge` = origin/main. Chosen via --channel, else
+ * Channels: `stable` = newest release tag `vX.Y.Z`; `edge` = origin/<current-or-configured branch>. Chosen via --channel, else
  * the persisted channel (shared/version.getChannel()). --ref pins an explicit tag/sha.
  *
  * Usage: node scripts/update.js [--channel stable|edge] [--ref <tag|sha>] [--dry-run] [--force]
@@ -27,6 +27,7 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 const version = require('../shared/version');
+const { updateResetArgv, resolveEdgeTarget, fetchOriginArgv } = require('../shared/update-ref');
 const { depsChanged, dashboardChanged } = require('./lib/should-run');
 
 const REPO = path.join(__dirname, '..');
@@ -141,9 +142,11 @@ function done(code, summary) {
   log(`update start — channel=${CHANNEL} from=${fromSha} v${version.readVersion()} by=${BY}${DRY ? ' (dry-run)' : ''}`);
   if (!DRY) _emit({ event_type: 'control', payload: { action: 'self-update-started', pid: process.pid, channel: CHANNEL } });
 
-  // fetch
+  // fetch — pin to this install's branch (never blindly origin/main)
+  const currentBranch = gitOut('rev-parse', '--abbrev-ref', 'HEAD');
+  const pinBranch = process.env.ASMLTR_UPDATE_BRANCH || currentBranch;
   phase('fetch origin + tags');
-  git('fetch', '--quiet', '--tags', '--force', 'origin', 'main');
+  git.apply(null, fetchOriginArgv(CHANNEL === 'stable' ? null : pinBranch));
 
   // resolve target
   let target, targetLabel;
@@ -152,7 +155,10 @@ function done(code, summary) {
     const tag = gitOut('tag', '-l', 'v*', '--sort=-version:refname').split('\n').filter(Boolean)[0];
     if (!tag) { log('stable channel: no release tags found (cut a release first). Falling back to nothing.'); return done(4, { message: 'no release tags on stable channel' }); }
     target = tag; targetLabel = tag;
-  } else { target = 'origin/main'; targetLabel = 'origin/main'; }
+  } else {
+    const edge = resolveEdgeTarget({ branch: pinBranch });
+    target = edge.target; targetLabel = edge.label;
+  }
 
   const targetSha = gitOut('rev-parse', target);
   if (!targetSha) { log(`cannot resolve target '${target}'`); return done(1, { error: 'bad target' }); }
@@ -195,7 +201,7 @@ function done(code, summary) {
   // checkout
   phase(`checkout ${targetLabel} (${toShort})`);
   const co = CHANNEL === 'edge' && !REF
-    ? git('reset', '--hard', 'origin/main')
+    ? git.apply(null, updateResetArgv(pinBranch))
     : git('-c', 'advice.detachedHead=false', 'checkout', '--force', targetSha);
   if (co.code !== 0) { log('checkout failed: ' + co.err); return done(1, { error: 'checkout failed' }); }
 

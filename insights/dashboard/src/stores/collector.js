@@ -3,6 +3,7 @@
 // on app mount, live-append into the in-memory buffers).
 import { defineStore } from 'pinia'
 import { api, parsePayload } from '@/services/api'
+import { displayStatus } from '@/lib/format'
 import { getSocket } from '@/services/socket'
 
 const EVENT_BUFFER_MAX = 1000
@@ -37,7 +38,7 @@ export const useCollectorStore = defineStore('collector', {
   }),
 
   getters: {
-    activeSessions: (s) => s.sessions.filter((x) => x.status === 'active'),
+    activeSessions: (s) => s.sessions.filter((x) => displayStatus(x) === 'active'),
     persistentSessions: (s) => s.sessions.filter((x) => x.kind === 'persistent'),
     latestSample: (s) => s.samples[s.samples.length - 1] || null,
     // distinct lists for filter chips

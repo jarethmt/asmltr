@@ -1,11 +1,19 @@
 {
-  "_comment": "Copy to seed.json (gitignored), edit, then run `node core/src/trust/seed.js`. The trust store is DEFAULT-DENY: only listed principals get access. Give the owner bypass_moderation (full trust). An `identifier` maps a (surface, value) to a principal — surface is the connector channel (discord, telegram, mcp, github, apikey); value is that channel's user id/username (for mcp, the `identity` username from connectors/types/mcp/clients.json). Grants without a role_id carry inline allow/forbidden lists; role_id references a role below.",
+  "_comment": "Copy to seed.json (gitignored), edit, then run `node core/src/trust/seed.js`. The trust store is DEFAULT-DENY: only listed principals get access. Give the owner bypass_moderation (full trust). An `identifier` maps a (surface, value) to a principal \u2014 surface is the connector channel (discord, telegram, mcp, github, apikey); value is that channel's user id/username (for mcp, the `identity` username from connectors/types/mcp/clients.json). Grants without a role_id carry inline allow/forbidden lists; role_id references a role below.",
   "roles": [
     {
       "id": "readonly",
       "name": "Read Only",
-      "allow": ["read", "search", "recall"],
-      "forbidden": ["write", "deploy", "credentials"]
+      "allow": [
+        "read",
+        "search",
+        "recall"
+      ],
+      "forbidden": [
+        "write",
+        "deploy",
+        "credentials"
+      ]
     }
   ],
   "principals": [
@@ -13,17 +21,55 @@
       "id": "owner",
       "display_name": "Owner",
       "identifiers": [
-        { "surface": "discord", "value": "000000000000000000" },
-        { "surface": "telegram", "value": "your_telegram_username" },
-        { "surface": "mcp", "value": "owner" }
+        {
+          "surface": "discord",
+          "value": "000000000000000000"
+        },
+        {
+          "surface": "telegram",
+          "value": "your_telegram_username"
+        },
+        {
+          "surface": "mcp",
+          "value": "owner"
+        }
       ],
-      "grants": [ { "bypass_moderation": true, "allow": ["*"] } ]
+      "grants": [
+        {
+          "bypass_moderation": true,
+          "allow": [
+            "*"
+          ]
+        }
+      ]
     },
     {
       "id": "teammate",
       "display_name": "Teammate",
-      "identifiers": [ { "surface": "discord", "value": "111111111111111111" } ],
-      "grants": [ { "role_id": "readonly" } ]
+      "identifiers": [
+        {
+          "surface": "discord",
+          "value": "111111111111111111"
+        }
+      ],
+      "grants": [
+        {
+          "role_id": "readonly"
+        }
+      ]
+    },
+    {
+      "id": "friend",
+      "display_name": "Friend",
+      "default_tier": 3,
+      "notes": "Example friend principal. Same-guild Discord post needs a trusted/send grant. Not owner.",
+      "identifiers": [
+        {
+          "surface": "discord",
+          "value": "111111111111111111"
+        }
+      ],
+      "grants": []
     }
   ]
 }
