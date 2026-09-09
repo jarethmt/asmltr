@@ -95,8 +95,9 @@ local Claude subscription (never an API key). The *classifier* can use either pr
 | `ASMLTR_MODERATION_PROVIDER` | `openai` | `openai` \| `anthropic` |
 | `ASMLTR_MODERATION_MODEL` | `gpt-5-nano` (openai) / `claude-haiku-4-5-20251001` (anthropic) | any chat/messages model of that provider |
 | `ASMLTR_MODERATION_KEY` | `openai_api_key` (openai) / `anthropic_api_key` (anthropic) | the **secret key name** resolved via the secret provider (`shared/secrets.js`) |
+| `ASMLTR_MODERATION_REASONING_EFFORT` | omit (unset) | OpenAI only. Default omits the field (API default, same as empty / `off` / `none`). Set `minimal` to cap `gpt-5-nano` latency (~2–3.5s uncapped). `low` / `medium` / `high` also send the field. |
 
-- **OpenAI** uses the `openai` SDK (`chat.completions`).
+- **OpenAI** uses the `openai` SDK (`chat.completions`). Default model `gpt-5-nano` is a *reasoning* model. By default the call omits `reasoning_effort` (API default). Set `ASMLTR_MODERATION_REASONING_EFFORT=minimal` to cap latency; `low` / `medium` / `high` also send the field. The field is sent on gpt-5-family models only. Non-gpt-5 models never get it. A model that still rejects it is retried without it. Every decision JSONL line includes `duration_ms`.
 - **Anthropic** uses the Messages API over plain HTTPS (no extra dependency).
 
 ### ⚠️ The Anthropic-key safety rule (important)
@@ -113,6 +114,17 @@ So if you use the **anthropic** moderation provider, provide its key **without**
 - A differently-named env var — e.g. `ASMLTR_MODERATION_KEY=mod_anthropic_key` + `MOD_ANTHROPIC_KEY=sk-ant-…`
 
 (The `openai` provider has no such constraint — `OPENAI_API_KEY` in the env is fine.)
+
+### Picture-intent classify (stills, not moderation)
+
+A **separate** YES/NO call (`classifyRaw` in `core/src/moderation.js`) runs **before** still generation on Discord/Telegram. It is **not** folded into `moderate()` — inbound moderation is unchanged.
+
+- **Gate:** the user text mentions a kind-word (`picture` / `image` / `photo` / … — not bare `art`) **or** a still was attached this turn.
+- **Model:** `gpt-5-nano` on the **same** moderation OpenAI key. Text only — never still bytes, never `CHANNEL MEDIA` paths. If a still arrived, one notice line that a photo was attached.
+- **YES** → Discord/Telegram raise that turn to `xhigh` (web/email/MCP keep their own effort; email/MCP skip classify).
+- **Missing `openai_api_key`:** log once, classify stays OFF, `image_gen` tools still work.
+- **Kill switch:** `ASMLTR_IMAGE_GEN_CLASSIFY=off` (also `0` / `false` / `no`).
+- Who may actually **call** `image_gen` on the public path is owner/bypass or `videoAllow`. `photoAllow` / `imageAllow` in the example file are format only (not a public stills gate). Host overlays may honor photo grants. See `shared/media-allow.example.json`.
 
 ### Examples
 
@@ -177,6 +189,7 @@ connector** that declares `outbound` in its `meta` and implements `POST /out`. O
 | `ASMLTR_MODERATION_PROVIDER` | `openai` (default) \| `anthropic` |
 | `ASMLTR_MODERATION_MODEL` | classifier model |
 | `ASMLTR_MODERATION_KEY` | secret key name for the classifier |
+| `ASMLTR_MODERATION_REASONING_EFFORT` | OpenAI reasoning cap (default omit/API-default; set `minimal` to cap latency; empty/`off`/`none` omit) |
 | `ASMLTR_MOD_LOG_DIR` | where decision JSONL is written |
 | `ASMLTR_ADMIN_ALERT_SEND` | connector alert route (via manager `/send`) |
 | `ASMLTR_ADMIN_ALERT_CMD` | shell-command alert sink |

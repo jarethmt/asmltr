@@ -18,7 +18,7 @@ const path = require('path');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL'); // exec, not pragma(): Node 24 GC of throwaway Statement ABRTs
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS streams (

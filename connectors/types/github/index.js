@@ -8,9 +8,10 @@
  * the core resumes the SDK session forever), so re-invoking the trigger token on the same
  * issue continues the same conversation.
  *
- * On invocation it posts ONE comment and live-edits it as the turn streams
- * (thinking + tool steps in a collapsed <details>), then swaps in the final
- * answer. Self-loop safety: the comment ids the assistant creates are tracked and never
+ * On invocation it posts ONE comment: the final answer only (V36). A working
+ * placeholder may appear while the turn runs, then is swapped for that answer.
+ * Thinking and tool I/O stay in the operator watch view — never the issue.
+ * Self-loop safety: comment ids the assistant creates are tracked and never
  * treated as triggers (so a human can post from the bot account too).
  *
  * Repo-aware: each repo is cloned locally and the session's working_dir is set
@@ -31,9 +32,8 @@ const GH_API = process.env.ASMLTR_GITHUB_API_BASE || 'https://api.github.com';
 // and the poller goes silently deaf while the process stays alive (the #34 "deaf but running" class).
 const GH_FETCH_TIMEOUT_MS = Number(process.env.ASMLTR_GITHUB_FETCH_TIMEOUT_MS) || 15000;
 const NAME = process.env.ASSISTANT_NAME || 'Assistant'; // display name in comments/prompt
-const { redactSecrets } = require('../../../shared/redact');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const COLLECTOR_BASE = (process.env.ASMLTR_COLLECTOR_URL || 'http://127.0.0.1:3017/ingest').replace(/\/ingest\/?$/, '');
+const { cloneArgv, cloneGitEnv, githubIdentityPrompt } = require('./clone-auth');
+const { workingPlaceholder, finalIssueComment } = require('./issue-comment');
 
 const meta = {
   type: 'github',
@@ -50,10 +50,10 @@ const meta = {
         properties: { owner: { type: 'string' }, repo: { type: 'string' } }, required: ['owner', 'repo'] } },
       pat_bws_key: { type: 'string', title: 'PAT secret key', description: 'secret key name for this account\'s GitHub PAT, e.g. my_github_pat' },
       mention: { type: 'string', title: 'Trigger token', description: 'Literal token that wakes the assistant in an issue/comment. Blank → defaults to *<assistant-name> (e.g. @bot).' },
-      poll_interval_ms: { type: 'integer', title: 'Poll interval (ms)', default: 20000 },
+      poll_interval_ms: { type: 'integer', title: 'Poll interval (ms)', default: 120000 },
       workspace_dir: { type: 'string', title: 'Local clone workspace', default: '', description: 'Where repos are shallow-cloned. Empty = ~/.asmltr/github-repos' },
       clone_repos: { type: 'boolean', title: 'Clone repos for code-awareness', default: true },
-      stream: { type: 'boolean', title: 'Live-stream the working comment', default: true },
+      stream: { type: 'boolean', title: 'Working placeholder, then final answer (never thinking/tools)', default: true },
       dry_run: { type: 'boolean', title: 'Dry run (log, don\'t post)', default: true },
     },
   },
@@ -84,92 +84,6 @@ function execp(cmd, args, opts) {
   });
 }
 
-// --- live-trace rendering (GitHub markdown) ---------------------------------
-// One-liner (collapse whitespace) for short fields like thinking + tool input.
-function oneLine(s, n) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n); }
-// Multi-line block for command/tool OUTPUT — preserve newlines, neutralize fence
-// delimiters so file contents can't break the code fence, generous cap + marker.
-function outBlock(s, n) {
-  let str = String(s == null ? '' : s).replace(/\r/g, '').replace(/`{3,}/g, '``');
-  if (str.length > n) str = str.slice(0, n) + `\n…(+${str.length - n} more chars)`;
-  return str;
-}
-// Trace = TOOL steps only (thinking moved to its own dropdown). Crisp rows: a tool
-// header + a nested collapsed dropdown holding the full output; errors flagged ⚠️.
-function renderTrace(events) {
-  const out = [];
-  for (const e of events) {
-    let pl = {}; try { pl = typeof e.payload === 'string' ? JSON.parse(e.payload) : (e.payload || {}); } catch {}
-    if (e.event_type === 'tool') out.push(`🔧 **${pl.tool}** \`${oneLine(pl.input, 400)}\``);
-    else if (e.event_type === 'tool_result') {
-      const label = pl.is_error ? '⚠️ <b>error output</b>' : '📥 output';
-      out.push(`<details><summary>${label}</summary>\n\n\`\`\`\n${outBlock(pl.output, 16000)}\n\`\`\`\n\n</details>`);
-    }
-  }
-  return out;
-}
-// Thinking = extended-thinking events + the assistant's intermediate narration (the prose between
-// tool calls). Shown collapsed at the TOP so the final answer stays clean.
-function renderThinking(events, narration) {
-  const out = [];
-  for (const e of events) {
-    if (e.event_type !== 'thinking') continue;
-    let pl = {}; try { pl = typeof e.payload === 'string' ? JSON.parse(e.payload) : (e.payload || {}); } catch {}
-    if (pl.text) out.push(`💭 _${oneLine(pl.text, 700)}_`);
-  }
-  for (const n of (narration || [])) { const s = oneLine(n, 700); if (s) out.push(`🗒️ ${s}`); }
-  return out;
-}
-function details(summary, blocks, open, maxLen = 50000) {
-  if (!blocks.length) return '';
-  let body = blocks.join('\n\n');
-  if (body.length > maxLen) body = body.slice(0, maxLen) + '\n\n…(truncated — full log in the asmltr watch view)';
-  return `<details${open ? ' open' : ''}><summary>${summary}</summary>\n\n${body}\n\n</details>`;
-}
-
-const GH_MAX = 64000; // safety margin under GitHub's 65 535-char comment limit
-
-// most-recent blocks that fit within `budget` (whole blocks, oldest→newest order kept)
-function tailFit(blocks, budget) {
-  let len = 0; const tail = [];
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (len + blocks[i].length + 2 > budget && tail.length) break;
-    tail.unshift(blocks[i]); len += blocks[i].length + 2;
-  }
-  return { tail, omitted: blocks.length - tail.length };
-}
-
-// Streaming layout: 🧠 Thinking (collapsed, live) then 🔍 Trace (open, live tail).
-function liveBody(thinkingBlocks, traceBlocks) {
-  const { tail, omitted } = tailFit(traceBlocks, 50000);
-  const tcount = omitted > 0 ? `latest ${tail.length} of ${traceBlocks.length}` : `${traceBlocks.length}`;
-  let s = `🧠 **${NAME} is working…**`;
-  if (thinkingBlocks.length) s += '\n\n' + details(`🧠 Thinking (${thinkingBlocks.length})`, tailFit(thinkingBlocks, 12000).tail, false, 999999);
-  s += '\n\n' + details(`🔍 Trace (${tcount} step${traceBlocks.length === 1 ? '' : 's'})`, tail, true, 999999);
-  return s;
-}
-
-// Final layout: pack head (🧠 Thinking + 💬 Response) into the main comment, then spill
-// the 🔍 Trace across continuation comments. Never slices a nested block; caps at 4.
-function packComments(head, traceBlocks) {
-  const CAP = 4;
-  if (head.length > GH_MAX) head = head.slice(0, GH_MAX - 200) + '\n…(truncated)';
-  const bodies = []; let i = 0;
-  while (i < traceBlocks.length && bodies.length < CAP) {
-    const first = bodies.length === 0;
-    const prefix = first ? head + '\n\n' : '';
-    const budget = GH_MAX - prefix.length - 200;
-    const chunk = []; let len = 0;
-    while (i < traceBlocks.length && len + traceBlocks[i].length + 2 <= budget) { chunk.push(traceBlocks[i]); len += traceBlocks[i].length + 2; i++; }
-    if (first && chunk.length === 0) { bodies.push(head); continue; }
-    const summary = first ? `🔍 Trace (${traceBlocks.length} step${traceBlocks.length === 1 ? '' : 's'})` : `🔍 Trace — cont. ${bodies.length + 1}`;
-    bodies.push(prefix + details(summary, chunk, false, 999999));
-  }
-  if (!bodies.length) bodies.push(head);
-  if (i < traceBlocks.length) bodies[bodies.length - 1] += `\n\n_…${traceBlocks.length - i} more step(s) omitted — full log in the asmltr watch view._`;
-  return bodies;
-}
-
 function start(ctx) {
   const cfg = ctx.config || {};
   const mention = cfg.mention || ('*' + (process.env.ASSISTANT_NAME || 'assistant').toLowerCase());
@@ -179,7 +93,7 @@ function start(ctx) {
   const doStream = cfg.stream !== false && !dryRun;
   const doClone = cfg.clone_repos !== false;
   const workspace = cfg.workspace_dir || process.env.ASMLTR_GITHUB_WORKSPACE || path.join(require('os').homedir(), '.asmltr', 'github-repos');
-  const pollMs = cfg.poll_interval_ms || 20000;
+  const pollMs = cfg.poll_interval_ms || 120000;
 
   const statePath = path.join(__dirname, '..', '..', 'manager', 'data', `github-state-${ctx.instanceId}.json`);
   let state = { seen: [], mine: [], since: null };
@@ -206,26 +120,17 @@ function start(ctx) {
     const dir = path.join(workspace, full.replace('/', '__'));
     try {
       if (fs.existsSync(path.join(dir, '.git'))) {
-        await execp('git', ['-C', dir, 'fetch', '--quiet', '--depth', '1', 'origin'], {}).catch(() => {});
-        await execp('git', ['-C', dir, 'reset', '--hard', '--quiet', 'origin/HEAD'], {}).catch(() => {});
+        await execp('git', ['-C', dir, 'fetch', '--quiet', '--depth', '1', 'origin'], { env: cloneGitEnv(pat) }).catch(() => {});
+        await execp('git', ['-C', dir, 'reset', '--hard', '--quiet', 'origin/HEAD'], { env: cloneGitEnv(pat) }).catch(() => {});
       } else {
         fs.mkdirSync(workspace, { recursive: true });
-        const url = `https://x-access-token:${pat}@github.com/${full}.git`;
-        await execp('git', ['clone', '--quiet', '--depth', '1', url, dir]);
+        await execp('git', cloneArgv(full, dir), { env: cloneGitEnv(pat) });
         // scrub the token from the stored remote (use a credential-less URL going forward)
         await execp('git', ['-C', dir, 'remote', 'set-url', 'origin', `https://github.com/${full}.git`]).catch(() => {});
         ctx.log(`cloned ${full} → ${dir}`);
       }
       return dir;
     } catch (e) { ctx.log(`clone/refresh ${full} failed: ${e.message}`); return undefined; }
-  }
-
-  async function fetchSessionEvents(key, sinceId) {
-    try {
-      const res = await fetch(`${COLLECTOR_BASE}/api/events?session=${encodeURIComponent(key)}&limit=300`);
-      const { events } = await res.json();
-      return (events || []).filter((e) => e.id > sinceId).sort((a, b) => a.id - b.id);
-    } catch (_) { return []; }
   }
 
   function systemExtra(full, issueNumber, author, hasClone) {
@@ -237,14 +142,14 @@ function start(ctx) {
       hasClone
         ? `A current local clone of the repo is your working directory — READ and grep the actual code to ground your answer.`
         : `You do NOT have the repo checked out; reason from the issue text and say so if you'd need to see the code.`,
-      `GITHUB IDENTITY (CRITICAL): on this repo you act ONLY as ${acct}. The host's default \`gh\`/git auth may be a DIFFERENT, unauthorized account — NEVER use it here. For ANY GitHub operation (gh CLI, REST API, git push), authenticate as ${acct} using this connector's PAT (secret key '${patKey}' in your configured secret store); export it as GH_TOKEN before the command, e.g. \`GH_TOKEN="<pat>" gh issue close ${issueNumber} --repo ${full}\`. If you cannot authenticate as ${acct}, do NOT fall back to another account — say so and stop.`,
+      githubIdentityPrompt({ name: NAME, acct, patKey, issueNumber, full }),
       'SCOPE: you may do GitHub housekeeping the human explicitly asks for (close the issue, add a label, comment) — but ONLY as the account above. Code changes (commits, PRs, merges) are out of scope for now.',
       'If the request is ambiguous or you lack information, ASK one clear clarifying question and stop — the human will reply with another mention.',
       'This is a persistent multi-turn thread; you retain the prior context of this issue.',
     ].join('\n');
   }
 
-  // Run one invocation: post a working comment, stream the turn into it, finalize.
+  // Run one invocation: optional working placeholder, then ONE final-answer comment (V36).
   async function handleTrigger({ full, issueNumber, requestText, author }) {
     const key = `github:${ctx.instanceId}:repo:${full}:issue:${issueNumber}`;
     const issue = await gh(pat, 'GET', `/repos/${full}/issues/${issueNumber}`).catch(() => ({}));
@@ -268,63 +173,33 @@ function start(ctx) {
     if (dryRun) {
       ctx.log(`[DRY-RUN] ${full}#${issueNumber} @${author}: handling (cwd=${cwd || 'none'})`);
       const actions = await ctx.core.handle(envelope).catch((e) => { ctx.log(`core failed: ${e.message}`); return []; });
-      const reply = (actions || []).find((a) => a.type === 'reply');
-      ctx.log(`[DRY-RUN] would post on ${full}#${issueNumber}:\n${reply ? reply.text.slice(0, 800) : '(no reply)'}`);
+      ctx.log(`[DRY-RUN] would post on ${full}#${issueNumber}:\n${finalIssueComment(actions).slice(0, 800)}`);
       return;
     }
 
-    // baseline so the live trace only shows THIS turn's events
-    const baseId = (await fetchSessionEvents(key, 0)).reduce((m, e) => Math.max(m, e.id), 0);
-    const placeholder = await gh(pat, 'POST', `/repos/${full}/issues/${issueNumber}/comments`, { body: `🧠 **${NAME} is on it…**` });
-    const commentId = placeholder.id;
-    mine.add(commentId); saveState();
-    inflight.set(commentId, { full, issueNumber }); // so a restart can finalize this comment instead of freezing it
-
-    let done = false; let lastBody = '';
-    const patchComment = async (rawBody) => {
-      // PUBLIC surface — scrub any secrets that surfaced in tool output before posting
-      const { text: body, count } = redactSecrets(rawBody);
-      if (count) ctx.log(`[redact] masked ${count} secret(s) on ${full}#${issueNumber}`);
-      if (body === lastBody) return;
-      lastBody = body;
-      await gh(pat, 'PATCH', `/repos/${full}/issues/comments/${commentId}`, { body }).catch((e) => ctx.log(`patch failed: ${e.message}`));
-    };
-    const streamer = (async () => {
-      if (!doStream) return;
-      while (!done) {
-        await sleep(8000); // gentle cadence — long turns shouldn't trip GitHub's secondary edit limits
-        const evts = await fetchSessionEvents(key, baseId);
-        await patchComment(liveBody(renderThinking(evts, []), renderTrace(evts)));
-      }
-    })();
+    let commentId = null;
+    if (doStream) {
+      const placeholder = await gh(pat, 'POST', `/repos/${full}/issues/${issueNumber}/comments`, { body: workingPlaceholder(NAME) });
+      commentId = placeholder.id;
+      mine.add(commentId); saveState();
+      inflight.set(commentId, { full, issueNumber });
+    }
 
     let actions = [];
     try { actions = await ctx.core.handle(envelope); }
     catch (e) { actions = [{ type: 'reply', text: `⚠️ I hit an error: ${e.message}` }]; }
-    finally { done = true; await streamer; }
 
-    const reply = (actions || []).find((a) => a.type === 'reply');
-    const evts = await fetchSessionEvents(key, baseId);
-    // split the assistant's text into the FINAL answer (last block) vs intermediate narration
-    // (earlier blocks) — narration goes up into the collapsed Thinking dropdown so the
-    // Response section is just the answer.
-    const segs = (reply && reply.segments) || [];
-    const answer = (segs.length ? segs[segs.length - 1] : (reply ? reply.text : '')).trim() || '_(no response generated)_';
-    const narration = segs.slice(0, -1);
-    const thinkingBlocks = renderThinking(evts, narration);
-    const head = (thinkingBlocks.length ? details(`🧠 Thinking (${thinkingBlocks.length})`, thinkingBlocks, false, 40000) + '\n\n' : '')
-      + `### 💬 Response\n\n${answer}`;
-    const bodies = packComments(head, renderTrace(evts));
-    await patchComment(bodies[0]); // edit the placeholder into the main comment
-    for (let k = 1; k < bodies.length; k++) {
+    const body = finalIssueComment(actions);
+    if (commentId) {
+      await gh(pat, 'PATCH', `/repos/${full}/issues/comments/${commentId}`, { body }).catch((e) => ctx.log(`patch failed: ${e.message}`));
+      inflight.delete(commentId);
+    } else {
       try {
-        const c = await gh(pat, 'POST', `/repos/${full}/issues/${issueNumber}/comments`, { body: redactSecrets(bodies[k]).text });
-        mine.add(c.id); // never trigger on the assistant's own continuation comments
-      } catch (e) { ctx.log(`continuation comment failed: ${e.message}`); }
+        const c = await gh(pat, 'POST', `/repos/${full}/issues/${issueNumber}/comments`, { body });
+        mine.add(c.id); saveState();
+      } catch (e) { ctx.log(`comment failed: ${e.message}`); }
     }
-    if (bodies.length > 1) saveState();
-    inflight.delete(commentId);
-    ctx.log(`answered ${full}#${issueNumber}${bodies.length > 1 ? ` (+${bodies.length - 1} trace comment(s))` : ''}`);
+    ctx.log(`answered ${full}#${issueNumber}`);
   }
 
   // Detect triggers across a repo's recent comments + recently-opened issue bodies.
@@ -389,7 +264,7 @@ function start(ctx) {
       // on "the assistant is working…" forever (the core turn may keep running; re-invoke to resume).
       for (const [cid, { full }] of inflight) {
         await gh(pat, 'PATCH', `/repos/${full}/issues/comments/${cid}`, {
-          body: '⚠️ _Eve was interrupted by a connector restart/deploy mid-turn. The backend may have finished underneath; re-invoke with the trigger token to resume this thread._',
+          body: `⚠️ _${NAME} was interrupted by a connector restart/deploy mid-turn. The backend may have finished underneath; re-invoke with the trigger token to resume this thread._`,
         }).catch(() => {});
       }
       inflight.clear();
