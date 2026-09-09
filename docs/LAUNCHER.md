@@ -131,7 +131,7 @@ adds is **capture-side context the server cannot see**:
 
 ## The face
 
-The eyes ([engine](../mobile/www/eyes.js)) become the wallpaper layer rather than an overlay window:
+The eyes (the shared engine, `mobile/www/eyes.js`) become the wallpaper layer rather than an overlay window:
 
 - no `SYSTEM_ALERT_WINDOW` required on the home screen;
 - idle when nothing is happening; `thinking` while a session is working; `listening` while recording;
