@@ -77,10 +77,10 @@
   var MOODS = {
     neutral:   { open: 1.00, wide: 1.00, arc: 0.00, lidOut: 0.00, lidIn: 0.00, tilt: 0.00, rTop: 0.46, rBot: 0.46 },
     happy:     { open: 0.70, wide: 1.08, arc: 0.26, lidOut: 0.00, lidIn: 0.00, tilt: 0.00, rTop: 0.50, rBot: 0.50 },
-    curious:   { open: 1.06, wide: 1.00, arc: 0.00, lidOut: 0.07, lidIn: 0.00, tilt: 0.09, rTop: 0.50, rBot: 0.46 },
-    concerned: { open: 0.90, wide: 0.98, arc: 0.00, lidOut: 0.30, lidIn: 0.03, tilt: 0.00, rTop: 0.44, rBot: 0.46 },
-    angry:     { open: 0.86, wide: 1.00, arc: 0.00, lidOut: 0.03, lidIn: 0.34, tilt: 0.00, rTop: 0.44, rBot: 0.46 },
-    sleepy:    { open: 0.52, wide: 1.00, arc: 0.08, lidOut: 0.20, lidIn: 0.20, tilt: 0.00, rTop: 0.42, rBot: 0.44 }
+    curious:   { open: 1.06, wide: 1.00, arc: 0.00, lidOut: 0.10, lidIn: 0.00, tilt: 0.10, rTop: 0.42, rBot: 0.46 },
+    concerned: { open: 0.94, wide: 0.98, arc: 0.00, lidOut: 0.38, lidIn: 0.02, tilt: 0.00, rTop: 0.38, rBot: 0.48 },
+    angry:     { open: 0.92, wide: 1.00, arc: 0.00, lidOut: 0.02, lidIn: 0.42, tilt: 0.00, rTop: 0.38, rBot: 0.48 },
+    sleepy:    { open: 0.60, wide: 1.00, arc: 0.06, lidOut: 0.26, lidIn: 0.22, tilt: 0.00, rTop: 0.38, rBot: 0.46 }
   };
 
   // Per-state modifiers layered on top of the mood, plus the behavioural personality of each state.
@@ -252,27 +252,43 @@
    * corner is its left one, the right eye's outer corner is its right one. Without this both eyes cut
    * the same side and the face reads as broken rather than expressive.
    */
-  function eyePath(cx, w, h, rTop, rBot, arc, lidOut, lidIn, side) {
-    var hw = w / 2, hh = h / 2;
-    rTop = Math.min(rTop * Math.min(w, h), hw, hh);
-    rBot = Math.min(rBot * Math.min(w, h), hw, hh);
+  function eyePath(cx, w, h, rTopF, rBotF, arc, lidOut, lidIn, side) {
+    var hw = w / 2, hh = h / 2, yB = hh;
     var dOut = lidOut * h, dIn = lidIn * h;
-    var dL = side < 0 ? dOut : dIn;          // left corner drop
-    var dR = side < 0 ? dIn : dOut;          // right corner drop
-    // The bottom bow is clamped so the control point can never rise past the top edge — beyond that
-    // the shape turns inside-out into an arch standing on two legs.
-    var bow = Math.min(arc * h, h * 0.62);
+    var dL = side < 0 ? dOut : dIn;          // how far the LEFT top corner is pulled down
+    var dR = side < 0 ? dIn : dOut;          // and the RIGHT
+    var dMax = Math.max(dL, dR);
+
+    // Vertical room actually left between the LOWEST lid corner and the bottom edge. Every radius and
+    // the bottom bow are clamped against this, not against h. Otherwise a deep lid plus fat corner
+    // radii make a side edge run backwards, the path self-intersects, and the non-zero winding rule
+    // punches the crossed region back out — the black triangles.
+    var room = Math.max(1, h - dMax);
+    // rTop is additionally capped as a fraction of the WIDTH so a straight lid segment always survives.
+    // At 0.46 x min(w,h) the two corner arcs left ~8% of the width straight, and an angled lid drawn
+    // across 8% of the eye is invisible — which is why the expressions only ever read as the corners
+    // starting at different heights. 0.34 x w keeps roughly a third of the top edge straight.
+    var rTop = Math.min(rTopF * Math.min(w, h), w * 0.34, room * 0.5);
+    var rBot = Math.min(rBotF * Math.min(w, h), hw, room * 0.5);
+    var bow  = Math.min(arc * h, room * 0.55);
+
+    var yL = -hh + dL, yR = -hh + dR;        // the lid line, meeting the left and right edges
+    var slope = (yR - yL) / w;               // follow the lid when placing its tangent points
 
     cx.beginPath();
-    cx.moveTo(-hw + rTop, -hh + dL);
-    cx.lineTo(hw - rTop, -hh + dR);
-    cx.quadraticCurveTo(hw, -hh + dR, hw, -hh + dR + rTop);
-    cx.lineTo(hw, hh - rBot);
-    cx.quadraticCurveTo(hw, hh, hw - rBot, hh);
-    cx.quadraticCurveTo(0, hh - bow, -hw + rBot, hh);
-    cx.quadraticCurveTo(-hw, hh, -hw, hh - rBot);
-    cx.lineTo(-hw, -hh + dL + rTop);
-    cx.quadraticCurveTo(-hw, -hh + dL, -hw + rTop, -hh + dL);
+    // Up the left edge, then let arcTo round the corner INTO the angled lid. arcTo keeps the lid a real
+    // straight edge at a real angle whatever the radius is. The previous version inset the top edge
+    // horizontally by rTop, which at these radii left a straight segment ~8% of the eye's width — so
+    // the angle had nowhere to show and only surfaced as two arcs starting at different heights.
+    cx.moveTo(-hw, yB - rBot);
+    cx.lineTo(-hw, yL + rTop);
+    cx.arcTo(-hw, yL, -hw + rTop, yL + rTop * slope, rTop);
+    cx.lineTo(hw - rTop, yR - rTop * slope);
+    cx.arcTo(hw, yR, hw, yR + rTop, rTop);
+    cx.lineTo(hw, yB - rBot);
+    cx.arcTo(hw, yB, hw - rBot, yB, rBot);
+    cx.quadraticCurveTo(0, yB - bow, -hw + rBot, yB);   // the bottom bow — the happy squint
+    cx.arcTo(-hw, yB, -hw, yB - rBot, rBot);
     cx.closePath();
   }
 
