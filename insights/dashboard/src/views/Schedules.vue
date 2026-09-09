@@ -295,6 +295,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
                 <option value="claude">claude</option>
                 <option value="codex">codex</option>
                 <option value="gemini">gemini</option>
+                <option value="grok">grok</option>
               </select>
             </div>
             <div>

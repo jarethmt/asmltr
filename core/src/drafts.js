@@ -15,7 +15,7 @@ const Database = require('better-sqlite3');
 
 const DB_PATH = require('./db-path').coreDbPath();
 const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL'); // exec, not pragma(): Node 24 GC of throwaway Statement ABRTs
 db.exec(`CREATE TABLE IF NOT EXISTS drafts (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   channel          TEXT NOT NULL,               -- origin surface (discord|telegram|email|…)
