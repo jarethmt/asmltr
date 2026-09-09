@@ -31,6 +31,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const NAME = process.env.ASSISTANT_NAME || 'the assistant'; // shown in the MCP tool description
+const { corsAllowOrigin, authVerifyUrl, sessionOkFromVerify, approveDecision } = require('./approve-gate');
+const { canAskOracle, lookupClientIdentity, identityForApprove } = require('./client-identity');
 
 const meta = {
   type: 'mcp',
@@ -72,7 +74,11 @@ function loadClientIdentities() {
   return _clientIdentities;
 }
 function clientToIdentity(clientId) {
-  return loadClientIdentities().get(clientId) || { userId: 'unknown', username: 'unknown' };
+  return lookupClientIdentity(loadClientIdentities(), clientId);
+}
+function rememberIdentity(clientId, ident) {
+  if (!clientId || !ident) return;
+  loadClientIdentities().set(clientId, ident);
 }
 
 const ASK_ORACLE_TOOL = {
@@ -94,10 +100,10 @@ const ASK_ORACLE_TOOL = {
 async function start(ctx) {
   const cfg = ctx.config || {};
   const PORT = cfg.port || 3018;
-  // Bind 127.0.0.1 by default (the asmltr principle). For the public instance we
-  // bind the docker-bridge gateway IP (e.g. 172.18.0.1) so Traefik — which lives
-  // on that network — can reach us WITHOUT exposing the port on the host's public
-  // NIC (the box has a public IP + ACCEPT iptables policy, so 0.0.0.0 would leak).
+  // Bind 127.0.0.1 by default (the asmltr principle). If a reverse proxy lives on
+  // a Docker bridge, you can bind that bridge gateway IP (e.g. 172.18.0.1) so the
+  // proxy can reach us WITHOUT exposing the port on the host's public NIC.
+  // Do not bind 0.0.0.0 on a host that accepts inbound on a public address.
   const BIND = cfg.bind_host || '127.0.0.1';
   const BASE_URL = cfg.base_url || 'https://mcp.example.com';
 
@@ -129,6 +135,7 @@ async function start(ctx) {
    * query proxy + hardcoded prompt. Returns the reply text.
    */
   async function askOracle(question, clientIdentity) {
+    if (!canAskOracle(clientIdentity)) throw new Error('client not mapped');
     const convKey = `mcp:${ctx.instanceId}:user:${clientIdentity.userId}`;
     ctx.emit({
       event_type: 'inbound',
@@ -181,10 +188,17 @@ async function start(ctx) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     ctx.log(`${req.method} ${url.pathname}`);
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    const allowOrigin = corsAllowOrigin(url.pathname);
+    if (allowOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    async function operatorWebSessionOk() {
+      return sessionOkFromVerify(fetch, authVerifyUrl(process.env.ASMLTR_CORE_URL), req.headers.cookie || '');
+    }
 
     // --- OAuth 2.1 endpoints -------------------------------------------------
     if (req.method === 'GET' && url.pathname === '/.well-known/oauth-protected-resource') {
@@ -210,6 +224,11 @@ async function start(ctx) {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') {
+      if (!(await operatorWebSessionOk())) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'authentication required', error_description: 'operator web session required' }));
+        return;
+      }
       const params = Object.fromEntries(url.searchParams);
       const result = oauthServer.handleAuthorizationRequest(params);
       if (result.error) {
@@ -232,13 +251,32 @@ async function start(ctx) {
       req.on('end', async () => {
         try {
           const params = JSON.parse(body);
-          if (!params.approved) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'access_denied', error_description: 'User denied authorization' }));
+          const sessionOk = await operatorWebSessionOk();
+          const decision = approveDecision({
+            sessionOk,
+            approved: params.approved,
+            client: oauthServer.getClient(params.client_id),
+            redirectUri: params.redirect_uri,
+            isRedirectUriAllowed: oauthServer.isRedirectUriAllowed,
+          });
+          if (!decision.ok) {
+            res.writeHead(decision.status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: decision.error, error_description: decision.error_description }));
             return;
           }
-          // client_id → userId mapping preserved verbatim from the original
-          const { userId, username } = clientToIdentity(params.client_id);
+          const client = oauthServer.getClient(params.client_id);
+          const ident = identityForApprove(
+            params.client_id,
+            clientToIdentity(params.client_id),
+            client && client.client_name,
+          );
+          if (!ident) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid_request', error_description: 'client_id required' }));
+            return;
+          }
+          rememberIdentity(params.client_id, ident);
+          const { userId, username } = ident;
           const code = oauthServer.createAuthorizationCode({
             clientId: params.client_id,
             redirectUri: params.redirect_uri,

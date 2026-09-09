@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { buildEvent } = require('../../shared/events');
+const liveActive = require('./liveActive');
 
 const DB_PATH = process.env.ASMLTR_INSIGHTS_DB || path.join(__dirname, 'data', 'insights.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -295,4 +296,32 @@ const insertSystemSample = db.transaction((s) => {
   });
 });
 
-module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, insertAssessment, q, DB_PATH };
+const _endSession = db.prepare(
+  `UPDATE sessions SET status = 'ended', updated_unix = ? WHERE session_id = ? AND status = 'active'`
+);
+
+/**
+ * Honest Live list: status=active rows that are still inside the idle window
+ * (or pid-backed). Past-idle no-pid web rows are excluded and marked ended
+ * without DELETE so history stays and a later inbound can set active again.
+ */
+function listLiveActive({ persistEnded = true, now = Date.now(), idleMs } = {}) {
+  const cutoffMs = idleMs == null ? liveActive.idleMsFromEnv() : idleMs;
+  const rows = q.activeSessions.all();
+  const live = [];
+  const stale = [];
+  for (const s of rows) {
+    if (liveActive.isLiveActive(s, now, cutoffMs)) live.push(s);
+    else stale.push(s);
+  }
+  if (persistEnded && stale.length) {
+    const tx = db.transaction((list) => {
+      const ts = Date.now();
+      for (const s of list) _endSession.run(ts, s.session_id);
+    });
+    tx(stale);
+  }
+  return live;
+}
+
+module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, insertAssessment, q, listLiveActive, isLiveActive: liveActive.isLiveActive, DB_PATH };

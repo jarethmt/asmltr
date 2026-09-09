@@ -51,10 +51,23 @@ These files carry secrets or personal identifiers. They are **gitignored**; comm
 | `connectors/types/mcp/clients.json` | `clients.example.json` | Pre-registered OAuth 2.1 MCP clients; each maps to a trust `identity`. |
 | `connectors/types/openai/keys.json` | `keys.example.json` | Bearer API keys → trust identities for the OpenAI-compatible connector. |
 | `core/src/trust/seed.json` | `seed.example.json` | Trust store seed (principals, identifiers, grants). |
-| `connectors/types/discord/channel-aliases.json` | `channel-aliases.example.json` | Real Discord channel ids ↔ aliases (e.g. `TD-TSD-main`). |
+| `connectors/types/discord/channel-aliases.json` | `channel-aliases.example.json` | Real Discord channel ids ↔ aliases (e.g. `alerts`). |
+| `~/.asmltr/media-allow.json` | `shared/media-allow.example.json` | Per-principal stills/video/code allowlists (`photoAllow`, `videoAllow`, `codeAllow`). Live file is under the home dir, not the repo. |
 
 Local data stores (SQLite DBs under `*/data/`, `*.db`, JSONL event logs), the dashboard
 `dist/`, and per-install notes (`CLAUDE.local.md`) are also gitignored.
+
+## Public tree — no personal or install-specific data
+
+This repository is public. Tracked files must not contain:
+
+- Household, family, or staff names
+- Personal or work emails, phones, Discord snowflakes
+- Internal hostnames, live vhosts, home-directory paths, per-box bind ports, backup clocks
+
+A value the running install needs (owner-from email, host paths, unit files) lives in the live
+`.env`, `CLAUDE.local.md`, or systemd copies under `~/.config` — never as a literal in git.
+`.example` twins use placeholders (`Owner`, `owner@example.com`, `/path/to/asmltr`, `%h`).
 
 ## `.env`
 
