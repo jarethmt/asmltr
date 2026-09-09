@@ -35,7 +35,9 @@ public class ReadAloud {
 
     if (!holdWhenBusy) {                                  // opt-out: old barge-in behavior, still ducked
       NotifEyesOverlay.show(c, text);
-      Speech.speakBlocking(c, base, token, text);
+      Speech.setAmpSink(NotifEyesOverlay::pushAmp);
+      try { Speech.speakBlocking(c, base, token, text); } finally { Speech.setAmpSink(null); }
+      NotifEyesOverlay.hide(c);
       return;
     }
 
@@ -48,7 +50,9 @@ public class ReadAloud {
 
     if (gate == SpeakGate.OK) {
       NotifEyesOverlay.show(c, text);
-      int r = Speech.speakBlocking(c, base, token, text);
+      Speech.setAmpSink(NotifEyesOverlay::pushAmp);        // the eyes move with the actual speech
+      int r;
+      try { r = Speech.speakBlocking(c, base, token, text); } finally { Speech.setAmpSink(null); }
       NotifEyesOverlay.hide(c);                            // the eyes track the voice, not a length guess
       if (r == Speech.SPOKE) return;
       android.util.Log.d(TAG, "speech did not complete (" + r + ") — holding instead");
@@ -84,7 +88,9 @@ public class ReadAloud {
     }
 
     NotifBadgeOverlay.setState("reading");
-    int r = Speech.speakBlocking(c, base, token, text);
+    Speech.setAmpSink(NotifBadgeOverlay::pushAmp);
+    int r;
+    try { r = Speech.speakBlocking(c, base, token, text); } finally { Speech.setAmpSink(null); }
     if (r == Speech.SPOKE) {
       NotifQueue.clear(c);
       NotifBadgeOverlay.hide(c);

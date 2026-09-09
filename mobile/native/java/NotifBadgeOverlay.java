@@ -125,6 +125,15 @@ public class NotifBadgeOverlay {
     H.post(() -> { try { if (web != null) web.evaluateJavascript("window.setCount&&setCount(" + n + ")", null); } catch (Throwable t) {} });
   }
 
+  /** Feed the playback envelope to the badge's face while it reads the backlog aloud. */
+  private static long lastAmpAt = 0;
+  static void pushAmp(final float v) {
+    long now = android.os.SystemClock.uptimeMillis();
+    if (now - lastAmpAt < 66) return;
+    lastAmpAt = now;
+    H.post(() -> { try { if (web != null) web.evaluateJavascript("window.setAmp&&setAmp(" + v + ")", null); } catch (Throwable t) {} });
+  }
+
   /** "idle" · "reading" · "busy" (a shake — you tapped, but a call is still up) · "drag". */
   static void setState(final String state) {
     H.post(() -> { try { if (web != null) web.evaluateJavascript("window.setState&&setState('" + Uri.encode(state) + "')", null); } catch (Throwable t) {} });

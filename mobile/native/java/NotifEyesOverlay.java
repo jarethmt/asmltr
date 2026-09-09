@@ -73,6 +73,19 @@ public class NotifEyesOverlay {
     });
   }
 
+  /** Feed the playback envelope to the face. Coalesced to ~15 Hz: the Visualizer fires at 20 Hz and a
+   *  JS eval per frame on the overlay's WebView is more traffic than the animation can use. */
+  private static long lastAmpAt = 0;
+  static void pushAmp(final float v) {
+    long now = android.os.SystemClock.uptimeMillis();
+    if (now - lastAmpAt < 66) return;
+    lastAmpAt = now;
+    H.post(() -> {
+      try { if (current instanceof WebView) ((WebView) current).evaluateJavascript("window.setAmp&&setAmp(" + v + ")", null); }
+      catch (Throwable t) {}
+    });
+  }
+
   public static void hide(Context ctx) {
     final Context app = ctx.getApplicationContext();
     H.post(() -> {

@@ -51,82 +51,31 @@ let vadCfg = { endpoint_ms: 1600, start_ms: 8000, sensitivity: 50 };
 // the live mic (while listening) and the decoded TTS envelope (while speaking) — both via setAmp;
 // idle/thinking synthesize a gentle breathe. Self-contained; no dependencies.
 const voiceOrb = (() => {
-  let vs = 'idle', amp = 0, ampT = 0, t = 0, extAmp = 0, extAt = 0;
-  let look = { x: 0, y: 0 }, lookT = { x: 0, y: 0 }, blink = 0, nextBlink = 80, nextLook = 150;
-  let cv, cx, eyeL, eyeR, eyes, glowA, glowB, running = false;
-  function els() {
-    cv = document.getElementById('orbcv'); if (!cv) return false;
-    cx = cv.getContext('2d'); eyeL = document.getElementById('eyeL'); eyeR = document.getElementById('eyeR');
-    eyes = document.getElementById('eyes'); glowA = document.getElementById('orbGlowA'); glowB = document.getElementById('orbGlowB');
-    return !!(cx && eyeL && eyeR);
-  }
-  function setState(s) { if (['idle', 'listening', 'thinking', 'speaking'].includes(s)) vs = s; }
-  // Amplitude is fed externally via setAmp — from the live mic while listening, and from the decoded
-  // TTS envelope while speaking (see speakAmp). idle/thinking synthesize a gentle breathe in frame().
-  function setAmp(v) { extAmp = Math.max(0, Math.min(1, v || 0)); extAt = Date.now(); }
-  // Pull the app's accent colors (Settings palette / --accent, --accent2) so the orb + eyes match the
-  // rest of the theme. Refreshed periodically in frame() so a palette change takes effect live.
-  let cA = '139,92,246', cB = '236,72,153';
-  function refreshPalette() {
+  // Thin adapter over the shared AsmltrEyes engine (eyes.js) — the same face the read-aloud toast and
+  // the held-notification badge mount, so the assistant can't drift into looking like a different
+  // character depending on which surface you meet it on. The public API (start/setState/setAmp) is
+  // unchanged, so every existing call site keeps working.
+  let face = null;
+  function palette() {
     try {
       const cs = getComputedStyle(document.documentElement);
       const a = cs.getPropertyValue('--accent').trim(), b = cs.getPropertyValue('--accent2').trim();
-      if (a) cA = a.replace(/\s+/g, ','); if (b) cB = b.replace(/\s+/g, ',');
+      if (a && b) return [a.replace(/\s+/g, ','), b.replace(/\s+/g, ',')];
     } catch (_) {}
+    return ['139,92,246', '236,72,153'];
   }
-  function drawOrb() {
-    const w = cv.width, h = cv.height, mx = w / 2, my = h / 2, base = w * 0.25, wob = w * 0.055 * (0.1 + amp * 1.15);
-    cx.clearRect(0, 0, w, h);
-    cx.globalCompositeOperation = 'lighter'; // additive → the two lobes melt into one soft, glowing body
-    for (let i = 0; i < 2; i++) {
-      const ox = Math.sin(t / 52 + i * 2.3) * base * 0.12, oy = Math.cos(t / 63 + i * 1.7) * base * 0.1;
-      const px = mx + ox, py = my + oy, ph = t / 17 + i * 2.1, col = i ? cB : cA;
-      const g = cx.createRadialGradient(px, py - 12, base * 0.12, px, py, base * 1.55);
-      g.addColorStop(0, `rgba(${col},.5)`); g.addColorStop(.5, `rgba(${col},.14)`); g.addColorStop(1, `rgba(${cB},0)`);
-      cx.fillStyle = g; cx.beginPath();
-      for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.09) {
-        // three drifting harmonics → an organic, breathing outline rather than a plain wobble
-        const r = base + Math.sin(a * 3 + ph) * wob + Math.sin(a * 5 - t / 15) * wob * 0.5
-          + Math.sin(a * 2 + t / 23) * wob * 0.45 + amp * base * 0.3;
-        const x = px + Math.cos(a) * r, y = py + Math.sin(a) * r; a === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y);
-      }
-      cx.closePath(); cx.fill();
-    }
-    cx.globalCompositeOperation = 'source-over';
+  function start() {
+    if (face) return;
+    const cv = document.getElementById('orbcv');
+    if (!cv || !window.AsmltrEyes) return;
+    face = AsmltrEyes.mount(cv, { palette: palette() });
+    // Pick up live palette changes from Settings without remounting.
+    setInterval(() => { try { face.setPalette(palette()); } catch (_) {} }, 4000);
   }
-  function frame() {
-    if (!running) return;
-    t++;
-    if (t % 90 === 1) refreshPalette(); // pick up live palette changes from Settings
-    const breathe = (Math.sin(t / 55) + 1) / 2, fresh = Date.now() - extAt < 250;
-    // Big gap between resting (idle/thinking: near-still, slow breathe) and active (listening/speaking:
-    // driven hard by real amplitude) so speech visibly animates the orb.
-    if (vs === 'idle') ampT = 0.05 + breathe * 0.03;
-    else if (vs === 'thinking') ampT = 0.09 + breathe * 0.04;
-    else if (vs === 'listening') ampT = fresh ? 0.22 + extAmp * 0.78 : 0.09;
-    else if (vs === 'speaking') ampT = fresh ? 0.3 + extAmp * 0.7 : 0.34 + Math.abs(Math.sin(t / 7)) * 0.4; // fed by the TTS envelope (setAmp), synth fallback between clips
-    amp += (ampT - amp) * (vs === 'speaking' || vs === 'listening' ? 0.3 : 0.1); // snappy when active, gentle at rest
-    if (--nextBlink <= 0) { blink = 1; nextBlink = 100 + Math.random() * 170; }
-    if (blink > 0) { blink -= 0.18; if (blink < 0) blink = 0; }
-    if (--nextLook <= 0) { lookT = { x: (Math.random() * 2 - 1) * 4, y: (Math.random() * 2 - 1) * 3 }; nextLook = 140 + Math.random() * 190; }
-    let lx = lookT.x, ly = lookT.y;
-    if (vs === 'listening') { lx = 0; ly = -1.5; } else if (vs === 'thinking') { lx = -3.5; ly = -4; } else if (vs === 'speaking') { lx = 0; ly = 0; }
-    look.x += (lx - look.x) * 0.08; look.y += (ly - look.y) * 0.08;
-    // Eyes react gently — a tight height band across states (the blobs carry most of the motion).
-    let open = 23, rad = 9, happy = false;
-    if (vs === 'listening') { open = 25; rad = 10; } else if (vs === 'thinking') { open = 20; rad = 8; } else if (vs === 'speaking') { happy = amp > 0.72; open = happy ? 19 : 23; }
-    const eh = Math.max(2, open * (1 - blink));
-    const bright = vs === 'listening'; // listening → noticeably whiter/brighter eyes (see .eye.bright)
-    for (const e of [eyeL, eyeR]) { e.style.height = eh + 'px'; e.style.borderRadius = happy ? '9px 9px 9px 9px / 5px 5px 11px 11px' : rad + 'px'; e.classList.toggle('bright', bright); }
-    if (eyes) eyes.style.transform = `translate(${look.x}px,${look.y}px) scale(${1 + amp * 0.025})`;
-    const dr = 1.5 + amp * 9; // drift barely moves at rest, swims when the orb is active
-    if (glowA) glowA.style.transform = `translate(${Math.sin(t / 150) * dr}px,${Math.cos(t / 185) * dr * 0.7}px) scale(${1 + amp * 0.36})`;
-    if (glowB) glowB.style.transform = `translate(${Math.cos(t / 170) * dr}px,${Math.sin(t / 140) * dr * 0.8}px) scale(${1 + amp * 0.55}) rotate(${t / 26}deg)`;
-    drawOrb();
-    requestAnimationFrame(frame);
-  }
-  function start() { if (running) return; if (!els()) return; refreshPalette(); running = true; requestAnimationFrame(frame); }
-  return { start, setState, setAmp };
+  function setState(s) { try { if (face) face.setState(s); } catch (_) {} }
+  function setAmp(v) { try { if (face) face.setAmp(v); } catch (_) {} }
+  function setMood(m) { try { if (face) face.setMood(m); } catch (_) {} }
+  return { start, setState, setAmp, setMood };
 })();
 let wakeCfg = { enabled: false, phrase: '' }; // wake word (mirrors core voice config; editable in-app)
 // Hands-free "stop listening" phrases — say one and the turn is dropped (not sent) + the mic turns off.
@@ -317,6 +266,10 @@ function afterReply() { if (continuous && !suppressRestart && !minimized() && st
 function renderFrame(m, live) {
   switch (m.type) {
     case 'thinking': addThinking(m.text); break;
+    // Expression, sent by the core as data (it strips the [[MOOD:x]] sentinel from the reply text so it
+    // is never displayed or spoken). Arrives at the start of a reply, so the face changes as the answer
+    // begins. Unknown names are ignored by the engine, so a new mood server-side can't break an old app.
+    case 'mood': try { voiceOrb.setMood(m.mood); } catch (_) {} break;
     case 'tool': addTool(m.name, m.input); break;
     case 'tool_result': addToolResult(m.output, m.is_error); break;
     case 'subagent': addSubagent(m); break;                     // live sub-agent panel (Claude only)
@@ -392,7 +345,11 @@ function drainTTS() {
   }
   if (replyTextDone && ttsNextPlay >= ttsSeq) finishReadout();  // all sentences synthesized + played
 }
-function finishReadout() { resetTTS(); setState('idle'); afterReply(); }
+function finishReadout() {
+  resetTTS(); setState('idle');
+  try { voiceOrb.setMood('neutral'); } catch (_) {}   // the expression belonged to that reply, not forever
+  afterReply();
+}
 function resetTTS() { ttsBuf = ''; ttsSeq = 0; ttsNextPlay = 0; ttsPlaying = false; replyTextDone = false; for (const k in ttsClips) delete ttsClips[k]; }
 
 // ---------- turn ----------

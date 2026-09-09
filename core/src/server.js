@@ -509,16 +509,52 @@ async function handle(envelope, opts = {}) {
   // to the last WHITESPACE boundary — so a secret is a complete token (redactSecrets masks it) before
   // it goes out, and we never emit a still-forming token. Full-trust recipients stream raw (no lag).
   let _streamRaw = '', _emitted = 0;
+
+  // --- EXPRESSION TAG ---------------------------------------------------------
+  // A surface that renders a face (the assistant app) asks the model to open its reply with
+  // [[MOOD:<name>]]. It is a SENTINEL, exactly like [[NO_REPLY]] below — never content. It is parsed
+  // and stripped HERE, in the core, for two reasons that matter:
+  //   · one session is reachable from every channel, so a tag left in the text would be read aloud by
+  //     TTS, and would show up as literal "[[MOOD:happy]]" in Discord, Telegram and email;
+  //   · consumers should receive it as DATA (opts.onMood) rather than re-parsing prose downstream.
+  // Stripping is unconditional and channel-independent — defensive, because a session that was once
+  // told about moods can keep emitting them after being taken over by a surface that never asked.
+  const MOOD_RE = /^\s*\[\[MOOD:([a-z]+)\]\]\s*/i;
+  // A tag can arrive split across ANY number of deltas, so hold output while what we have so far could
+  // still become one. The trailing \]?\]? matters: without it the partial match dies on the closing
+  // brackets and a fully-formed tag streams out as text when it arrives one character at a time.
+  const MOOD_PARTIAL = /^\s*\[\[?M?O?O?D?:?[A-Za-z]*\]?\]?$/;
+  let _moodPending = true, _moodCut = 0;   // _moodCut = chars removed from the head, applied FOREVER
+  const _visible = () => {
+    if (_moodPending) {
+      const m = _streamRaw.match(MOOD_RE);
+      if (m) {
+        _moodPending = false; _moodCut = m[0].length;
+        if (opts.onMood) { try { opts.onMood(m[1].toLowerCase()); } catch (_) {} }
+      } else if (_streamRaw.length < 24 && MOOD_PARTIAL.test(_streamRaw)) {
+        return null;                        // still possibly forming — hold
+      } else {
+        _moodPending = false;               // ordinary text; never look again
+      }
+    }
+    // Always re-apply the cut. Returning the raw buffer once the tag was consumed re-emits it: the
+    // stream indices count VISIBLE characters, so the final flush would append the tag's tail back on.
+    return _moodCut ? _streamRaw.slice(_moodCut) : _streamRaw;
+  };
+
   const _pushDelta = (raw) => {
     _streamRaw += raw;
-    const red = mustRedact ? redactSecrets(_streamRaw).text : _streamRaw;
+    const vis = _visible();
+    if (vis === null) return;                       // holding a possibly-forming tag
+    const red = mustRedact ? redactSecrets(vis).text : vis;
     let end = red.length;
     if (mustRedact) { const b = Math.max(red.lastIndexOf(' '), red.lastIndexOf('\n')); end = b >= 0 ? b + 1 : _emitted; }
     if (end > _emitted) { try { opts.onText(red.slice(_emitted, end)); } catch (_) {} _emitted = end; }
   };
   const _flushStream = () => {
     if (!opts.onText) return;
-    const red = mustRedact ? redactSecrets(_streamRaw).text : _streamRaw;
+    const vis = _visible() ?? _streamRaw;           // a held partial tag that never completed is text
+    const red = mustRedact ? redactSecrets(vis).text : vis;
     if (/\[\[NO_REPLY\]\]/i.test(red)) return; // don't ship the silence sentinel
     if (red.length > _emitted) { try { opts.onText(red.slice(_emitted)); } catch (_) {} _emitted = red.length; }
   };
@@ -666,6 +702,16 @@ async function handle(envelope, opts = {}) {
     record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
       identity: resolved.user_key, source: 'core', payload: { action: 'empty-no-reply' } });
     return [];
+  }
+
+  // The same sentinel must never survive into the final text: non-streaming connectors, the recorded
+  // transcript and the TTS path all read result.text.
+  const _finalMood = (result.text || '').match(MOOD_RE);
+  if (_finalMood) {
+    result.text = result.text.replace(MOOD_RE, '');
+    if (opts.onMood && _moodPending) { try { opts.onMood(_finalMood[1].toLowerCase()); } catch (_) {} }
+    record({ surface: e.channel, session_id: e.conversation_key, event_type: 'control',
+      identity: resolved.user_key, source: 'core', payload: { action: 'mood', mood: _finalMood[1].toLowerCase() } });
   }
 
   const actions = [env.reply(result.text, { segments: result.segments || [] })];

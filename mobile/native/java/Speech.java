@@ -6,6 +6,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.media.audiofx.Visualizer;
 import android.os.Build;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
@@ -42,6 +43,11 @@ public class Speech {
   public static final int SPOKE = 0;    // it was read aloud, start to finish
   public static final int BUSY = 1;     // focus denied or lost — nothing (useful) was heard
   public static final int FAILED = 2;   // nothing to say / no way to say it
+
+  /** Where the live playback envelope goes while a clip plays — whichever eyes are on screen. */
+  public interface AmpSink { void amp(float v); }
+  private static volatile AmpSink sink;
+  public static void setAmpSink(AmpSink s) { sink = s; }
 
   private static volatile MediaPlayer playing;   // the clip currently on the speaker
   private static volatile boolean aborted;       // set when focus is lost under us
@@ -193,13 +199,57 @@ public class Speech {
       mp.prepare();
       playing = mp;
       if (aborted) { try { mp.release(); } catch (Throwable t) {} playing = null; return false; }
+      Visualizer viz = attachVisualizer(mp);
       mp.start();
       synchronized (lock) { while (!done[0]) { try { lock.wait(30000); } catch (InterruptedException e) { break; } if (!mp.isPlaying()) break; } }
+      releaseVisualizer(viz);
       playing = null;
       try { mp.release(); } catch (Throwable t) {}
+      try { AmpSink s = sink; if (s != null) s.amp(0f); } catch (Throwable t) {}   // settle the face
       return true;
     } catch (Throwable t) { playing = null; return false; }
     finally { if (f != null) try { f.delete(); } catch (Throwable t) {} }
+  }
+
+  /**
+   * Tap the clip's own audio session so the eyes can move with the actual speech rather than a guess.
+   * Without this the notification overlays have NO signal at all — native MediaPlayer does the playing
+   * and the WebView never hears about it, which is why they only ever animated idly while talking.
+   *
+   * Uses the smallest capture buffer at ~20 Hz, which is plenty for an envelope and cheap enough to run
+   * on a foreground service. Requires RECORD_AUDIO (already held for the assistant mic). Entirely
+   * best-effort: some devices refuse a Visualizer, and the face just falls back to its synthesised
+   * breathing rather than failing the readout.
+   */
+  private static Visualizer attachVisualizer(MediaPlayer mp) {
+    try {
+      if (sink == null) return null;
+      Visualizer v = new Visualizer(mp.getAudioSessionId());
+      v.setCaptureSize(Visualizer.getCaptureSizeRange()[0]);
+      int rate = Math.min(20000, Visualizer.getMaxCaptureRate());
+      v.setDataCaptureListener(new Visualizer.OnDataCaptureListener() {
+        @Override public void onWaveFormDataCapture(Visualizer vv, byte[] wave, int samplingRate) {
+          AmpSink s = sink;
+          if (s == null || wave == null || wave.length == 0) return;
+          // 8-bit PCM centred on 128 → RMS → a 0..1 envelope. The x2.6 lift maps ordinary speech level
+          // into the top of the range; without it the face barely twitches on normal dialogue.
+          long sum = 0;
+          for (int i = 0; i < wave.length; i++) { int d = (wave[i] & 0xFF) - 128; sum += (long) d * d; }
+          double rms = Math.sqrt((double) sum / wave.length) / 128.0;
+          float amp = (float) Math.max(0, Math.min(1, rms * 2.6));
+          try { s.amp(amp); } catch (Throwable t) {}
+        }
+        @Override public void onFftDataCapture(Visualizer vv, byte[] fft, int samplingRate) {}
+      }, rate, true, false);
+      v.setEnabled(true);
+      return v;
+    } catch (Throwable t) { android.util.Log.d("AsmltrNotif", "visualizer unavailable: " + t); return null; }
+  }
+
+  private static void releaseVisualizer(Visualizer v) {
+    if (v == null) return;
+    try { v.setEnabled(false); } catch (Throwable t) {}
+    try { v.release(); } catch (Throwable t) {}
   }
 
   /** OS-engine fallback, blocking so the caller keeps audio focus (and the ducking) until it finishes. */

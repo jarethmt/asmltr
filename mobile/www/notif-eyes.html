@@ -4,52 +4,29 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <title>eyes</title>
 <style>
-  :root{ --v:139 92 246; --p:236 72 153; --c:34 211 238; }
   html,body{margin:0;height:100%;background:transparent;overflow:hidden;
     -webkit-user-select:none;user-select:none;pointer-events:none}
-  /* Just the eyes — a soft floating glow + two expressive pill-eyes. No card, no text: it should read as
-     a little presence hovering over the screen, not a notification banner. */
-  #face{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.4);opacity:0;
-    transition:transform .55s cubic-bezier(.2,1.5,.4,1), opacity .4s ease;
-    display:grid;place-items:center;width:200px;height:200px}
-  #face.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
-  .halo{position:absolute;inset:0;border-radius:50%;filter:blur(26px);opacity:.9;
-    background:radial-gradient(circle at 50% 45%, rgb(var(--v)/.85), rgb(var(--p)/.4) 52%, transparent 70%)}
-  .halo.b{inset:8%;filter:blur(16px);opacity:.7;animation:spin 9s linear infinite;
-    background:radial-gradient(circle at 55% 55%, rgb(var(--c)/.5), transparent 68%)}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .eyes{position:relative;z-index:2;display:flex;gap:22px}
-  /* soft single-hue glowing orbs — matches the in-app assistant orb */
-  .eye{width:28px;height:50px;border-radius:50% / 46%;
-    background:radial-gradient(ellipse 44% 30% at 50% 34%, rgba(255,255,255,.18), transparent 72%),
-      radial-gradient(ellipse 96% 96% at 50% 50%, rgb(var(--v)) 0%, rgb(var(--v)/.82) 44%, rgb(var(--v)/0) 100%);
-    filter:blur(1.4px);
-    box-shadow:0 0 30px 3px rgb(var(--v)/.62), 0 0 62px 8px rgb(var(--p)/.28)}
+  /* The canvas fills the whole overlay window. AsmltrEyes reserves its own padding for the glow, so
+     the halo fades out inside the canvas instead of being clipped by the window edge — which is
+     exactly what the old CSS `filter: blur(26px)` version could not do. */
+  #face{position:fixed;inset:0;width:100%;height:100%;opacity:0;transition:opacity .38s ease}
+  #face.show{opacity:1}
+  #face.out{opacity:0}
 </style></head>
 <body>
-  <div id="face">
-    <span class="halo"></span><span class="halo b"></span>
-    <span class="eyes"><i class="eye" id="eyeL"></i><i class="eye" id="eyeR"></i></span>
-  </div>
+  <canvas id="face"></canvas>
+<script src="eyes.js"></script>
 <script>
-  // The native overlay controls lifetime (auto-dismiss); we animate in, live-blink + gently bob, and
-  // expose dismissEyes() so native can fade us out before removing the window.
-  const face = document.getElementById('face');
-  const eyes = [document.getElementById('eyeL'), document.getElementById('eyeR')];
-  requestAnimationFrame(() => requestAnimationFrame(() => face.classList.add('show')));
-  let t = 0, nextBlink = 45;
-  (function loop(){
-    t++;
-    // blink: squish the eyes closed briefly, then re-open
-    let h = 44;
-    if (--nextBlink <= 0) { h = 5; if (nextBlink < -4) nextBlink = 70 + Math.random()*140; }
-    for (const e of eyes) e.style.height = h + 'px';
-    // gentle floating bob + a slow look-around drift
-    const bob = Math.sin(t/38)*5, lookX = Math.sin(t/70)*4;
-    if (!face.classList.contains('out'))
-      face.style.transform = `translate(calc(-50% + ${lookX}px), calc(-50% + ${bob}px)) scale(1)`;
-    requestAnimationFrame(loop);
-  })();
-  window.dismissEyes = () => { face.classList.add('out'); face.classList.remove('show'); };
+  var el = document.getElementById('face');
+  var face = AsmltrEyes.mount(el, { palette: window.__ASMLTR_PALETTE || ['139,92,246', '236,72,153'] });
+  face.setState('speaking');   // this overlay only exists while something is being read aloud
+  requestAnimationFrame(function () { requestAnimationFrame(function () { el.classList.add('show'); }); });
+
+  // Native hooks (called via evaluateJavascript from NotifEyesOverlay).
+  window.setAmp = function (v) { try { face.setAmp(v); } catch (e) {} };      // live TTS envelope
+  window.setEyeState = function (s) { try { face.setState(s); } catch (e) {} };
+  window.setEyeMood = function (m) { try { face.setMood(m); } catch (e) {} };
+  window.setPalette = function (a, b) { try { face.setPalette([a, b]); } catch (e) {} };
+  window.dismissEyes = function () { el.classList.add('out'); el.classList.remove('show'); };
 </script>
 </body></html>

@@ -34,6 +34,19 @@ const tts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const identity = require('../../../shared/identity'); // for /gw/theme (signature palette + agent name)
 
+// The expression vocabulary the app's eyes can actually render (see mobile/www/eyes.js MOODS). Kept
+// deliberately short: a face that can do six things well reads better than one that does twenty badly,
+// and every name here maps to a real shape rather than a label the renderer would have to guess at.
+const MOOD_PROMPT = [
+  'THIS SURFACE HAS A FACE. The assistant app renders animated eyes while it speaks your reply.',
+  'You may set their expression by opening your reply with a sentinel: [[MOOD:name]]',
+  'Valid names: neutral, happy, curious, concerned, angry, sleepy.',
+  'Rules: at most one, and it must be the FIRST thing in the reply, before any other text.',
+  'It is stripped before the reply is shown or spoken, so it is never read aloud and never displayed.',
+  'Use it when the expression genuinely fits what you are saying — a warm answer, a puzzled one, bad',
+  'news. Omit it entirely when neutral; a face that reacts to everything reads as noise.',
+].join('\n');
+
 const meta = {
   type: 'android',
   displayName: 'Android assistant',
@@ -304,6 +317,10 @@ async function start(ctx) {
       // This channel CAN receive outbound files (rendered as a `media` frame + served by /gw/file), so the
       // core tells the agent it may attach here instead of claiming it can't.
       capabilities: { max_message_chars: 100000, supports_markdown: false, streaming: true, supports_attachments_out: true },
+      // This surface RENDERS A FACE, so the agent is offered control of its expression. Scoped to this
+      // connector on purpose: it is the only channel with eyes, and the core strips the sentinel from
+      // every channel's text regardless, so a session taken over elsewhere can never leak it.
+      system_prompt_extra: MOOD_PROMPT,
     };
 
     // Ack immediately (the reply streams over the SSE, not this POST response).
@@ -314,6 +331,10 @@ async function start(ctx) {
         // `key: convo` tags every frame with its conversation so the app can demultiplex concurrent
         // turns into the right session TAB (one device SSE carries all of a device's live sessions).
         onDelta: (t) => { replyText += t; pushSSE(device, { type: 'delta', key: convo, text: t }); },            // streamed reply text
+        // Expression, as structured data rather than something the app has to grep out of the prose.
+        // It lands at the very start of a reply, so the face changes as the answer begins rather than
+        // after it finishes.
+        onMood: (m) => { pushSSE(device, { type: 'mood', key: convo, mood: m }); },
         onThinking: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'thinking', session_id: convo, identity: 'assistant', payload: { text: t } }); pushSSE(device, { type: 'thinking', key: convo, text: t }); }, // reasoning steps
         onToolCall: (t) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool', session_id: convo, identity: 'assistant', payload: { tool: t.name, input: t.input } }); pushSSE(device, { type: 'tool', key: convo, name: t.name, input: t.input }); }, // tool call + args
         onToolResult: (r) => { ctx.emit({ surface: 'assistant-native', event_type: 'tool_result', session_id: convo, identity: 'assistant', payload: { output: r.output, is_error: r.is_error } }); pushSSE(device, { type: 'tool_result', key: convo, output: r.output, is_error: r.is_error }); }, // its output
