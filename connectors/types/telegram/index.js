@@ -20,6 +20,7 @@ const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { isImage } = require('../../../shared/mimeguess');
 const { MediaGroupCoalescer } = require('./media-group'); // batch album photos into one turn
+const { parseCommand, buildCommandMenu } = require('../../../shared/commands'); // in-chat slash commands
 
 const meta = {
   type: 'telegram',
@@ -60,6 +61,42 @@ async function start(ctx) {
     if (allowed.size === 0) { if (!learnedChat) learnedChat = chatId; return chatId === learnedChat; }
     return allowed.has(chatId);
   }
+
+  // In-chat slash commands (Telegram convention: leading /name, surfaced in the client via
+  // setMyCommands). State-changing commands are implicitly owner-scoped: this connector only serves
+  // the single authorized chat (see authorized()), so there is no other principal to gate against.
+  const COMMANDS = [
+    { name: 'help', description: 'List available commands' },
+    { name: 'status', description: 'Show connector status' },
+    { name: 'stop', description: 'Stop the reply I am currently generating' },
+  ];
+  // Run a parsed command. Returns true if handled, false to fall through to the model (unknown slash).
+  async function runCommand(cmd, { chatId, userId }) {
+    const convKey = `telegram:${ctx.instanceId}:user:${userId}`;
+    switch (cmd.name) {
+      case 'help':
+        await bot.sendMessage(chatId, 'Commands:\n' + COMMANDS.map((c) => `/${c.name} — ${c.description}`).join('\n'));
+        return true;
+      case 'status': {
+        const chat = allowed.size ? [...allowed].join(', ') : (learnedChat != null ? String(learnedChat) : 'learning (first chat to message)');
+        await bot.sendMessage(chatId, `Status:\n- polling: on\n- instance: ${ctx.instanceId}\n- authorized chat: ${chat}`);
+        return true;
+      }
+      case 'stop': {
+        // Abort the in-flight turn for THIS chat. /v2/abort 404s (SDK rejects) when nothing is running;
+        // treat any failure as "nothing to stop" rather than erroring at the user.
+        let stopped = false;
+        try { const r = await ctx.core.abort(convKey); stopped = !!(r && (r.ok || r.turns)); }
+        catch (_) { stopped = false; }
+        await bot.sendMessage(chatId, stopped ? '🛑 Stopped.' : '🤷 Nothing running to stop.');
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+  // Advertise the command list so it appears in Telegram's client command menu with autocomplete.
+  bot.setMyCommands(buildCommandMenu(COMMANDS)).catch((e) => ctx.log(`setMyCommands failed: ${e.message}`));
 
   // Album coalescing: Telegram delivers a multi-photo album as separate messages sharing a
   // media_group_id, and running one vision turn per photo pins the box (the 2026-08-18 24-photo
@@ -116,6 +153,16 @@ async function start(ctx) {
     const chatId = msg.chat.id;
     const userId = (msg.from && (msg.from.username || msg.from.id)) || String(chatId);
     if (!authorized(chatId)) { bot.sendMessage(chatId, '🔒 Access denied.'); return; }
+
+    // Intercept a recognized slash command before the normal turn path. An unknown slash command
+    // falls through to the model (Telegram sends plenty of text that merely starts with "/").
+    if (msg.text) {
+      const parsed = parseCommand(msg.text);
+      if (parsed && COMMANDS.some((c) => c.name === parsed.name)) {
+        await runCommand(parsed, { chatId, userId }).catch((e) => ctx.log(`command /${parsed.name} failed: ${e.message}`));
+        return;
+      }
+    }
 
     const attachments = [];
     const caption = msg.text || msg.caption || '';
