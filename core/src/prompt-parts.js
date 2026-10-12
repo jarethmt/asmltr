@@ -20,16 +20,22 @@ const { createHash } = require('crypto');
 
 /**
  * @param {object} p named parts — each a string ('' when absent):
- *   identity, speaker, channel, authz, rel, extra, toolbelt, uploadsInstr, uploadsList, announce
+ *   identity, speaker, channel, authz, rel, extra, toolbelt, places, uploadsInstr, uploadsList, announce
  * @returns {{full:string, stable:string, volatile:string, stableHash:string}}
  */
 function composeSystemPrompts(p) {
   const g = (k) => (typeof p[k] === 'string' ? p[k] : '');
   // FULL — historical order (identity → speaker → channel → authz → rel → extra → toolbelt →
   // uploads-instruction → uploads-list → announce). Do not reorder: this is the claude/no-regression path.
+  // `places` is INSERTED after toolbelt rather than reordering anything: the toolbelt block is what
+  // tells a turn to use `asmltr send <channel> <target>`, so the directory of targets reads next to
+  // it. Every existing part keeps its existing neighbour, which is what the warning above protects.
   const full = [g('identity'), g('speaker'), g('channel'), g('authz'), g('rel'), g('extra'),
-    g('toolbelt'), g('uploadsInstr'), g('uploadsList'), g('announce')].filter(Boolean).join('\n\n');
-  const stable = [g('identity'), g('channel'), g('toolbelt'), g('uploadsInstr')].filter(Boolean).join('\n\n');
+    g('toolbelt'), g('places'), g('uploadsInstr'), g('uploadsList'), g('announce')].filter(Boolean).join('\n\n');
+  // STABLE because the directory changes when someone labels a place, not per turn. That also means
+  // labelling a place changes stableHash, so the next turn on each live session resends the stable
+  // block once. That is the mechanism working, not a regression.
+  const stable = [g('identity'), g('channel'), g('toolbelt'), g('places'), g('uploadsInstr')].filter(Boolean).join('\n\n');
   const volatile = [g('speaker'), g('authz'), g('rel'), g('extra'), g('uploadsList'), g('announce')].filter(Boolean).join('\n\n');
   const stableHash = createHash('sha256').update(stable).digest('hex');
   return { full, stable, volatile, stableHash };
