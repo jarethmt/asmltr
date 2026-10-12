@@ -87,7 +87,16 @@ async function refreshInstance(store, inst) {
   }
 
   if (!servers.length && !channels.length) {
-    out.error = sv.error || ch.error || (sv.ok || ch.ok ? 'connector reported no places' : `manager said ${sv.status || ch.status}`);
+    // A 404 from BOTH proxies means this connector type does not serve /servers or /channels at all,
+    // which is most of them: telegram, email, android. That is not a failure and reporting it as
+    // "manager said 404" turns an ordinary refresh into a page of noise. Found running a refresh
+    // against the live manager, where the telegram instance reported an error for existing.
+    const noEndpoint = sv.status === 404 && ch.status === 404;
+    out.kind_has_places = !noEndpoint;
+    out.error = noEndpoint ? null
+      : (sv.error || ch.error || (sv.ok || ch.ok ? 'connector reported no places' : `manager said ${sv.status || ch.status}`));
+  } else {
+    out.kind_has_places = true;
   }
   return out;
 }
@@ -96,11 +105,16 @@ async function refreshInstance(store, inst) {
 async function refresh(store, o = {}) {
   const insts = await instancesToRefresh(o);
   if (!Array.isArray(insts)) return { ok: false, error: insts.error, instances: [], guilds: 0, channels: 0 };
-  const results = [];
-  for (const inst of insts) results.push(await refreshInstance(store, inst));
+  const all = [];
+  for (const inst of insts) all.push(await refreshInstance(store, inst));
+  // Keep the ones that either contributed or failed for a real reason. A type with no places
+  // endpoint is dropped rather than printed as a zero with an error beside it.
+  const results = all.filter((r) => r.kind_has_places !== false);
+  const skipped = all.length - results.length;
   return {
     ok: results.some((r) => r.guilds || r.channels),
     instances: results,
+    skipped,
     guilds: results.reduce((n, r) => n + r.guilds, 0),
     channels: results.reduce((n, r) => n + r.channels, 0),
   };

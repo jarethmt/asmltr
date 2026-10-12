@@ -63,6 +63,17 @@ CREATE INDEX IF NOT EXISTS idx_labels_place ON place_labels(surface, scope_id);`
 
 const now = () => Date.now();
 const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+/**
+ * Fold a name the way a person says it. Channel names carry separators and decoration nobody types:
+ * `gianni-remote-work-log`, `team_notes`, `ops.alerts`, a leading `#`. Comparing raw strings meant
+ * "remote work log" could not find `gianni-remote-work-log`, which is the exact lookup this
+ * directory exists to answer. Found by running a refresh against the live connector.
+ */
+const fold = (s) => norm(s)
+  .replace(/^#/, '')
+  .replace(/[-_./|·:,]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 const KINDS = ['guild', 'channel', 'thread', 'chat', 'mailbox'];
 
 const _upsert = db.prepare(`INSERT INTO places
@@ -169,9 +180,10 @@ function list(o = {}) {
   if (o.kind) out = out.filter((r) => r.kind === norm(o.kind));
   if (o.role) out = out.filter((r) => r.roles.includes(norm(o.role)));
   if (o.q) {
-    const q = norm(o.q);
+    // Folded for the same reason resolve() is: -q and resolve must not disagree about what matches.
+    const q = fold(o.q);
     out = out.filter((r) => [r.name, r.parent_name, r.topic, r.display, ...r.aliases, ...r.roles]
-      .filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
+      .filter(Boolean).some((v) => fold(v).includes(q)));
   }
   return out;
 }
@@ -196,6 +208,7 @@ function resolve(ref, surface) {
   if (!raw) throw Object.assign(new Error('places.resolve: a reference is required'), { code: 'BAD_REQUEST' });
   const s = surface ? norm(surface) : null;
   const key = norm(raw).replace(/^#/, '');
+  const lkey = fold(raw);
 
   // 1. an id
   if (s) { const byId = get(s, raw); if (byId) return { place: byId, matched_on: 'id' }; }
@@ -207,10 +220,11 @@ function resolve(ref, surface) {
 
   // 2. a label the operator chose
   if (s) {
-    const row = _byLabel.get(s, key);
+    const row = _byLabel.get(s, key) || _foldedLabel(s, lkey);
     if (row) return { place: get(s, row.scope_id), matched_on: 'label' };
   } else {
-    const rows = _byLabelAny.all(key);
+    let rows = _byLabelAny.all(key);
+    if (!rows.length) rows = _foldedLabelAny(lkey);
     if (rows.length === 1) return { place: get(rows[0].surface, rows[0].scope_id), matched_on: 'label' };
     if (rows.length > 1) throw ambiguous(raw, rows.map((r) => get(r.surface, r.scope_id)), 'that label is used on more than one surface');
   }
@@ -218,16 +232,29 @@ function resolve(ref, surface) {
   // 3. an exact name, then 4. a loose one. Exact first so "general" prefers a channel actually
   // called general over one merely containing the word.
   const pool = (s ? _allBySurface.all(s) : _all.all()).map(hydrate);
-  const exact = pool.filter((r) => norm(r.name) === key || norm(r.display) === key);
+  const fkey = fold(raw);
+  // Folded, so "shop floor" is an EXACT match for "shop-floor" instead of dropping to the loose tier
+  // and competing with every name that merely contains those words.
+  const exact = pool.filter((r) => fold(r.name) === fkey || fold(r.display) === fkey);
   if (exact.length === 1) return { place: exact[0], matched_on: 'name' };
   if (exact.length > 1) throw ambiguous(raw, exact, 'more than one place has that name');
 
   const loose = pool.filter((r) => [r.name, r.display, r.parent_name, r.topic]
-    .filter(Boolean).some((v) => String(v).toLowerCase().includes(key)));
+    .filter(Boolean).some((v) => fold(v).includes(fkey)));
   if (loose.length === 1) return { place: loose[0], matched_on: 'loose' };
   if (loose.length > 1) throw ambiguous(raw, loose, 'more than one place matches loosely');
 
   throw Object.assign(new Error(`places.resolve: nothing matches '${raw}' (try: asmltr places -q ${raw.slice(0, 24)})`), { code: 'NOT_FOUND' });
+}
+
+/** Labels are stored as typed (lowercased); fold at read time so "shift log" finds "shift-log". */
+function _foldedLabel(surface, fkey) {
+  const rows = db.prepare('SELECT scope_id, label FROM place_labels WHERE surface = ?').all(surface);
+  return rows.find((r) => fold(r.label) === fkey) || null;
+}
+function _foldedLabelAny(fkey) {
+  const rows = db.prepare('SELECT surface, scope_id, label FROM place_labels').all();
+  return rows.filter((r) => fold(r.label) === fkey);
 }
 
 function ambiguous(ref, candidates, why) {
@@ -248,4 +275,4 @@ function count() {
   try { return db.prepare('SELECT COUNT(*) AS n FROM places').get().n; } catch (_) { return 0; }
 }
 
-module.exports = { db, upsert, get, setLabel, unsetLabel, list, roles, resolve, remove, count, KINDS, DB_PATH };
+module.exports = { db, upsert, get, setLabel, unsetLabel, list, roles, resolve, remove, count, fold, KINDS, DB_PATH };

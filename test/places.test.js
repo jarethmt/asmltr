@@ -197,3 +197,34 @@ test('a read of an unknown place is null, not a throw', () => {
   assert.deepEqual(places.list({ surface: 'nonsense' }), []);
   assert.equal(places.count(), 0);
 });
+
+test('a name written with separators resolves from the words someone says', () => {
+  wipe();
+  // The defect this fixes, found by refreshing against the live connector: the shift-log channel is
+  // called gianni-remote-work-log, and "remote work log" matched nothing because the comparison was
+  // raw. Nobody types a channel name the way Discord stores it.
+  places.upsert({ surface: 'discord', scope_id: 'c-log', kind: 'channel', name: 'gianni-remote-work-log', parent_name: '3D Print Pittsburgh' });
+  for (const q of ['remote work log', 'gianni remote work log', 'REMOTE-WORK-LOG', 'remote_work_log']) {
+    assert.equal(places.resolve(q, 'discord').place.scope_id, 'c-log', `'${q}' should reach it`);
+  }
+  assert.equal(places.list({ q: 'remote work log' }).length, 1, '-q agrees with resolve');
+});
+
+test('a folded name counts as an exact match, not a loose one', () => {
+  wipe();
+  places.upsert({ surface: 'discord', scope_id: 'c1', kind: 'channel', name: 'shop-floor' });
+  places.upsert({ surface: 'discord', scope_id: 'c2', kind: 'channel', name: 'shop-floor-photos' });
+  // Without folding in the exact tier, "shop floor" would drop to the loose tier, match both, and
+  // refuse as ambiguous. The channel actually called that should win outright.
+  const r = places.resolve('shop floor', 'discord');
+  assert.equal(r.matched_on, 'name');
+  assert.equal(r.place.scope_id, 'c1');
+});
+
+test('a label is found from the words someone says too', () => {
+  wipe();
+  places.upsert({ surface: 'discord', scope_id: 'c1', name: 'work-log' });
+  places.setLabel({ surface: 'discord', scope_id: 'c1', label: 'shift-log', kind: 'role' });
+  assert.equal(places.resolve('shift log', 'discord').matched_on, 'label');
+  assert.equal(places.resolve('shift log').place.scope_id, 'c1', 'and without naming the surface');
+});

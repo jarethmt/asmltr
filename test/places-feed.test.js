@@ -16,15 +16,17 @@ const feed = require('../core/src/places-feed');
 //   GET /instances/:id/servers      -> { servers: [{ id, name, member_count }] }
 //   GET /instances/:id/channels     -> { channels: [{ guild_id, guild, channel_id, name, enabled }] }
 const routes = {
-  '/instances': { instances: [{ id: 'dc1', type: 'discord', name: 'main' }, { id: 'tg1', type: 'telegram', name: 'tg' }] },
+  '/instances': { instances: [{ id: 'dc1', type: 'discord', name: 'main' }, { id: 'tg1', type: 'telegram', name: 'tg' }, { id: 'em1', type: 'email', name: 'mail' }] },
   '/instances/dc1/servers': { ok: true, servers: [{ id: 'g1', name: '3D Print Pittsburgh', member_count: 22 }] },
   '/instances/dc1/channels': { ok: true, channels: [
     { guild_id: 'g1', guild: '3D Print Pittsburgh', channel_id: 'c1', name: 'shop-floor', enabled: true },
     { guild_id: 'g1', guild: '3D Print Pittsburgh', channel_id: 'c2', name: 'general', enabled: true },
   ] },
-  // A connector with no places at all. It must contribute nothing and not fail the run.
+  // A connector that answers but has nothing: contributes nothing, reports why.
   '/instances/tg1/servers': { ok: true },
   '/instances/tg1/channels': { ok: true },
+  // em1 is absent from `routes` entirely, so the stub 404s both proxies, which is what the manager
+  // does for a connector type that declares no such endpoints (telegram, email, android).
 };
 let hits = [];
 const srv = http.createServer((req, res) => {
@@ -171,4 +173,22 @@ test('a missing or broken alias file is a reason, not a throw', () => {
   fs.writeFileSync(bad, '{not json');
   assert.equal(feed.importAliasFile(places, { file: bad }).ok, false);
   assert.equal(places.count(), 0);
+});
+
+test('a connector type with no places endpoint is dropped, not listed as an error', async () => {
+  wipe();
+  // Found running a refresh against the live manager: the telegram instance reported
+  // "manager said 404" simply for not serving /servers or /channels, turning an ordinary refresh
+  // into a page of noise. A type that cannot have places has nothing to report.
+  const r = await feed.refresh(places);
+  const ids = (r.instances || []).map((i) => i.instance_id);
+  assert.equal(ids.includes('em1'), false, 'the 404-on-both type is not in the report');
+  assert.equal(r.skipped, 1, 'but it is counted, so the number of instances still adds up');
+  assert.equal(r.ok, true);
+
+  // A connector that DOES serve the endpoint and simply has nothing is still reported, because that
+  // is a state worth seeing (an empty guild list can mean the bot was removed).
+  const tg = (r.instances || []).find((i) => i.instance_id === 'tg1');
+  assert.ok(tg, 'answered-but-empty is still listed');
+  assert.match(tg.error, /no places/);
 });
