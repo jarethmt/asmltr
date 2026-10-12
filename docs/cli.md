@@ -260,6 +260,9 @@ room. Naming the guild or passing the id breaks the tie.
 **Filling it.** `places refresh` asks each running connector what it can see, through the manager's
 existing `/instances/:id/servers` and `/instances/:id/channels` proxies. `places import` reads the
 alias file, including that unread `channels` block, so whatever you already typed there carries over.
+Which file it reads is server-side config (`ASMLTR_DISCORD_ALIASES_FILE`) and deliberately not a
+command-line or request argument: the core runs as you, so a caller-supplied path there is an
+arbitrary file read.
 Both are idempotent, and a refresh only overwrites the platform's own facts: a name changes, a note or
 a description you wrote does not.
 
