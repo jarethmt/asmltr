@@ -75,6 +75,22 @@ const fold = (s) => norm(s)
   .replace(/\s+/g, ' ')
   .trim();
 const KINDS = ['guild', 'channel', 'thread', 'chat', 'mailbox'];
+const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+const SURFACE_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;   // the event-stream vocabulary: discord, telegram, …
+
+/**
+ * Keys are validated, not cleaned. `clean()` repairs free text for display; doing that to an id
+ * would let "c1\u001b" and "c1 " collapse onto the same row, and a surface is a fixed vocabulary.
+ */
+function key(surface, scope_id, who) {
+  const s = norm(surface);
+  const id = String(scope_id == null ? '' : scope_id).trim();
+  if (!SURFACE_RE.test(s)) throw Object.assign(new Error(`places.${who}: surface must match ${SURFACE_RE}`), { code: 'BAD_REQUEST' });
+  if (!id) throw Object.assign(new Error(`places.${who}: scope_id required`), { code: 'BAD_REQUEST' });
+  if (CONTROL.test(id)) throw Object.assign(new Error(`places.${who}: scope_id contains control characters`), { code: 'BAD_REQUEST' });
+  if (id.length > 128) throw Object.assign(new Error(`places.${who}: scope_id is too long`), { code: 'BAD_REQUEST' });
+  return { surface: s, scope_id: id };
+}
 
 /**
  * Platform-sourced text, made safe to store and to print.
@@ -153,10 +169,7 @@ function hydrate(row) {
  * without erasing each other.
  */
 function upsert(a = {}) {
-  const surface = norm(a.surface);
-  const scope_id = String(a.scope_id == null ? '' : a.scope_id).trim();
-  if (!surface) throw Object.assign(new Error('places.upsert: surface required'), { code: 'BAD_REQUEST' });
-  if (!scope_id) throw Object.assign(new Error('places.upsert: scope_id required'), { code: 'BAD_REQUEST' });
+  const { surface, scope_id } = key(a.surface, a.scope_id, 'upsert');
   if (a.kind != null && !KINDS.includes(norm(a.kind))) {
     throw Object.assign(new Error(`places.upsert: kind must be one of ${KINDS.join(' | ')}`), { code: 'BAD_REQUEST' });
   }
@@ -185,20 +198,19 @@ function get(surface, scope_id) {
  * operator correcting a mistake expects.
  */
 function setLabel(a = {}) {
-  const surface = norm(a.surface);
-  const label = norm(a.label);
-  const scope_id = String(a.scope_id == null ? '' : a.scope_id).trim();
-  if (!surface || !label || !scope_id) {
-    throw Object.assign(new Error('places.setLabel: surface, scope_id and label required'), { code: 'BAD_REQUEST' });
-  }
+  const { surface, scope_id } = key(a.surface, a.scope_id, 'setLabel');
+  // Cleaned, then STORED cleaned. The first cut validated the cleaned form and stored the raw one,
+  // so a label could carry an ANSI escape into the DB and out through `asmltr places`.
+  const label = clean(norm(a.label), 64);
+  if (!label) throw Object.assign(new Error('places.setLabel: label required (and not only control characters)'), { code: 'BAD_REQUEST' });
   const kind = norm(a.kind) === 'role' ? 'role' : 'alias';
-  if (!clean(label, 64)) throw Object.assign(new Error('places.setLabel: label is empty after cleaning'), { code: 'BAD_REQUEST' });
   _setLabel.run({ surface, scope_id, label, kind, note: clean(a.note, 300), ts: now(), set_by: a.set_by == null ? null : clean(a.set_by, 64) });
   return hydrate(_get.get(surface, scope_id));
 }
 
 function unsetLabel(surface, label) {
-  return _delLabel.run(norm(surface), norm(label)).changes > 0;
+  // Cleaned the same way it was stored, or a label set through setLabel could not be removed.
+  return _delLabel.run(norm(surface), clean(norm(label), 64) || '').changes > 0;
 }
 
 function list(o = {}) {
@@ -235,7 +247,7 @@ function resolve(ref, surface) {
   const raw = String(ref == null ? '' : ref).trim();
   if (!raw) throw Object.assign(new Error('places.resolve: a reference is required'), { code: 'BAD_REQUEST' });
   const s = surface ? norm(surface) : null;
-  const key = norm(raw).replace(/^#/, '');
+  const lookup = clean(norm(raw), 64) || norm(raw);   // matches how setLabel stored it
   const lkey = fold(raw);
 
   // 1. an id
@@ -248,10 +260,10 @@ function resolve(ref, surface) {
 
   // 2. a label the operator chose
   if (s) {
-    const row = _byLabel.get(s, key) || _foldedLabel(s, lkey);
+    const row = _byLabel.get(s, lookup) || _foldedLabel(s, lkey);
     if (row) return { place: get(s, row.scope_id), matched_on: 'label' };
   } else {
-    let rows = _byLabelAny.all(key);
+    let rows = _byLabelAny.all(lookup);
     if (!rows.length) rows = _foldedLabelAny(lkey);
     if (rows.length === 1) return { place: get(rows[0].surface, rows[0].scope_id), matched_on: 'label' };
     if (rows.length > 1) throw ambiguous(raw, rows.map((r) => get(r.surface, r.scope_id)), 'that label is used on more than one surface');
@@ -303,4 +315,4 @@ function count() {
   try { return db.prepare('SELECT COUNT(*) AS n FROM places').get().n; } catch (_) { return 0; }
 }
 
-module.exports = { db, upsert, get, setLabel, unsetLabel, list, roles, resolve, remove, count, fold, clean, KINDS, TEXT_MAX, DB_PATH };
+module.exports = { db, upsert, get, setLabel, unsetLabel, list, roles, resolve, remove, count, fold, clean, KINDS, TEXT_MAX, SURFACE_RE, DB_PATH };

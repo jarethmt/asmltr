@@ -484,9 +484,17 @@ async function cmdPlaces(rest, f) {
     } catch (e) { return { status: 0, body: { error: e.message } }; }
   };
   const fail = (r) => console.log(A.red(r.body.error || `core said ${r.status}`));
+  // Everything printed here came from a platform or from another session, and an ANSI escape in a
+  // channel name or a label would reach the terminal: \u001b[2K erases the line it is printed on, so
+  // a listing could be made to hide a row. The store strips these on write; this is the sink guard
+  // for rows written before it did, or by anything that writes the DB directly.
+  const flat = (v, max = 120) => {
+    const out = String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return out.length > max ? out.slice(0, max) : out;
+  };
   const row = (p) => {
-    const tags = [p.kind, ...(p.roles || []).map((x) => 'role:' + x), ...(p.aliases || [])].filter(Boolean);
-    return `${pad(p.surface, 10)}${pad(p.scope_id, 22)}${A.bold(p.display || p.name || p.scope_id)}${tags.length ? A.dim('  [' + tags.join(' ') + ']') : ''}`;
+    const tags = [p.kind, ...(p.roles || []).map((x) => 'role:' + flat(x, 48)), ...(p.aliases || []).map((x) => flat(x, 48))].filter(Boolean);
+    return `${pad(flat(p.surface, 32), 10)}${pad(flat(p.scope_id, 64), 22)}${A.bold(flat(p.display || p.name || p.scope_id))}${tags.length ? A.dim('  [' + tags.join(' ') + ']') : ''}`;
   };
 
   if (sub === 'resolve') {
@@ -503,7 +511,7 @@ async function cmdPlaces(rest, f) {
     if (r.status !== 200) return fail(r);
     const p = r.body.place;
     console.log(row(p) + A.dim(`  (matched on ${r.body.matched_on})`));
-    if (p.topic) console.log(A.dim('  ' + p.topic));
+    if (p.topic) console.log(A.dim('  ' + flat(p.topic, 400)));
     return;
   }
 
@@ -513,8 +521,8 @@ async function cmdPlaces(rest, f) {
     const r = await hit('GET', `/v2/places/${encodeURIComponent(surface)}/${encodeURIComponent(id)}`);
     if (r.status !== 200) return fail(r);
     console.log(row(r.body));
-    if (r.body.topic) console.log(A.dim('  ' + r.body.topic));
-    if (r.body.notes && r.body.notes.length) for (const n of r.body.notes) console.log(A.dim('  note: ' + n));
+    if (r.body.topic) console.log(A.dim('  ' + flat(r.body.topic, 400)));
+    if (r.body.notes && r.body.notes.length) for (const n of r.body.notes) console.log(A.dim('  note: ' + flat(n, 300)));
     console.log(A.dim(`  source ${r.body.source || '?'}  ·  last seen ${r.body.last_seen ? ageOf(r.body.last_seen) + ' ago' : '?'}`));
     return;
   }
@@ -564,8 +572,8 @@ async function cmdPlaces(rest, f) {
     // Roles first: "what is the shift log" is the question this command exists to answer.
     console.log(A.bold('roles'));
     for (const x of roles) {
-      const where = x.parent_name ? `${x.parent_name}#${x.name || x.scope_id}` : (x.name || x.scope_id);
-      console.log(`  ${pad(x.label, 18)}${pad(x.surface, 10)}${pad(x.scope_id, 22)}${where}${x.note ? A.dim('  ' + x.note) : ''}`);
+      const where = x.parent_name ? `${flat(x.parent_name)}#${flat(x.name || x.scope_id)}` : flat(x.name || x.scope_id);
+      console.log(`  ${pad(flat(x.label, 48), 18)}${pad(flat(x.surface, 32), 10)}${pad(flat(x.scope_id, 64), 22)}${where}${x.note ? A.dim('  ' + flat(x.note)) : ''}`);
     }
     console.log('');
   }

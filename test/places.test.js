@@ -261,3 +261,33 @@ test('a note is cleaned too, and a label that cleans to nothing is refused', () 
   assert.throws(() => places.setLabel({ surface: 'discord', scope_id: 'c1', label: '\u0000\u001b ' }),
     (e) => e.code === 'BAD_REQUEST');
 });
+
+test('a label is STORED cleaned, not merely validated as cleanable', () => {
+  wipe();
+  // The first cut checked clean(label) was non-empty and then stored the raw string, so an ANSI
+  // escape survived into the DB and out through `asmltr places`, where \u001b[2K erases the line it
+  // is printed on and a listing can be made to hide a row.
+  places.upsert({ surface: 'discord', scope_id: 'c1', name: 'general' });
+  const p = places.setLabel({ surface: 'discord', scope_id: 'c1', label: 'shift\u001b[2Klog', kind: 'role' });
+  const stored = p.roles[0];
+  assert.equal(/[\u0000-\u001F\u007F-\u009F]/.test(stored), false, `escape survived: ${JSON.stringify(stored)}`);
+  // And it is still addressable under the form that was stored.
+  assert.equal(places.resolve('shift\u001b[2Klog', 'discord').place.scope_id, 'c1', 'the original input still resolves');
+  assert.equal(places.resolve(stored, 'discord').place.scope_id, 'c1', 'and so does the stored form');
+  assert.equal(places.unsetLabel('discord', 'shift\u001b[2Klog'), true, 'and it can be removed again');
+});
+
+test('a key is rejected, not repaired', () => {
+  wipe();
+  // Repairing an id would let two different inputs collapse onto one row. A surface is a fixed
+  // vocabulary and a scope_id is a platform identifier; neither legitimately holds a control char.
+  assert.throws(() => places.upsert({ surface: 'discord', scope_id: 'c\u001b1' }), (e) => e.code === 'BAD_REQUEST');
+  assert.throws(() => places.upsert({ surface: 'disc ord', scope_id: 'c1' }), (e) => e.code === 'BAD_REQUEST');
+  assert.throws(() => places.upsert({ surface: 'DISCORD\u0000', scope_id: 'c1' }), (e) => e.code === 'BAD_REQUEST');
+  assert.throws(() => places.upsert({ surface: 'discord', scope_id: 'x'.repeat(200) }), (e) => e.code === 'BAD_REQUEST');
+  assert.throws(() => places.setLabel({ surface: 'discord', scope_id: 'c\u001b1', label: 'x' }), (e) => e.code === 'BAD_REQUEST');
+  // Surfaces that are actually used still pass.
+  for (const sfc of ['discord', 'telegram', 'email', 'assistant-web', 'claude-code']) {
+    assert.ok(places.upsert({ surface: sfc, scope_id: 'k1', name: 'n' }), sfc);
+  }
+});
