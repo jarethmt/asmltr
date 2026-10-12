@@ -65,7 +65,13 @@ function mountPlaceRoutes(app, deps = {}) {
   });
   app.post('/v2/places/import', (req, res) => {
     const b = req.body || {};
-    const r = feed.importAliasFile(places, { file: b.file, surface: b.surface });
+    // No `file` from the request. The path is server-side config only (ASMLTR_DISCORD_ALIASES_FILE),
+    // because accepting one here is an arbitrary file read: the core runs as the user, so any caller
+    // that can reach this port could name ~/.ssh/id_ed25519 or a vault token file. It does not even
+    // need the file to parse, since JSON.parse echoes the first ~10 bytes of whatever it was given
+    // ("Unexpected token 's', \"ssh-ed2551\"... is not valid JSON"), which makes the error message a
+    // read oracle one request at a time. Flagged by the security review; verified by running it.
+    const r = feed.importAliasFile(places, { surface: b.surface });
     record({ surface: 'core', session_id: null, event_type: 'control', identity: String(b.by || 'operator'), source: 'core',
       payload: { action: 'place-import', file: r.file, aliases: r.aliases, channels: r.channels } });
     res.json(r);

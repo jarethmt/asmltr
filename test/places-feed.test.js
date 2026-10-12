@@ -192,3 +192,17 @@ test('a connector type with no places endpoint is dropped, not listed as an erro
   assert.ok(tg, 'answered-but-empty is still listed');
   assert.match(tg.error, /no places/);
 });
+
+test('a parse failure never echoes what was read', () => {
+  wipe();
+  // JSON.parse quotes the first ~10 bytes of its input, so returning e.message made the import a
+  // read oracle: one request per 10 bytes of any file the core user can open.
+  const secret = path.join(TMP, 'not-json.txt');
+  fs.writeFileSync(secret, 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5SECRET gianni@thor');
+  const r = feed.importAliasFile(places, { file: secret });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not valid JSON/);
+  assert.equal(/ssh-ed25519|AAAAC3|SECRET/.test(r.error), false, `error leaked content: ${r.error}`);
+  // And the two failure modes stay distinguishable, which is what the caller actually needs.
+  assert.match(feed.importAliasFile(places, { file: path.join(TMP, 'absent.json') }).error, /no alias file/);
+});

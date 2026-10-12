@@ -138,7 +138,13 @@ function importAliasFile(store, o = {}) {
   let raw;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (e) {
-    return { ok: false, file, aliases: 0, channels: 0, error: e.code === 'ENOENT' ? `no alias file at ${file}` : e.message };
+    // Never the parser's message: JSON.parse quotes the first ~10 bytes of its input, so echoing it
+    // turns any read failure into a disclosure of whatever was read. The caller needs to know WHICH
+    // of the two things went wrong, and nothing about the contents.
+    const why = e.code === 'ENOENT' ? `no alias file at ${file}`
+      : e.code === 'EACCES' ? `alias file is not readable (${file})`
+      : `alias file is not valid JSON (${file})`;
+    return { ok: false, file, aliases: 0, channels: 0, error: why };
   }
   const out = { ok: true, file, aliases: 0, channels: 0, error: null };
 

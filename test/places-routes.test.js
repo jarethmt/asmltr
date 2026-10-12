@@ -122,3 +122,30 @@ test('DELETE removes a label and a place, and 404s when there is nothing to remo
   assert.equal((await del('/v2/places/discord/c1')).status, 404);
   assert.equal((await get('/v2/places')).body.count, 0);
 });
+
+test('the import route ignores a caller-supplied file path', async () => {
+  // Flagged by the security review and verified: the core runs as the user, so a path from the body
+  // reads anything it can read. JSON.parse also quotes the first ~10 bytes of its input, so even a
+  // failed parse would leak ("Unexpected token 's', \"ssh-ed2551\"... is not valid JSON"). The path
+  // is server-side config only (ASMLTR_DISCORD_ALIASES_FILE).
+  wipe();
+  const seen = [];
+  const app2 = express();
+  app2.use(express.json());
+  mountPlaceRoutes(app2, {
+    places,
+    record: () => {},
+    feed: { importAliasFile: (store, o = {}) => { seen.push(o); return { ok: true, file: 'server-side', aliases: 0, channels: 0 }; } },
+  });
+  const s2 = app2.listen(0);
+  try {
+    const r = await fetch(`http://127.0.0.1:${s2.address().port}/v2/places/import`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: '/home/gianni/.ssh/id_ed25519', surface: 'discord' }),
+    });
+    assert.equal(r.status, 200);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].file, undefined, 'the path from the body must never reach the reader');
+    assert.equal(seen[0].surface, 'discord', 'but surface still does');
+  } finally { s2.close(); }
+});

@@ -464,7 +464,6 @@ async function cmdPlaces(rest, f) {
     else if (t === '--role') o.asRole = true;
     else if (t === '--note') o.note = args[++i];
     else if (t === '--instance') o.instance_id = args[++i];
-    else if (t === '--file') o.file = args[++i];
     else words.push(t);
   }
   // The CLI has no shared query helper; URLSearchParams is the idiom it already uses elsewhere.
@@ -549,7 +548,9 @@ async function cmdPlaces(rest, f) {
   }
 
   if (sub === 'import') {
-    const r = await hit('POST', '/v2/places/import', { file: o.file, surface: o.surface, by: 'cli' });
+    // No --file: the path is server-side config (ASMLTR_DISCORD_ALIASES_FILE), because the route
+    // cannot accept a caller-supplied path without becoming an arbitrary file read.
+    const r = await hit('POST', '/v2/places/import', { surface: o.surface, by: 'cli' });
     if (r.status !== 200) return fail(r);
     if (!r.body.ok) return console.log(A.red(r.body.error));
     console.log(`imported ${r.body.channels} described channel(s) and ${r.body.aliases} alias(es)` + A.dim(`\n  from ${r.body.file}`));
