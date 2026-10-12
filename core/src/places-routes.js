@@ -48,7 +48,7 @@ function mountPlaceRoutes(app, deps = {}) {
       const r = places.resolve(req.query.ref, req.query.surface || null);
       res.json({ ok: true, ...r });
     } catch (e) {
-      const code = { BAD_REQUEST: 400, NOT_FOUND: 404, AMBIGUOUS: 409 }[e.code] || 500;
+      const code = CODES[e.code] || 500;
       res.status(code).json({ ok: false, error: e.message, code: e.code || null, candidates: e.candidates || undefined });
     }
   });

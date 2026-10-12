@@ -125,3 +125,16 @@ test('an absent places part leaves the prompt byte-identical to before', () => {
   assert.equal(without.full, withEmpty.full);
   assert.equal(without.stableHash, withEmpty.stableHash);
 });
+
+test('when roles fill the cap, the withheld count still has a heading', () => {
+  // Otherwise "• …and 18 more" dangles after the role list with nothing saying what it counted.
+  const roleRows = Array.from({ length: 3 }, (_, i) => ({ surface: 'discord', scope_id: 'r' + i, label: 'role' + i, name: 'chan' + i, parent_name: 'Shop' }));
+  const rows = Array.from({ length: 18 }, (_, i) => place('discord', 'c' + i, 'chan-' + i, 'Shop'));
+  withEnv({ ASMLTR_PLACES_PROMPT_MAX: '3' }, () => {
+    const b = buildPlacesBlock(store(rows, roleRows));
+    assert.match(b, /Roles \(what a place is for\)/);
+    assert.equal((b.match(/discord c\d+ =/g) || []).length, 0, 'no room left for named places');
+    assert.match(b, /Known places: none listed here/);
+    assert.match(b, /and 18 more/);
+  });
+});

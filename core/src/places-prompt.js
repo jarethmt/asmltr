@@ -69,7 +69,12 @@ function buildPlacesBlock(store, o = {}) {
     }
   }
   const hidden = ordered.length - shown.length;
-  if (hidden > 0) lines.push(`• …and ${hidden} more (run \`asmltr places\` for the full directory)`);
+  // Only under a heading. When roles alone fill the cap, `shown` is empty and a bare "…and N more"
+  // would dangle after the role list with nothing saying what it counted.
+  if (hidden > 0) {
+    if (!shown.length) lines.push('\nKnown places: none listed here (the cap is spent on roles).');
+    lines.push(`• …and ${hidden} more (run \`asmltr places\` for the full directory)`);
+  }
 
   if (!lines.length) return '';
   return 'PLACES — the servers, channels and chats asmltr knows, by id:\n' + lines.join('\n') +
