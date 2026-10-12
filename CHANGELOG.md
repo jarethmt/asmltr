@@ -10,6 +10,24 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **A directory of where: `asmltr places`.** asmltr keyed people (`identifiers (surface, value)` in
+  the trust store) and stored nothing about the places it talks to, while already using
+  `(surface, scope_id)` to scope a grant. So "which channel is the shift log" had no answer anywhere
+  in asmltr: `channel-aliases.json` maps an alias to an id, is read once at connector start, lives
+  inside the connector process where core, the CLI and a turn cannot reach it, and the `channels`
+  block its own `.example` documents (`{ server, channel, description }` per id) has never been read
+  by any code. The knowledge ended up in one agent's private notes, invisible to the send path and to
+  every other session, going stale silently. New `places` and `place_labels` tables in the core DB
+  (following `streams.js`/`drafts.js`: `coreDbPath()`, own handle, own `CREATE TABLE IF NOT EXISTS`),
+  `/v2/places` routes, and `asmltr places [list|get|resolve|set|unset|refresh|import]`. A **role**
+  names what a place is for and outlives a platform rename, because labels are a separate table from
+  the names a refresh overwrites. `resolve` goes id, then alias or role, then exact name, then loose,
+  and refuses a tie with the candidates rather than picking. `places refresh` fills it from live
+  connectors through the manager's existing `/instances/:id/{servers,channels}` proxies;
+  `places import` reads the alias file including that unread block. A compact roles-first version
+  rides the STABLE part of the system prompt, bounded by `ASMLTR_PLACES_PROMPT_MAX` (default 40) and
+  switchable off with `ASMLTR_PLACES_IN_PROMPT=off`.
+
 - **The Android notification reader no longer talks over you** (mobile app 0.9.0). It asks whether the
   ear is actually free before reading a synopsis: a live call (cellular or VoIP), Do Not Disturb, a
   navigation prompt, an alarm or another assistant all mean "not now". Music and podcasts are the

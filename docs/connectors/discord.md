@@ -161,6 +161,19 @@ TUI/dashboard can drive any connector uniformly. Changes take effect immediately
 
 ---
 
+## The alias file, and the directory that replaces hand-editing it
+
+`channel-aliases.json` still works exactly as before: `.aliases` maps a friendly name to a channel id
+for the outbound `target`, read once when the instance starts. Two things worth knowing:
+
+- Its `.example` also documents a `channels` block (`{ server, channel, description }` per id). The
+  connector has never read that block. `asmltr places import` does, so anything written there becomes
+  queryable instead of decorative.
+- `asmltr places refresh` populates names and parents from the live gateway, so the directory stays
+  current without editing a file or restarting the instance. See [the CLI reference](../cli.md).
+
+---
+
 ## Multi-agent group chats
 
 Several agents can share a channel. Key knobs:
