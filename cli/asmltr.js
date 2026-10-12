@@ -443,6 +443,139 @@ async function cmdSteer(rest) {
   console.log(A.grn(`↪ steered ${key}${interrupt ? ' (interrupted its turn)' : ''}`));
   if (r.reply) console.log(A.dim('  its reply: ') + String(r.reply).replace(/\s+/g, ' ').slice(0, 200));
 }
+async function cmdPlaces(rest, f) {
+  // asmltr places [list] [-q X] [--surface S] [--kind K] [--role R]
+  //             | get <surface> <id> | resolve <ref> [--surface S]
+  //             | set <surface> <id> <label> [--role] [--note "…"] | unset <surface> <label>
+  //             | refresh [--instance ID] [--surface S] | import [--file PATH]
+  // The directory of WHERE (core/src/places.js): what asmltr can talk to, by id, with the roles and
+  // aliases a human gave it. Talks to the core over HTTP like every other asmltr subcommand.
+  const subs = ['list', 'get', 'resolve', 'set', 'unset', 'refresh', 'import'];
+  const sub = subs.includes(rest[0]) ? rest[0] : 'list';
+  const args = subs.includes(rest[0]) ? rest.slice(1) : rest;
+  const words = [];
+  const o = {};
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (t === '-q' || t === '--query') o.q = args[++i];
+    else if (t === '--surface') o.surface = args[++i];
+    else if (t === '--kind') o.kind = args[++i];
+    else if (t === '--role' && (sub === 'list')) o.role = args[++i];
+    else if (t === '--role') o.asRole = true;
+    else if (t === '--note') o.note = args[++i];
+    else if (t === '--instance') o.instance_id = args[++i];
+    else if (t === '--file') o.file = args[++i];
+    else words.push(t);
+  }
+  // The CLI has no shared query helper; URLSearchParams is the idiom it already uses elsewhere.
+  // Empty values are dropped so `?surface=` never reaches the route as a filter for "".
+  const qs = (o2) => {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(o2 || {})) if (v != null && v !== '') sp.set(k, String(v));
+    const t = sp.toString();
+    return t ? '?' + t : '';
+  };
+  const url = (p) => CORE_BASE + p;
+  const hit = async (method, p, body) => {
+    const init = { method, headers: { Accept: 'application/json' } };
+    if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
+    try {
+      const r = await fetch(url(p), init);
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    } catch (e) { return { status: 0, body: { error: e.message } }; }
+  };
+  const fail = (r) => console.log(A.red(r.body.error || `core said ${r.status}`));
+  const row = (p) => {
+    const tags = [p.kind, ...(p.roles || []).map((x) => 'role:' + x), ...(p.aliases || [])].filter(Boolean);
+    return `${pad(p.surface, 10)}${pad(p.scope_id, 22)}${A.bold(p.display || p.name || p.scope_id)}${tags.length ? A.dim('  [' + tags.join(' ') + ']') : ''}`;
+  };
+
+  if (sub === 'resolve') {
+    const ref = words.join(' ');
+    if (!ref) throw new Error('usage: asmltr places resolve "<id|alias|role|name>" [--surface S]');
+    const r = await hit('GET', `/v2/places/resolve${qs({ ref, surface: o.surface })}`);
+    if (r.status === 409) {
+      // Ambiguity is the answer, not an error to swallow: print the candidates so the next command
+      // can name one.
+      console.log(A.red(r.body.error));
+      for (const c of r.body.candidates || []) console.log(`  ${pad(c.surface, 10)}${pad(c.scope_id, 22)}${c.display}`);
+      return;
+    }
+    if (r.status !== 200) return fail(r);
+    const p = r.body.place;
+    console.log(row(p) + A.dim(`  (matched on ${r.body.matched_on})`));
+    if (p.topic) console.log(A.dim('  ' + p.topic));
+    return;
+  }
+
+  if (sub === 'get') {
+    const [surface, id] = [o.surface || words[0], words[o.surface ? 0 : 1]];
+    if (!surface || !id) throw new Error('usage: asmltr places get <surface> <id>');
+    const r = await hit('GET', `/v2/places/${encodeURIComponent(surface)}/${encodeURIComponent(id)}`);
+    if (r.status !== 200) return fail(r);
+    console.log(row(r.body));
+    if (r.body.topic) console.log(A.dim('  ' + r.body.topic));
+    if (r.body.notes && r.body.notes.length) for (const n of r.body.notes) console.log(A.dim('  note: ' + n));
+    console.log(A.dim(`  source ${r.body.source || '?'}  ·  last seen ${r.body.last_seen ? ageOf(r.body.last_seen) + ' ago' : '?'}`));
+    return;
+  }
+
+  if (sub === 'set') {
+    const [surface, id, label] = words;
+    if (!surface || !id || !label) throw new Error('usage: asmltr places set <surface> <id> <label> [--role] [--note "…"]');
+    const r = await hit('POST', '/v2/places/label', { surface, scope_id: id, label, kind: o.asRole ? 'role' : 'alias', note: o.note, by: 'cli' });
+    if (r.status !== 200) return fail(r);
+    console.log(`${o.asRole ? 'role' : 'alias'} ${A.bold(label)} → ${row(r.body.place).trim()}`);
+    return;
+  }
+
+  if (sub === 'unset') {
+    const [surface, label] = words;
+    if (!surface || !label) throw new Error('usage: asmltr places unset <surface> <label>');
+    const r = await hit('DELETE', `/v2/places/${encodeURIComponent(surface)}/label/${encodeURIComponent(label)}`);
+    return r.status === 200 ? console.log(`removed ${label}`) : fail(r);
+  }
+
+  if (sub === 'refresh') {
+    const r = await hit('POST', '/v2/places/refresh', { instance_id: o.instance_id, surface: o.surface, by: 'cli' });
+    if (r.status !== 200) return fail(r);
+    for (const i of r.body.instances || []) {
+      const what = `${i.guilds} server(s), ${i.channels} channel(s)`;
+      console.log(`${pad(i.instance_id, 14)}${pad(i.surface, 10)}${i.error ? A.dim(what + '  ' + i.error) : what}`);
+    }
+    console.log(A.dim(`\n  ${r.body.guilds || 0} server(s) and ${r.body.channels || 0} channel(s) recorded`));
+    if (!r.body.ok) console.log(A.dim('  nothing was reachable; is the connector manager running?'));
+    return;
+  }
+
+  if (sub === 'import') {
+    const r = await hit('POST', '/v2/places/import', { file: o.file, surface: o.surface, by: 'cli' });
+    if (r.status !== 200) return fail(r);
+    if (!r.body.ok) return console.log(A.red(r.body.error));
+    console.log(`imported ${r.body.channels} described channel(s) and ${r.body.aliases} alias(es)` + A.dim(`\n  from ${r.body.file}`));
+    return;
+  }
+
+  const r = await hit('GET', `/v2/places${qs({ surface: o.surface, kind: o.kind, role: o.role, q: o.q || words[0] })}`);
+  if (r.status !== 200) return fail(r);
+  const roles = r.body.roles || [];
+  if (roles.length) {
+    // Roles first: "what is the shift log" is the question this command exists to answer.
+    console.log(A.bold('roles'));
+    for (const x of roles) {
+      const where = x.parent_name ? `${x.parent_name}#${x.name || x.scope_id}` : (x.name || x.scope_id);
+      console.log(`  ${pad(x.label, 18)}${pad(x.surface, 10)}${pad(x.scope_id, 22)}${where}${x.note ? A.dim('  ' + x.note) : ''}`);
+    }
+    console.log('');
+  }
+  if (!(r.body.places || []).length) {
+    return console.log(A.dim('no places recorded — run `asmltr places refresh` (live connectors) or `asmltr places import` (channel-aliases.json)'));
+  }
+  console.log(A.bold(pad('SURFACE', 10) + pad('ID', 22) + 'NAME'));
+  for (const p of r.body.places) console.log(row(p));
+  console.log(A.dim(`\n  ${r.body.places.length} of ${r.body.count} place(s)`));
+}
+
 async function cmdMail(rest) {
   // asmltr mail [list] [-n N] [--unseen] | read <uid> [--seen] | search "<query>" [-n N]
   const sub = rest[0] === 'read' || rest[0] === 'search' || rest[0] === 'list' ? rest[0] : 'list';
@@ -579,6 +712,10 @@ function cmdHelp() {
        drafts show <id> · send <id> · discard <id>
   asmltr mail [list]                   browse the mailbox (-n N, --unseen)
        mail read <uid> [--seen] · mail search "<q>"
+  asmltr places [list]                 the servers/channels/chats asmltr knows (-q X, --surface S)
+       places resolve "<name|role>"    one place, by id, alias, role or loose name
+       places set <surface> <id> <label> [--role] [--note "…"]
+       places refresh · places import   fill it from live connectors / channel-aliases.json
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -990,6 +1127,7 @@ async function cmdVault(rest, f) {
       case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
+      case 'places': return await cmdPlaces(rest, f);
       case 'steer': return await cmdSteer(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
