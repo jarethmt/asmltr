@@ -1,9 +1,15 @@
 # asmltr Pangolin Backbone — Design
 
-The self-hosted mesh that connects an asmltr instance to all its devices, replacing the Tailscale
-dependency. Ships with core; the asmltr Portal (`../../asmltr-portal/`) provisions devices onto it.
+asmltr's **networking plane**: a self-hosted layer that both (a) connects an instance to all its
+devices (private WireGuard mesh — agent reaches any enrolled machine) and (b) **publicly exposes
+services with TLS/routing** (reverse proxy). Pangolin does both, so **asmltr core ships no Traefik of
+its own** — Pangolin *is* the ingress. The asmltr Portal (`../../asmltr-portal/`) provisions devices onto it.
 
-Status: design (2026-10-19). Not yet deployed — asmltr currently rides Tailscale.
+Status: design (2026-10-19). Not yet deployed — asmltr currently rides Tailscale + a BYO reverse proxy.
+
+> **Scope note:** this doc is the *core, shippable* feature. The one-time migration of a specific
+> existing install's services off a legacy reverse proxy onto Pangolin is **per-install infra, kept OUT
+> of this repo** (ours lives privately under `/root/infrastructure/asmltr-pangolin-migration/`).
 
 ---
 
@@ -153,3 +159,34 @@ Add a **Network / Mesh** view to the Vue dashboard (`insights/dashboard`, alongs
   the Portal), `core/` endpoints for enrollment + status, `insights/dashboard/src/views/Mesh.vue` + route,
   `docs/PANGOLIN-BACKBONE-DESIGN.md` (this), config in `.env.example`/`reconcile-env.js`. All in the main
   asmltr repo — a shipped capability, versioned with core.
+
+---
+
+## 10. Networking plane — supersedes BYO reverse proxy (core, repo)
+
+**Decision (2026-10-19):** Pangolin is asmltr's single networking plane. asmltr core **drops the
+BYO-reverse-proxy assumption** — it no longer expects or ships a separate Traefik; Pangolin's own
+ingress handles public exposure, TLS, and per-service routing, and the **auth gate** (asmltr
+OIDC/forward-auth, §9.3) sits in front of exposed resources.
+
+### 10.1 What this replaces
+- **Before:** services bound to localhost; the operator brought their own Traefik/nginx/Caddy and wired
+  TLS + the auth gate themselves (see `docs/deployment/dashboard.md`). No "expose my service" primitive.
+- **After:** asmltr can stand up a service and **expose it through Pangolin** (public hostname + TLS +
+  auth) with no external proxy — and reach any device over the same plane's mesh.
+
+### 10.2 Robustness — a plane that peers, not an exclusive takeover
+The plane must coexist, so an install is never boxed in:
+- **Tailscale may run beside it.** Enabling Pangolin does not disable or conflict with an existing
+  Tailscale tailnet; both can be up. Migration off Tailscale is opt-in and gradual, never forced.
+- **Join other Pangolin networks.** An instance can be a client/site of *another* org's Pangolin (as we
+  hook devices into 3DPGH's today) while also running its own — the cross-join federation model (§6).
+- **Pluggable backbone** stays true: code targets a `backbone` interface; Pangolin is primary, Tailscale
+  a still-valid option, and multiple can be active at once.
+
+### 10.3 Ingress ownership on an existing host
+On a box that already runs a legacy reverse proxy (the common real-world case), Pangolin becomes the
+ingress by **staged migration**, not a flag flip: deploy Pangolin's mesh first (no 80/443 contention),
+move services onto Pangolin's ingress one at a time, then cut 80/443 over and retire the old proxy.
+The *mechanism* (Pangolin as ingress) is core; the *cutover of a given install's services* is private
+per-install work (scope note at top). Fresh installs skip all this — Pangolin is the ingress from day one.
