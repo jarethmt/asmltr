@@ -112,7 +112,7 @@ This is a first-class asmltr feature in the main repo, wired into the existing s
 ### 9.1 Install / update / wizard
 - New **`setup.d/050-pangolin.*`** step: detects reachability (see §9.2), and — if the user opts in —
   deploys the Pangolin control plane (Docker: pangolin + gerbil + traefik), creates the `asmltr` org,
-  stores the admin API key in the TRUST vault / BWS, and registers Pangolin behind asmltr auth (§9.3).
+  auto-provisions the local Pangolin admin + stores all Pangolin creds in the asmltr TRUST vault, and registers Pangolin behind asmltr auth (§9.3).
   Idempotent: re-running (the **updater**) detects an existing/absent Pangolin and **offers to stand it
   up** for installs that predate the feature — exactly the "update handles it" requirement.
 - The step is **opt-in and flag-gated** (consistent with `ASMLTR_AUTH`'s additive philosophy): a install
@@ -190,3 +190,15 @@ ingress by **staged migration**, not a flag flip: deploy Pangolin's mesh first (
 move services onto Pangolin's ingress one at a time, then cut 80/443 over and retire the old proxy.
 The *mechanism* (Pangolin as ingress) is core; the *cutover of a given install's services* is private
 per-install work (scope note at top). Fresh installs skip all this — Pangolin is the ingress from day one.
+
+### 10.4 Credential provisioning (core — vault-native, no human input)
+The setup.d step provisions and stores all Pangolin credentials itself; the operator never types or sees them:
+- **Local break-glass admin:** created automatically as **`admin@${ASMLTR_DOMAIN}`** with a **random**
+  password. (Needed for bootstrap + lockout recovery; day-to-day admin is the operator's asmltr identity
+  via OIDC — promote the OIDC user to server admin after first SSO login.)
+- **OIDC client** (asmltr↔Pangolin) client_id/secret and the admin creds are stored in the **asmltr TRUST
+  vault** (`shared/vault` → the TRUST Protocol broker), **never in BWS or plaintext env** (BWS was
+  pre-asmltr-migration scaffolding). Keys: `pangolin_<instance>_admin_email/_password`,
+  `pangolin_<instance>_oidc_client_id/_secret`.
+- Retrieval is the vault's SACRED-agent proxy-value flow (`vault.getSecret(name)`); storage is
+  `vault.storeSecret(name,{value},{minTrust:'SACRED'})`.
