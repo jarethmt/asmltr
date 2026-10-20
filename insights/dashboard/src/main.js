@@ -15,6 +15,7 @@ app.component('FontAwesomeIcon', FontAwesomeIcon)
 app.component('AppIcon', AppIcon)
 app.mount('#app')
 
+
 // PWA: register the service worker so the dashboard is installable (and can receive push /
 // show notifications). Served from public/sw.js; failures are non-fatal (e.g. plain http dev).
 if ('serviceWorker' in navigator) {

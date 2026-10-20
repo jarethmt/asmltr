@@ -7,39 +7,22 @@
 // v1 is the DISCOVERY milestone: scan → connect → read the dongle's identity (INFO) → register it as
 // a device with a BLE transport. LOAD/RUN/module-management are deliberately left as "coming soon"
 // placeholders — this ships discovery + register, nothing more.
-import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { BleClient } from '@capacitor-community/bluetooth-le'
 import { Capacitor } from '@capacitor/core'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
 import { devices } from '@/services/api'
 
-// Are we running inside the asmltr app (native webview) vs a desktop browser? When in-app,
-// BleClient routes scan/connect to the app's NATIVE Bluetooth bridge (the Capacitor plugin in the
-// APK) — no Web Bluetooth, so no Chrome/Edge requirement. In a browser it uses Web Bluetooth.
 const inApp = Capacitor.isNativePlatform()
 const bleModeLabel = inApp ? 'asmltr app · native Bluetooth' : 'browser · Web Bluetooth (Chrome/Edge)'
 
-// In the asmltr app the dashboard is a REMOTE page, where Capacitor plugins don't bridge — so BLE goes
-// through the app's own native bridge (window.AsmltrNative, the addJavascriptInterface that already powers
-// everything else here). On desktop AN is absent and we use Web Bluetooth via BleClient.
+// In the asmltr app the dashboard is a REMOTELY-loaded page, where Capacitor plugins don't bridge — so
+// in-app BLE goes through the app's own native bridge (window.AsmltrNative, the addJavascriptInterface
+// that powers everything else here: scan/connect/read). On desktop AN is absent and we use Web
+// Bluetooth via BleClient (Chrome/Edge only).
 const AN = (typeof window !== 'undefined' && window.AsmltrNative && typeof window.AsmltrNative.bleStartScan === 'function') ? window.AsmltrNative : null
 let blePoll = null
-
-// TEMP diagnostic: show the live Capacitor bridge state so we can see whether the native plugin
-// bridge reaches this (remotely-loaded) page and whether BluetoothLe is registered.
-const DIAG_BUILD = 'd2'  // bump to prove fresh JS reached the device (defeats a stale webview cache)
-const bridgeInfo = ref('(checking…)')
-onMounted(() => {
-  try {
-    const C = window.Capacitor
-    const headers = C && Array.isArray(C.PluginHeaders) ? C.PluginHeaders.map((h) => h.name) : null
-    bridgeInfo.value = '[' + DIAG_BUILD + '] platform=' + (C && C.getPlatform ? C.getPlatform() : 'none')
-      + ' · nativeHeaders=' + (headers ? '[' + headers.join(',') + ']' : 'MISSING')
-      + ' · http=' + (C && C.isPluginAvailable ? C.isPluginAvailable('CapacitorHttp') : 'n/a')
-      + ' · ble=' + (C && C.isPluginAvailable ? C.isPluginAvailable('BluetoothLe') : 'n/a')
-  } catch (e) { bridgeInfo.value = 'err: ' + (e && e.message) }
-})
 
 // --- The Portal dongle's GATT (exact — do not change) -------------------------------------------
 const NAME_PREFIX = 'asmltr-portal-'
@@ -320,7 +303,6 @@ onBeforeUnmount(async () => { await stopScan(); await disconnect() })
     </div>
 
     <!-- TEMP diagnostic (remove after we resolve the in-app BLE bridge) -->
-    <p class="mb-3 break-all rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 font-mono text-[11px] text-amber-200">bridge: {{ bridgeInfo }}</p>
 
     <p v-if="inApp" class="mb-3 text-[12px] leading-relaxed text-slate-500">
       Running inside the asmltr app — scanning over the device's <span class="text-slate-300">native Bluetooth</span>.
