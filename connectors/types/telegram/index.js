@@ -18,9 +18,9 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
+const { parseCommand, buildCommandMenu } = require('../../../shared/commands'); // in-chat slash commands
 const { isImage } = require('../../../shared/mimeguess');
 const { MediaGroupCoalescer } = require('./media-group'); // batch album photos into one turn
-const { parseCommand, buildCommandMenu } = require('../../../shared/commands'); // in-chat slash commands
 
 const meta = {
   type: 'telegram',
