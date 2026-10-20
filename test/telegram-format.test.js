@@ -167,3 +167,30 @@ test('escapeHtml is exported and minimal', () => {
 test('htmlToPlain strips tags and unescapes entities for the per-chunk fallback', () => {
   assert.equal(htmlToPlain('<b>a</b> &lt;x&gt; &amp; <code>y</code>'), 'a <x> & y');
 });
+
+test('a NUL in the input cannot forge a fence or code sentinel', () => {
+  // FENCE/ICODE mark extracted spans with \x00. The module's own comment said null bytes "don't
+  // occur in normal chat text", which is a statement about the common case and not an invariant the
+  // renderer can rely on: the model, or a quoted message, can emit one. Input NULs are dropped
+  // before any sentinel is inserted, so a forged marker cannot come back out as someone else's code
+  // span or survive into the sent message.
+  const forged = 'before \u0000C0\u0000 after';
+  const html = renderToHtml(forged);
+  assert.equal(html.includes('\u0000'), false, 'no sentinel survives into the output');
+  assert.match(html, /before C0 after/);
+
+  // The real thing still round-trips beside the forgery.
+  const mixed = 'say `code` and \u0000F0\u0000 too';
+  const out = renderToHtml(mixed);
+  assert.equal(out.includes('\u0000'), false);
+  assert.match(out, /<code>code<\/code>/);
+});
+
+test('the source carries no raw NUL bytes, so the file stays diffable and mergeable', () => {
+  // Eight raw NULs made the file read as binary: the diff said "Binary files differ", a reviewer
+  // saw no change at all, and no textual three-way resolution was possible either, which turns any
+  // concurrent edit to a file in shared/ into a conflict nothing can resolve. The sentinels are
+  // written as the \x00 escape instead, which compiles to the same values.
+  const src = require('fs').readFileSync(require.resolve('../shared/telegram-format.js'));
+  assert.equal(src.includes(0x00), false, 'a raw NUL in the source makes the file binary');
+});
