@@ -19,6 +19,7 @@ const path = require('path');
 const express = require('express');
 const { Client, GatewayIntentBits, Partials, ActivityType, AttachmentBuilder, Status } = require('discord.js');
 // THE shared asmltr speech layer — same TTS/STT used by the dashboard + core /v2/speak (DRY).
+const discordRead = require('./read');                                // guilds/channels/history/search (#164)
 const sharedTts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const sharedStt = require('../../../shared/speech/stt');
@@ -64,6 +65,10 @@ const meta = {
   // How the Access page presents identifiers for this surface (trust framework).
   identifierFormats: [{ surface: 'discord', label: 'Discord User ID', placeholder: '000000000000000000', pattern: '^\\d+$' }],
   outbound: { kinds: ['text', 'photo', 'file'], target: { required: true, label: 'Channel id or alias (e.g. TD-TSD-main)' } },
+  // Browsable on demand, the same contract the mailbox uses (manager POST /read -> this /read).
+  // Without this line readSource() answers "type 'discord' is not readable" and nothing outside the
+  // connector can ask what channels or messages exist (#164).
+  readable: { ops: discordRead.OPS },
   // Per-unit monitoring on/off: the assistant sits in many Discord channels and decides when to
   // chime in; each can be individually muted via the connector's /channels endpoint (no restart).
   // The dashboard reads this to know a session is mutable (matching a channel_id in the roster).
@@ -1102,6 +1107,19 @@ RESPONSE RULES:
       res.json({ ok: true, messageId: m.id, conversation_key });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
+  // --- read ops: the manager's POST /read proxies here (op = guilds | channels | history | search).
+  // The ops live in ./read.js against injected deps, so they are testable without a live gateway;
+  // this handler is only the transport plus the error-code mapping.
+  app.post('/read', async (req, res) => {
+    const codes = { BAD_REQUEST: 400, NOT_FOUND: 404, AMBIGUOUS: 409, FORBIDDEN: 403 };
+    try {
+      const result = await discordRead.handleRead({ client, channelEnabled, resolveChannel, emit: ctx.emit, log: ctx.log }, req.body || {});
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      res.status(codes[e.code] || 500).json({ ok: false, error: e.message, code: e.code || null });
+    }
+  });
+
   // --- channel enable/disable control (TUI/GUI drive this) -------------------------------
   // GET → every text channel the bot can see, with its effective enabled state.
   app.get('/channels', (req, res) => {

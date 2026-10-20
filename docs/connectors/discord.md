@@ -161,6 +161,96 @@ TUI/dashboard can drive any connector uniformly. Changes take effect immediately
 
 ---
 
+## Reading Discord: servers, channels, history, search
+
+The enable/disable endpoints above are the control plane. Asking Discord a question goes through the
+same `/read` contract the mailbox uses, so the CLI and the agent share one transport:
+
+```
+asmltr discord guilds                       # servers the bot is in
+asmltr discord channels -q shop             # channels whose name contains "shop"
+asmltr discord channels --type voice        # text,announcement,thread,voice,forum,stage,media
+asmltr discord history shop-floor -n 100    # by name, by alias, or by channel id
+asmltr discord read shop-floor -n 100       # `read` is an alias for `history`, as in `mail read`
+asmltr discord search "BigPAM" --guild Shop
+```
+
+Under it: `POST <manager>/read { channel: 'discord', op, ... }`, proxied to the connector's own
+`POST /read`. `channel` selects the connector, so the Discord channel being read is `target`, the
+same word `meta.outbound.target` already uses.
+
+| op | arguments |
+| --- | --- |
+| `guilds` | `q` (fuzzy) |
+| `channels` | `q` (fuzzy, matches name and topic), `guild` (fuzzy), `type`, `include_containers` |
+| `history` | `target` (id, alias, or fuzzy name), `limit` (default 50, cap 500), `before`, `after`, `around` |
+| `search` | `q` (message text), `target`, `guild`, `limit`, `scan` (per channel, default 200, cap 1000) |
+
+`history` paginates, because one Discord fetch returns at most 100 messages.
+
+### Finding a channel without knowing its exact name
+
+`q` and `target` do not need the name as Discord stores it. Nobody types `🔧shop-floor`. Lookup
+scores every candidate against its name, its `guild name` form, and its topic:
+
+```
+asmltr discord channels -q "floor shop"     # word order does not matter
+asmltr discord channels -q "shpfloor"       # typos and missing separators
+asmltr discord channels -q "nickel plating" # matches the TOPIC, not the name
+asmltr discord guilds -q "pittsburg"        # server names too
+asmltr discord history "radiator general"   # name the guild to pick between two #general
+```
+
+Each row carries `score` (0 to 1) and `matched_on` (`name`, `guild#name` or `topic`), and the CLI
+prints both, so a weak hit is visibly a weak hit. A topic match is scored at a discount and can never
+outrank a channel whose name actually says it.
+
+Resolving a single `target` needs a winner that is both over the bar and clearly ahead of the
+runner-up. Two channels called `#general` is an error listing both with their scores, because
+choosing one silently reads the wrong room. Naming the guild breaks the tie.
+
+**This is lexical matching, not embeddings.** "printer jam" will not find `#bigpam-z` unless one of
+those words is in its name or topic. Set a channel topic and it becomes findable by what it is for.
+
+`channel-aliases.json` still wins outright when the input is an alias, and a raw channel id skips
+scoring entirely.
+
+**`search` is a scan, not an index.** Discord's message search endpoint is user-only and closed to
+bot tokens, so `search` walks recent history per channel and matches plain text, case-insensitively.
+The response carries `scanned` and `truncated` for that reason: zero matches means "none in the last
+`scan` messages of each channel", not "not said". Raise `--scan` to look further back.
+
+**No `/regex/`.** A `/pattern/`-shaped query is refused with a 400 rather than compiled. A pattern
+from a caller is a program running on the connector child process the manager spawned, and the scan
+reaches up to 1000 messages in every channel the caller can read: `(a+)+$` against a few dozen
+characters backtracks exponentially, wedges that process so every Discord session it serves stops,
+and leaves core's proxied request hanging until it times out. No limit fixes that, because the
+blow-up is exponential in the length of the text being matched and not in the pattern, which is six
+characters long. It is refused rather than searched as literal text so a `/jam+ed/` query says why
+instead of returning nothing. Regex search can come back on a linear-time engine; it is not coming
+back on `new RegExp`.
+
+### What it will not read by default
+
+These are reads across channel boundaries, which is the hole [#132][132] describes. The gate itself
+belongs in core, not here, so the ops ship three defaults instead:
+
+- **DMs are excluded** from `channels`, `history` and `search`. Pass `--include-dms` to read one
+  deliberately.
+- **Operator-disabled channels are excluded.** A disabled channel already means *fully ignored* for
+  ingest and reply, so reading one anyway would contradict that setting. `--include-disabled`
+  overrides, and `asmltr discord channels` tells you how many rows it held back.
+- **Channels the bot cannot view are omitted**, rather than listed and then failing on read.
+- **Every op emits a `control` event** with the arguments (`action: discord-read`), never the message
+  content. A crossing is auditable in the event stream while the real gate is still a design.
+
+A name that matches two channels is an error listing both, not a pick, so `history general` in a
+setup with two `#general` channels tells you to pass the id.
+
+[132]: https://github.com/jarethmt/asmltr/issues/132
+
+---
+
 ## Multi-agent group chats
 
 Several agents can share a channel. Key knobs:

@@ -10,6 +10,28 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
+- **Discord is readable: servers, channels, history and search.** `asmltr discord guilds |
+  channels | history <channel> | search "<q>"`, on the same `POST <manager>/read` contract the
+  mailbox uses, so the CLI and the agent share one transport. The connector already answered
+  `GET /channels` and `GET /servers` on its own loopback port for the TUI, but `meta.readable` was
+  absent, so the manager refused `/read` for the type and nothing outside the connector could ask;
+  there was no way to read messages at all. `channels` covers voice, threads, forums and stages with
+  name, guild and type filters, where the control-plane endpoint is GuildText and Announcement only.
+  `history` paginates past Discord's 100-per-fetch cap and stops at 500. Lookup does not require the
+  name as Discord stores it: `q` and `target` score candidates against name, `guild name` and topic,
+  so "floor shop", "shpfloor" and `🔧shop-floor` all reach the same channel, "nickel plating" finds a
+  channel by its topic, and a typo in a server name still lands. Rows carry `score` and `matched_on`.
+  A raw id or a `channel-aliases.json` alias skips scoring; a tie (two `#general` channels) is an
+  error listing both with their scores rather than a silent pick, and naming the guild breaks it.
+  The matching is lexical, not embeddings, so a word has to appear in a name or a topic. Because these are cross-channel reads of the kind
+  [#132](https://github.com/jarethmt/asmltr/issues/132) describes, and the gate belongs in core, they
+  ship conservative: DMs and operator-disabled channels are excluded unless asked for by name, and
+  every op emits a `control` event carrying the arguments and not the messages. `search` matches
+  plain text only: a `/regex/` query is refused with a 400 instead of compiled, because a pattern
+  from a caller runs on the connector's own child process and `(a+)+$` backtracks exponentially
+  against a few dozen characters, which no pattern-length or message-length cap bounds.
+  ([#164](https://github.com/jarethmt/asmltr/issues/164))
+
 - **The Android notification reader no longer talks over you** (mobile app 0.9.0). It asks whether the
   ear is actually free before reading a synopsis: a live call (cellular or VoIP), Do Not Disturb, a
   navigation prompt, an alarm or another assistant all mean "not now". Music and podcasts are the
