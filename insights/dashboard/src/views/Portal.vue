@@ -55,20 +55,24 @@ function flash(msg) { notice.value = msg; setTimeout(() => { if (notice.value ==
 async function ensureBle() {
   if (bleReady) return
   // androidNeverForLocation pairs with the manifest's BLUETOOTH_SCAN neverForLocation flag — the
-  // plugin then requests BLUETOOTH_SCAN (not location) the first time we scan, so the system prompt
-  // appears on scan rather than failing silently.
+  // plugin then requests BLUETOOTH_SCAN (not location) the first time we scan.
   await BleClient.initialize({ androidNeverForLocation: true })
+  // If the Bluetooth radio itself is off, scanning throws "unavailable" — prompt the user to enable it.
+  try {
+    const on = await BleClient.isEnabled()
+    if (!on) { notice.value = 'Turning on Bluetooth…'; await BleClient.requestEnable() }
+  } catch (_) { /* isEnabled/requestEnable unsupported on web — ignore */ }
   bleReady = true
 }
 
 function bleUnavailableMsg(e) {
   const m = (e && e.message) || String(e)
-  if (/not .*(available|supported)|undefined|bluetooth/i.test(m)) {
-    return inApp
-      ? 'Bluetooth is unavailable — grant the asmltr app Bluetooth + Location permission and make sure Bluetooth is on.'
-      : 'Bluetooth is unavailable here. Use Chrome or Edge on desktop (Firefox/Safari have no Web Bluetooth), or open the asmltr app.'
-  }
-  return m
+  // Show the REAL error (so failures are diagnosable) plus a context hint. On Android 12+ the scan
+  // permission shows up as "Nearby devices" in app settings (NOT Location).
+  const hint = inApp
+    ? ' — in Android Settings → Apps → asmltr → Permissions, allow "Nearby devices", and make sure Bluetooth is ON.'
+    : ' — use Chrome/Edge on desktop (Firefox/Safari lack Web Bluetooth), or the asmltr app.'
+  return 'BLE: ' + m + hint
 }
 
 function upsertFound(d) {
