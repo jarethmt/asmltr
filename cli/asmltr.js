@@ -447,7 +447,9 @@ async function cmdDiscord(rest) {
   // asmltr discord guilds [-q X] | channels [-q X] [--guild G] [--type text,voice] | history <channel>
   //   [-n N] [--before ID] | search "<query>" [--channel C] [--guild G] [--scan N]
   // Same transport as `asmltr mail`: the manager's /read proxies to the connector (issue #164).
-  const subs = ['guilds', 'servers', 'channels', 'history', 'search'];
+  // `read` is an alias for `history`, because `mail read` is the pattern this follows and reaching
+  // for the same verb on a different surface should not be a usage error.
+  const subs = ['guilds', 'servers', 'channels', 'history', 'read', 'search'];
   const sub = subs.includes(rest[0]) ? rest[0] : 'channels';
   const args = subs.includes(rest[0]) ? rest.slice(1) : rest;
   const o = {};
@@ -499,9 +501,9 @@ async function cmdDiscord(rest) {
     return;
   }
 
-  if (sub === 'history') {
+  if (sub === 'history' || sub === 'read') {
     const channel = o.channel || words[0];
-    if (!channel) throw new Error('usage: asmltr discord history <channel> [-n N]');
+    if (!channel) throw new Error(`usage: asmltr discord ${sub} <channel> [-n N]`);
     const r = await post({ op: 'history', target: channel, limit: o.limit, before: o.before, after: o.after, around: o.around, include_dms: o.include_dms, include_disabled: o.include_disabled });
     if (!r.ok) return fail(r);
     console.log(A.bold(`${r.channel.guild ? r.channel.guild + '#' : ''}${r.channel.name || r.channel.id}`) + A.dim(`  ${r.count} message(s), newest first`));
@@ -666,7 +668,7 @@ function cmdHelp() {
        mail read <uid> [--seen] · mail search "<q>"
   asmltr discord channels [-q X]       find channels by loose name/topic (--guild G, --type text,voice)
        discord guilds [-q X]           servers the bot is in
-       discord history <channel> [-n N]  recent messages (id, alias, or a loose name)
+       discord history|read <channel> [-n N]  recent messages (id, alias, or a loose name)
        discord search "<q>"            scan recent history (--channel C, --guild G, --scan N)
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)

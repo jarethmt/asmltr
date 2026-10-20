@@ -171,6 +171,7 @@ asmltr discord guilds                       # servers the bot is in
 asmltr discord channels -q shop             # channels whose name contains "shop"
 asmltr discord channels --type voice        # text,announcement,thread,voice,forum,stage,media
 asmltr discord history shop-floor -n 100    # by name, by alias, or by channel id
+asmltr discord read shop-floor -n 100       # `read` is an alias for `history`, as in `mail read`
 asmltr discord search "BigPAM" --guild Shop
 ```
 
