@@ -717,6 +717,61 @@ async function cmdBackup(rest, f) {
   }
 }
 
+// asmltr mesh <status|provision|enroll|resource|host-client> — the Pangolin networking plane (mesh/).
+async function cmdMesh(rest, f) {
+  try { require('../shared/loadenv'); } catch (_) {}
+  const mesh = require('../mesh');
+  const di = require('../mesh/deviceinstall');
+  const verb = rest[0] || 'status';
+  const pos = rest.slice(1).filter((a) => !a.startsWith('-'));
+  const log = (m) => console.log(A.dim(m));
+  const dot = (on) => (on ? A.grn('●') : A.dim('○'));
+  switch (verb) {
+    case 'status': {
+      const s = await mesh.status();
+      if (!s.enabled) return console.log(A.yel('mesh not configured — set ASMLTR_MESH_DASHBOARD_URL'));
+      console.log(A.bold('mesh ') + A.dim(s.dashboardUrl) + A.dim(`  org=${s.org} subnet=${s.subnet}`));
+      console.log(A.bold('  sites:     ') + (s.sites.map((x) => x.name + dot(x.online)).join('  ') || A.dim('(none)')));
+      console.log(A.bold('  clients:   ') + (s.clients.map((x) => x.name + dot(x.online)).join('  ') || A.dim('(none)')));
+      console.log(A.bold('  resources: ') + (s.resources.map((r) => `${r.name}${A.dim(' ' + r.alias + '→' + r.dest + ':' + (r.tcp || ''))}`).join('  ') || A.dim('(none)')));
+      return;
+    }
+    case 'provision': {
+      const r = await mesh.provision({ log });
+      console.log(r.skipped ? A.yel('· mesh not configured — skipped') : A.grn('✓ provisioned') + A.dim(` (admin=${r.adminChanged} org=${r.orgChanged} oidc=${r.oidcChanged})`));
+      if (r.oidcChanged) console.log(A.yel('  ⚠ restart asmltr-core so the new OIDC client loads before first SSO login'));
+      return;
+    }
+    case 'host-client': {
+      const r = await mesh.ensureHostClient(pos[0] || 'host', { log });
+      console.log(A.grn(`✓ host client '${r.name}'`) + A.dim(` (id ${r.clientId}${r.created ? ', created' : ''})`));
+      return;
+    }
+    case 'enroll': {
+      const device = pos[0];
+      if (!device) return console.log('usage: asmltr mesh enroll <device> [--os windows|linux]');
+      const site = await mesh.enrollSite(device, { log });
+      const osk = (f.os || 'linux').toLowerCase();
+      const cfg = mesh.meshConfig();
+      const plan = di.installPlan({ role: 'site', os: osk, org: cfg.org, id: site.newtId || '<newt-id — see vault>', secret: site.newtSecret || '<newt-secret — see vault>', endpoint: cfg.dashboardUrl });
+      console.log(A.grn(`✓ site '${site.name}' enrolled`) + A.dim(` (id ${site.siteId}${site.created ? ', created' : ', existing'})`));
+      console.log(A.bold(`\nRun on the ${osk} device${osk === 'windows' ? ' (elevated — runs as SYSTEM):' : ':'}`));
+      console.log(osk === 'windows' ? plan.powershell : (plan.service + '\n\n' + A.dim('# ' + plan.enable)));
+      return;
+    }
+    case 'resource': {
+      const [device, name] = pos;
+      if (!device || !name || (!f.tcp && !f.udp)) return console.log('usage: asmltr mesh resource <device> <name> --tcp <ports>|--udp <ports> [--to <dest>] [--client <name>]');
+      const clients = f.client ? (Array.isArray(f.client) ? f.client : [f.client]) : [];
+      const r = await mesh.addResource(device, { name, tcp: f.tcp, udp: f.udp, destination: f.to || '127.0.0.1', clients, log });
+      console.log(A.grn(`✓ resource '${name}'`) + A.dim(` alias ${r.alias} (${r.aliasAddress}) → ${r.destination}`));
+      return;
+    }
+    default:
+      console.log('asmltr mesh <status|provision|enroll <device> [--os ...]|resource <device> <name> --tcp N [--to dest] [--client c]|host-client [name]>');
+  }
+}
+
 // asmltr vault <status|unseal|seal|init> — TRUST vault bootstrap + passphrase-unseal (shared/vault.js).
 // --- asmltr device: the machines asmltr drives (docs/DEVICE-REGISTRY.md) -------------------------
 async function cmdDevice(argv, f) {
@@ -999,6 +1054,7 @@ async function cmdVault(rest, f) {
       case 'update': return await cmdUpdate(rest, f);
       case 'silo': return await cmdSilo(rest, f);
       case 'backup': return await cmdBackup(rest, f);
+      case 'mesh': return await cmdMesh(rest, f);
       case 'device': case 'devices': return await cmdDevice(rest, f);
       case 'vault': return await cmdVault(rest, f);
       case 'version': case '--version': return await cmdVersion();
