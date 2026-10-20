@@ -28,9 +28,12 @@ public class MainActivity extends BridgeActivity {
     // Android 12+ gates Bluetooth behind a runtime grant. Without it Chromium's media stack won't touch
     // the BT adapter ("cr_media: BLUETOOTH_CONNECT permission is missing") and every capture lands on
     // the phone's built-in mic — so talking through the earbuds silently doesn't work.
-    if (Build.VERSION.SDK_INT >= 31
-        && checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != PackageManager.PERMISSION_GRANTED) {
-      requestPermissions(new String[]{ "android.permission.BLUETOOTH_CONNECT" }, 9);
+    if (Build.VERSION.SDK_INT >= 31) {
+      java.util.ArrayList<String> bt = new java.util.ArrayList<>();
+      if (checkSelfPermission("android.permission.BLUETOOTH_CONNECT") != PackageManager.PERMISSION_GRANTED) bt.add("android.permission.BLUETOOTH_CONNECT");
+      // BLUETOOTH_SCAN ("Nearby devices") is needed for the Portal BLE scan.
+      if (checkSelfPermission("android.permission.BLUETOOTH_SCAN") != PackageManager.PERMISSION_GRANTED) bt.add("android.permission.BLUETOOTH_SCAN");
+      if (!bt.isEmpty()) requestPermissions(bt.toArray(new String[0]), 9);
     }
     // One-time nudge for the "draw over other apps" grant so the persistent floating overlay can appear.
     SharedPreferences p = getSharedPreferences("asmltr", MODE_PRIVATE);

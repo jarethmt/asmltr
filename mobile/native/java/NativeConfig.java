@@ -10,6 +10,16 @@ import android.provider.Settings;
 import android.media.AudioManager;
 import android.media.AudioDeviceInfo;
 import android.webkit.JavascriptInterface;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.InputStream;
@@ -46,6 +56,60 @@ public class NativeConfig {
   }
   @JavascriptInterface
   public String getDeviceId() { return deviceId(ctx); }
+
+  // --- BLE discovery (native) -------------------------------------------------------------------
+  // The dashboard loads as a REMOTE page where Capacitor plugins don't bridge, so BLE goes through
+  // this addJavascriptInterface bridge (same mechanism as the rest of AsmltrNative). JS starts a scan,
+  // polls bleResults(), then stops. Unfiltered scan + JS-side name-prefix filter = robust discovery.
+  private BluetoothLeScanner bleScanner;
+  private ScanCallback bleCallback;
+  private final Map<String, JSONObject> bleFound = new ConcurrentHashMap<>();
+
+  @JavascriptInterface
+  public boolean bleScanPermitted() {
+    return Build.VERSION.SDK_INT < 31 || ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+  }
+
+  @JavascriptInterface
+  public String bleStartScan() {
+    try {
+      if (!bleScanPermitted()) return "no-permission";
+      BluetoothManager m = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+      BluetoothAdapter a = m != null ? m.getAdapter() : null;
+      if (a == null) return "no-adapter";
+      if (!a.isEnabled()) return "bt-off";
+      bleScanner = a.getBluetoothLeScanner();
+      if (bleScanner == null) return "no-scanner";
+      bleFound.clear();
+      bleCallback = new ScanCallback() {
+        @Override public void onScanResult(int type, ScanResult r) {
+          try {
+            String name = r.getScanRecord() != null ? r.getScanRecord().getDeviceName() : null;
+            if (name == null || name.isEmpty()) return;  // only named devices (the dongle advertises its name)
+            JSONObject o = new JSONObject();
+            o.put("id", r.getDevice().getAddress()); o.put("name", name); o.put("rssi", r.getRssi());
+            bleFound.put(r.getDevice().getAddress(), o);
+          } catch (Exception e) {}
+        }
+      };
+      ScanSettings s = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
+      bleScanner.startScan(null, s, bleCallback);  // unfiltered; JS filters by the asmltr-portal- name prefix
+      return "ok";
+    } catch (Exception e) { return "err:" + e.getMessage(); }
+  }
+
+  @JavascriptInterface
+  public String bleResults() {
+    JSONArray arr = new JSONArray();
+    for (JSONObject o : bleFound.values()) arr.put(o);
+    return arr.toString();
+  }
+
+  @JavascriptInterface
+  public void bleStopScan() {
+    try { if (bleScanner != null && bleCallback != null) bleScanner.stopScan(bleCallback); } catch (Exception e) {}
+    bleCallback = null;
+  }
 
   /** Start the always-on device link (idempotent). */
   @JavascriptInterface

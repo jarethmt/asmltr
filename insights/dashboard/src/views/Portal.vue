@@ -7,7 +7,7 @@
 // v1 is the DISCOVERY milestone: scan → connect → read the dongle's identity (INFO) → register it as
 // a device with a BLE transport. LOAD/RUN/module-management are deliberately left as "coming soon"
 // placeholders — this ships discovery + register, nothing more.
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { BleClient } from '@capacitor-community/bluetooth-le'
 import { Capacitor } from '@capacitor/core'
 import PageHeader from '@/components/PageHeader.vue'
@@ -19,6 +19,27 @@ import { devices } from '@/services/api'
 // APK) — no Web Bluetooth, so no Chrome/Edge requirement. In a browser it uses Web Bluetooth.
 const inApp = Capacitor.isNativePlatform()
 const bleModeLabel = inApp ? 'asmltr app · native Bluetooth' : 'browser · Web Bluetooth (Chrome/Edge)'
+
+// In the asmltr app the dashboard is a REMOTE page, where Capacitor plugins don't bridge — so BLE goes
+// through the app's own native bridge (window.AsmltrNative, the addJavascriptInterface that already powers
+// everything else here). On desktop AN is absent and we use Web Bluetooth via BleClient.
+const AN = (typeof window !== 'undefined' && window.AsmltrNative && typeof window.AsmltrNative.bleStartScan === 'function') ? window.AsmltrNative : null
+let blePoll = null
+
+// TEMP diagnostic: show the live Capacitor bridge state so we can see whether the native plugin
+// bridge reaches this (remotely-loaded) page and whether BluetoothLe is registered.
+const DIAG_BUILD = 'd2'  // bump to prove fresh JS reached the device (defeats a stale webview cache)
+const bridgeInfo = ref('(checking…)')
+onMounted(() => {
+  try {
+    const C = window.Capacitor
+    const headers = C && Array.isArray(C.PluginHeaders) ? C.PluginHeaders.map((h) => h.name) : null
+    bridgeInfo.value = '[' + DIAG_BUILD + '] platform=' + (C && C.getPlatform ? C.getPlatform() : 'none')
+      + ' · nativeHeaders=' + (headers ? '[' + headers.join(',') + ']' : 'MISSING')
+      + ' · http=' + (C && C.isPluginAvailable ? C.isPluginAvailable('CapacitorHttp') : 'n/a')
+      + ' · ble=' + (C && C.isPluginAvailable ? C.isPluginAvailable('BluetoothLe') : 'n/a')
+  } catch (e) { bridgeInfo.value = 'err: ' + (e && e.message) }
+})
 
 // --- The Portal dongle's GATT (exact — do not change) -------------------------------------------
 const NAME_PREFIX = 'asmltr-portal-'
@@ -85,6 +106,7 @@ function upsertFound(d) {
 async function startScan() {
   error.value = ''
   found.value = []
+  if (AN) return startScanNative()
   try {
     await ensureBle()
   } catch (e) { error.value = bleUnavailableMsg(e); return }
@@ -106,10 +128,35 @@ async function startScan() {
   }
 }
 
+// Native (in-app) scan: start via AsmltrNative, poll its results, keep the asmltr-portal-* advertisers.
+function startScanNative() {
+  const r = AN.bleStartScan()
+  if (r !== 'ok') {
+    error.value = r === 'bt-off' ? 'Turn on Bluetooth and scan again.'
+      : r === 'no-permission' ? 'Allow "Nearby devices" for asmltr (Settings → Apps → asmltr → Permissions), then scan again.'
+      : 'BLE scan could not start (' + r + ').'
+    return
+  }
+  scanning.value = true
+  const tick = () => {
+    try {
+      for (const d of JSON.parse(AN.bleResults() || '[]')) {
+        if (!/^asmltr-portal-/i.test(d.name || '')) continue
+        upsertFound({ deviceId: d.id, name: d.name, rssi: typeof d.rssi === 'number' ? d.rssi : null })
+      }
+    } catch (_) { /* transient */ }
+  }
+  blePoll = setInterval(tick, 1000)
+  tick()
+  scanTimer = setTimeout(stopScan, SCAN_MS)
+}
+
 async function stopScan() {
   if (scanTimer) { clearTimeout(scanTimer); scanTimer = null }
+  if (blePoll) { clearInterval(blePoll); blePoll = null }
   if (!scanning.value) return
   scanning.value = false
+  if (AN) { try { AN.bleStopScan() } catch (_) { /* ignore */ } return }
   try { await BleClient.stopLEScan() } catch { /* already stopped */ }
 }
 
@@ -248,6 +295,9 @@ onBeforeUnmount(async () => { await stopScan(); await disconnect() })
       <span class="pill border border-white/10 bg-white/5 text-slate-500">looks for service …727401</span>
       <span class="pill border" :class="inApp ? 'border-brand-violet/30 bg-brand-violet/10 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400'">{{ bleModeLabel }}</span>
     </div>
+
+    <!-- TEMP diagnostic (remove after we resolve the in-app BLE bridge) -->
+    <p class="mb-3 break-all rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 font-mono text-[11px] text-amber-200">bridge: {{ bridgeInfo }}</p>
 
     <p v-if="inApp" class="mb-3 text-[12px] leading-relaxed text-slate-500">
       Running inside the asmltr app — scanning over the device's <span class="text-slate-300">native Bluetooth</span>.
