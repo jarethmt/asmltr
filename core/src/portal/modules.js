@@ -97,6 +97,19 @@ const LIBRARY = [
     ],
   },
   {
+    id: 'type-test', name: 'Type test', v: 1,
+    description: 'Types a line of text into whatever window is focused on the plugged-in host — the first proof the Portal can drive the machine. Focus a text field (e.g. Notepad) before running.',
+    steps: [
+      { op: 'screen', icon: 'bolt', title: 'Type test', body: 'Focus a text box on the host — this types into it', color: 'violet' },
+      { op: 'status', text: 'Make sure a text field is focused on the host...' },
+      { op: 'wait', ms: 1200 },
+      { op: 'type', text: 'hello from the asmltr Portal\n' },
+      { op: 'screen', icon: 'check', title: 'Typed', body: 'If the text appeared on the host, USB-HID works', color: 'green' },
+      { op: 'led', color: 'green' },
+      { op: 'status', text: 'Type test done — check the host screen.' },
+    ],
+  },
+  {
     id: 'identify', name: 'Identify', v: 1,
     description: 'Makes THIS dongle announce itself — names itself on-screen and flashes its LED hard so you can spot which physical Portal you are talking to.',
     steps: [
