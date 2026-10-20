@@ -24,6 +24,9 @@ import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothStatusCodes;
+import android.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
@@ -117,12 +120,56 @@ public class NativeConfig {
     bleCallback = null;
   }
 
-  // --- BLE connect + read one characteristic (identity) -----------------------------------------
+  // --- BLE GATT session: connect, read, write, subscribe (persistent callback) ------------------
+  // One held connection drives the whole control flow: read `info`, write `pair`, chunk `load`,
+  // trigger `run`, and receive `status` notifications — all on the same gatt via a single callback.
   private BluetoothGatt gatt;
   private volatile String gattState = "idle";   // idle|connecting|connected|reading|done|error|disconnected
   private volatile String gattValue = "";        // last read characteristic value (UTF-8)
   private volatile String gattError = "";
+  private volatile String writeState = "idle";   // idle|writing|done|error
+  private volatile String writeError = "";
+  private volatile int    bleMtu = 23;           // negotiated ATT MTU (payload = mtu-3)
+  private final java.util.concurrent.ConcurrentLinkedQueue<String> bleNotif = new java.util.concurrent.ConcurrentLinkedQueue<>();
   private java.util.UUID readSvc, readChar;
+
+  private final BluetoothGattCallback gattCb = new BluetoothGattCallback() {
+    @Override public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
+      if (newState == BluetoothProfile.STATE_CONNECTED) {
+        gattState = "connected";
+        try { g.requestMtu(247); } catch (Exception e) {}
+        try { g.discoverServices(); } catch (Exception e) {}
+      } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+        bleMtu = 23;
+        if (!"done".equals(gattState) && !"error".equals(gattState)) gattState = "disconnected";
+      }
+    }
+    @Override public void onMtuChanged(BluetoothGatt g, int mtu, int status) {
+      if (status == BluetoothGatt.GATT_SUCCESS) bleMtu = mtu;
+    }
+    @Override public void onServicesDiscovered(BluetoothGatt g, int status) {
+      // If a read was requested on connect (identity), do it now; otherwise just mark connected.
+      if (readChar == null) { gattState = "done"; return; }
+      try {
+        BluetoothGattService svc = g.getService(readSvc);
+        if (svc == null) { gattState = "error"; gattError = "service not found"; return; }
+        BluetoothGattCharacteristic ch = svc.getCharacteristic(readChar);
+        if (ch == null) { gattState = "error"; gattError = "characteristic not found"; return; }
+        gattState = "reading"; g.readCharacteristic(ch);
+      } catch (Exception e) { gattState = "error"; gattError = String.valueOf(e.getMessage()); }
+    }
+    @Override public void onCharacteristicRead(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
+      if (status == BluetoothGatt.GATT_SUCCESS && ch.getValue() != null) { gattValue = new String(ch.getValue()); gattState = "done"; }
+      else { gattState = "error"; gattError = "read status " + status; }
+    }
+    @Override public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
+      if (status == BluetoothGatt.GATT_SUCCESS) { writeState = "done"; }
+      else { writeState = "error"; writeError = "write status " + status; }
+    }
+    @Override public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic ch) {
+      try { byte[] v = ch.getValue(); if (v != null) bleNotif.add(new String(v)); } catch (Exception e) {}
+    }
+  };
 
   @JavascriptInterface
   public String bleConnectAndRead(String deviceId, String serviceUuid, String charUuid) {
@@ -132,29 +179,11 @@ public class NativeConfig {
       if (a == null) return "no-adapter";
       bleStopScan();
       try { if (gatt != null) { gatt.close(); gatt = null; } } catch (Exception e) {}
-      gattState = "connecting"; gattValue = ""; gattError = "";
+      gattState = "connecting"; gattValue = ""; gattError = ""; writeState = "idle"; writeError = ""; bleMtu = 23; bleNotif.clear();
       readSvc = java.util.UUID.fromString(serviceUuid);
       readChar = java.util.UUID.fromString(charUuid);
       BluetoothDevice dev = a.getRemoteDevice(deviceId);
-      gatt = dev.connectGatt(ctx, false, new BluetoothGattCallback() {
-        @Override public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
-          if (newState == BluetoothProfile.STATE_CONNECTED) { gattState = "connected"; try { g.discoverServices(); } catch (Exception e) {} }
-          else if (newState == BluetoothProfile.STATE_DISCONNECTED) { if (!"done".equals(gattState) && !"error".equals(gattState)) gattState = "disconnected"; }
-        }
-        @Override public void onServicesDiscovered(BluetoothGatt g, int status) {
-          try {
-            BluetoothGattService svc = g.getService(readSvc);
-            if (svc == null) { gattState = "error"; gattError = "service not found"; return; }
-            BluetoothGattCharacteristic ch = svc.getCharacteristic(readChar);
-            if (ch == null) { gattState = "error"; gattError = "characteristic not found"; return; }
-            gattState = "reading"; g.readCharacteristic(ch);
-          } catch (Exception e) { gattState = "error"; gattError = String.valueOf(e.getMessage()); }
-        }
-        @Override public void onCharacteristicRead(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
-          if (status == BluetoothGatt.GATT_SUCCESS && ch.getValue() != null) { gattValue = new String(ch.getValue()); gattState = "done"; }
-          else { gattState = "error"; gattError = "read status " + status; }
-        }
-      });
+      gatt = dev.connectGatt(ctx, false, gattCb);
       return "ok";
     } catch (Exception e) { gattState = "error"; gattError = String.valueOf(e.getMessage()); return "err:" + e.getMessage(); }
   }
@@ -165,10 +194,82 @@ public class NativeConfig {
     catch (Exception e) { return "{\"state\":\"error\"}"; }
   }
 
+  // Re-read a characteristic on the live connection (e.g. `info` again after pairing). Poll bleGattResult().
+  @JavascriptInterface
+  public String bleReadChar(String serviceUuid, String charUuid) {
+    if (gatt == null) return "not-connected";
+    try {
+      gattState = "reading"; gattValue = ""; gattError = "";
+      BluetoothGattService svc = gatt.getService(java.util.UUID.fromString(serviceUuid));
+      if (svc == null) return "no-service";
+      BluetoothGattCharacteristic ch = svc.getCharacteristic(java.util.UUID.fromString(charUuid));
+      if (ch == null) return "no-char";
+      return gatt.readCharacteristic(ch) ? "ok" : "read-failed";
+    } catch (Exception e) { return "err:" + e.getMessage(); }
+  }
+
+  // Write one base64 value to a characteristic (pair / load-chunk / run). Poll bleWriteState().
+  @JavascriptInterface
+  public String bleWrite(String serviceUuid, String charUuid, String base64Value) {
+    if (gatt == null) return "not-connected";
+    try {
+      byte[] val = Base64.decode(base64Value, Base64.DEFAULT);
+      BluetoothGattService svc = gatt.getService(java.util.UUID.fromString(serviceUuid));
+      if (svc == null) return "no-service";
+      BluetoothGattCharacteristic ch = svc.getCharacteristic(java.util.UUID.fromString(charUuid));
+      if (ch == null) return "no-char";
+      writeState = "writing"; writeError = "";
+      int wt = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;  // write-with-response: acked ordering
+      if (Build.VERSION.SDK_INT >= 33) {
+        int rc = gatt.writeCharacteristic(ch, val, wt);
+        return rc == BluetoothStatusCodes.SUCCESS ? "ok" : ("write-rc:" + rc);
+      } else {
+        ch.setWriteType(wt); ch.setValue(val);
+        return gatt.writeCharacteristic(ch) ? "ok" : "write-failed";
+      }
+    } catch (Exception e) { writeState = "error"; writeError = String.valueOf(e.getMessage()); return "err:" + e.getMessage(); }
+  }
+
+  @JavascriptInterface
+  public String bleWriteState() {
+    try { JSONObject o = new JSONObject(); o.put("state", writeState); o.put("error", writeError); return o.toString(); }
+    catch (Exception e) { return "{\"state\":\"error\"}"; }
+  }
+
+  // Subscribe to a NOTIFY characteristic (status); lines arrive via bleNotifications().
+  @JavascriptInterface
+  public String bleSubscribe(String serviceUuid, String charUuid) {
+    if (gatt == null) return "not-connected";
+    try {
+      BluetoothGattService svc = gatt.getService(java.util.UUID.fromString(serviceUuid));
+      if (svc == null) return "no-service";
+      BluetoothGattCharacteristic ch = svc.getCharacteristic(java.util.UUID.fromString(charUuid));
+      if (ch == null) return "no-char";
+      gatt.setCharacteristicNotification(ch, true);
+      BluetoothGattDescriptor cccd = ch.getDescriptor(java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+      if (cccd != null) {
+        if (Build.VERSION.SDK_INT >= 33) gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+        else { cccd.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE); gatt.writeDescriptor(cccd); }
+      }
+      return "ok";
+    } catch (Exception e) { return "err:" + e.getMessage(); }
+  }
+
+  // Drain accumulated status notifications as a JSON array of strings (clears the buffer).
+  @JavascriptInterface
+  public String bleNotifications() {
+    StringBuilder sb = new StringBuilder("["); boolean first = true; String s;
+    while ((s = bleNotif.poll()) != null) { if (!first) sb.append(","); sb.append(JSONObject.quote(s)); first = false; }
+    return sb.append("]").toString();
+  }
+
+  @JavascriptInterface
+  public int bleMtuSize() { return bleMtu; }
+
   @JavascriptInterface
   public void bleDisconnect() {
     try { if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; } } catch (Exception e) {}
-    gattState = "idle";
+    gattState = "idle"; writeState = "idle"; bleNotif.clear();
   }
 
   /** Start the always-on device link (idempotent). */

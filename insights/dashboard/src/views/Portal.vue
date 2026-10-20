@@ -4,15 +4,15 @@
 // Chrome/Edge only) and the native Capacitor app (platform auto-detected), so this single view is
 // the discovery surface everywhere the dashboard runs.
 //
-// v1 is the DISCOVERY milestone: scan → connect → read the dongle's identity (INFO) → register it as
-// a device with a BLE transport. LOAD/RUN/module-management are deliberately left as "coming soon"
-// placeholders — this ships discovery + register, nothing more.
-import { ref, computed, onBeforeUnmount } from 'vue'
+// Discovery: scan → connect → read the dongle's identity (INFO) → register it as a device with a BLE
+// transport. Control (docs/PORTAL-PROTOCOL.md): pair (write the instance's signing key as the trust
+// anchor), then load a core-signed step-DSL module in chunks and run it, streaming STATUS back.
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { BleClient } from '@capacitor-community/bluetooth-le'
 import { Capacitor } from '@capacitor/core'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
-import { devices } from '@/services/api'
+import { devices, portal } from '@/services/api'
 
 const inApp = Capacitor.isNativePlatform()
 const bleModeLabel = inApp ? 'asmltr app · native Bluetooth' : 'browser · Web Bluetooth (Chrome/Edge)'
@@ -31,6 +31,7 @@ const INFO_UUID = '00657665-5f61-736d-6c74-72706f727402' // READ  — JSON ident
 const LOAD_UUID = '00657665-5f61-736d-6c74-72706f727403' // WRITE — stubbed
 const RUN_UUID = '00657665-5f61-736d-6c74-72706f727404' // WRITE — stubbed
 const STATUS_UUID = '00657665-5f61-736d-6c74-72706f727405' // NOTIFY — status lines
+const PAIR_UUID = '00657665-5f61-736d-6c74-72706f727406' // WRITE — 32-byte trust anchor (TOFU)
 
 const SCAN_MS = 8000
 
@@ -42,8 +43,15 @@ const connecting = ref(false)
 const connected = ref(false)
 const info = ref(null)       // parsed INFO JSON { kind, name, fw, trust }
 const statusLines = ref([])  // incoming STATUS NOTIFY lines
-const registering = ref(false)
 const registeredId = ref('') // device id once registered (links to Fleet)
+const modulesList = ref([])  // built-in module library from the core
+const selectedModuleId = ref('')
+const adopting = ref(false)  // register + pair in one action
+const running = ref(false)
+let notifTimer = null
+const isPaired = computed(() => !!(info.value && info.value.trust === 'paired'))
+const selectedDesc = computed(() => { const m = modulesList.value.find((x) => x.id === selectedModuleId.value); return m ? m.description : '' })
+const adopted = computed(() => isPaired.value && !!registeredId.value) // in the Fleet AND trust-paired
 
 const error = ref('')
 const notice = ref('')
@@ -177,6 +185,7 @@ async function connect(d) {
     const view = await BleClient.read(d.deviceId, SVC_UUID, INFO_UUID)
     const text = new TextDecoder('utf-8').decode(view)
     try { info.value = JSON.parse(text) } catch { info.value = { _raw: text } }
+    detectRegistered() // reflect prior adoption
 
     // STATUS is optional — subscribe best-effort, never let it fail the connect.
     try {
@@ -204,6 +213,9 @@ async function connectNative(d) {
       if (res.state === 'done') {
         clearInterval(poll); clearTimeout(to); connected.value = true; connecting.value = false
         try { info.value = JSON.parse(res.value) } catch { info.value = { _raw: res.value } }
+        try { AN.bleSubscribe(SVC_UUID, STATUS_UUID) } catch (_) { /* best-effort */ }
+        startNotifPoll()   // drain STATUS notifications (pair/run output) into the log
+        detectRegistered() // reflect prior adoption
         resolve()
       } else if (res.state === 'error' || res.state === 'disconnected') {
         clearInterval(poll); clearTimeout(to); connecting.value = false; connected.value = false
@@ -220,6 +232,7 @@ function onDisconnect() {
 }
 
 async function disconnect() {
+  stopNotifPoll()
   if (AN) { try { AN.bleDisconnect() } catch (_) { /* ignore */ } connected.value = false; return }
   const id = selected.value && selected.value.deviceId
   if (id) {
@@ -237,50 +250,167 @@ async function clearSelection() {
   registeredId.value = ''
 }
 
-// Register: create the device row, then attach a BLE transport. Both steps tolerate "already there"
-// so a second Register on the same dongle lands gracefully instead of erroring.
-async function register() {
-  if (!selected.value) return
+// Register (the Fleet side of adoption): create the device row, then attach a BLE transport. Both
+// steps tolerate "already there" so re-adopting the same dongle lands gracefully. Returns the id.
+async function registerInner() {
   const name = dongleName.value
-  if (!name) { error.value = 'No dongle name to register.'; return }
-  registering.value = true
-  error.value = ''
+  if (!name) throw new Error('no dongle name to register')
+  let dev
   try {
-    let dev
-    let existed = false
-    try {
-      dev = await devices.create({ name, kind: 'appliance' })
-    } catch (e) {
-      // Likely a name collision — reuse the existing row rather than failing the whole flow.
-      const list = (await devices.list()).devices || []
-      const match = list.find((x) => x.name === name)
-      if (!match) throw e
-      dev = match
-      existed = true
-    }
-
-    const id = dev.id
-    try {
-      await devices.addTransport(id, {
-        transport: 'ble',
-        address: name,
-        params: { service_uuid: SVC_UUID, mac: selected.value.deviceId || null },
-      })
-    } catch (e) {
-      // A duplicate BLE transport is fine — treat only unrelated errors as real.
-      if (!/exist|duplicate|already/i.test((e && e.message) || '')) throw e
-    }
-
-    registeredId.value = id
-    flash(existed ? `${name} was already registered — BLE transport ensured.` : `Registered ${name} in the Fleet.`)
+    dev = await devices.create({ name, kind: 'appliance' })
   } catch (e) {
-    error.value = e.message
-  } finally {
-    registering.value = false
+    // Likely a name collision — reuse the existing row rather than failing the whole flow.
+    const list = (await devices.list()).devices || []
+    const match = list.find((x) => x.name === name)
+    if (!match) throw e
+    dev = match
+  }
+  const id = dev.id
+  try {
+    await devices.addTransport(id, {
+      transport: 'ble',
+      address: name,
+      params: { service_uuid: SVC_UUID, mac: selected.value.deviceId || null },
+    })
+  } catch (e) {
+    if (!/exist|duplicate|already/i.test((e && e.message) || '')) throw e
+  }
+  registeredId.value = id
+  return id
+}
+
+// If this dongle is already in the Fleet (adopted in a past session), reflect that so the UI shows
+// the run surface instead of asking to adopt again.
+async function detectRegistered() {
+  try {
+    const name = dongleName.value
+    if (!name) return
+    const match = ((await devices.list()).devices || []).find((x) => x.name === name)
+    if (match) registeredId.value = match.id
+  } catch (_) { /* core offline — fine */ }
+}
+
+// --- control plane: pair, then load + run signed modules (docs/PORTAL-PROTOCOL.md) -------------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+function b64ToBytes(b64) { const bin = atob(b64); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a }
+function bytesToB64(bytes) { let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s) }
+
+async function loadLibrary() {
+  try { modulesList.value = (await portal.modules()).modules || [] ; if (!selectedModuleId.value && modulesList.value[0]) selectedModuleId.value = modulesList.value[0].id } catch (_) { /* core offline — leave empty */ }
+}
+
+function startNotifPoll() {
+  if (!AN || notifTimer) return
+  notifTimer = setInterval(() => {
+    try { const arr = JSON.parse(AN.bleNotifications() || '[]'); for (const l of arr) if (l) statusLines.value = [...statusLines.value.slice(-49), l] } catch (_) { /* ignore */ }
+  }, 400)
+}
+function stopNotifPoll() { if (notifTimer) { clearInterval(notifTimer); notifTimer = null } }
+
+// Write a base64 value to one characteristic (native bridge or Web Bluetooth), awaiting completion.
+async function writeChar(charUuid, base64Value) {
+  if (AN) {
+    const r = AN.bleWrite(SVC_UUID, charUuid, base64Value)
+    if (r !== 'ok') throw new Error('bridge write: ' + r)
+    for (let i = 0; i < 50; i++) {
+      let st; try { st = JSON.parse(AN.bleWriteState() || '{}') } catch { st = {} }
+      if (st.state === 'done') return
+      if (st.state === 'error') throw new Error(st.error || 'write error')
+      await sleep(80)
+    }
+    throw new Error('write timed out')
+  }
+  const bytes = b64ToBytes(base64Value)
+  await BleClient.write(selected.value.deviceId, SVC_UUID, charUuid, new DataView(bytes.buffer))
+}
+
+async function rereadInfo() {
+  if (AN) {
+    const r = AN.bleReadChar(SVC_UUID, INFO_UUID)
+    if (r !== 'ok') throw new Error('reread: ' + r)
+    for (let i = 0; i < 50; i++) {
+      let res; try { res = JSON.parse(AN.bleGattResult() || '{}') } catch { res = {} }
+      if (res.state === 'done') { try { info.value = JSON.parse(res.value) } catch { info.value = { _raw: res.value } } return }
+      if (res.state === 'error') throw new Error(res.error || 'read error')
+      await sleep(80)
+    }
+    throw new Error('reread timed out')
+  }
+  const view = await BleClient.read(selected.value.deviceId, SVC_UUID, INFO_UUID)
+  try { info.value = JSON.parse(new TextDecoder('utf-8').decode(view)) } catch { /* keep prior */ }
+}
+
+// Pair (TOFU, the dongle side of adoption): write the instance's signing pubkey to `pair`, re-read INFO.
+async function pairInner() {
+  const { pubkey_b64 } = await portal.signingKey()
+  if (!pubkey_b64) throw new Error('core returned no signing key')
+  await writeChar(PAIR_UUID, pubkey_b64)
+  await sleep(350)
+  await rereadInfo()
+  if (!isPaired.value) throw new Error('the Portal still reports unpaired')
+}
+
+// Adopt = one intent, both sides: register it in your Fleet AND pair your signing key onto it.
+async function adopt() {
+  if (!selected.value) return
+  adopting.value = true; error.value = ''
+  try {
+    await registerInner()                 // Fleet side (idempotent)
+    if (!isPaired.value) await pairInner() // dongle side (idempotent for the same key)
+    flash('Adopted — in your Fleet and trusted. Load a module below.')
+  } catch (e) { error.value = 'Adopt failed: ' + (e.message || e) }
+  finally { adopting.value = false }
+}
+
+// Reset trust: write 32 zero bytes to `pair` → the dongle forgets its anchor (back to unpaired).
+async function unpair() {
+  if (!selected.value) return
+  adopting.value = true; error.value = ''
+  try {
+    await writeChar(PAIR_UUID, btoa(String.fromCharCode.apply(null, new Uint8Array(32))))
+    await sleep(350)
+    await rereadInfo()
+    if (isPaired.value) throw new Error('the Portal still reports paired')
+    flash('Trust reset — the Portal is unpaired again.')
+  } catch (e) { error.value = 'Reset trust failed: ' + (e.message || e) }
+  finally { adopting.value = false }
+}
+
+// Load a signed module in chunks, then trigger run; STATUS lines stream into the log.
+async function loadChunks(bytes) {
+  const mtu = (AN && AN.bleMtuSize) ? (AN.bleMtuSize() || 23) : 185
+  const chunkData = Math.max(16, Math.min(180, mtu - 3 - 4)) // minus ATT overhead (3) + our 4-byte header
+  let seq = 0
+  for (let off = 0; off < bytes.length; off += chunkData) {
+    const slice = bytes.subarray(off, Math.min(off + chunkData, bytes.length))
+    const first = off === 0 ? 0x01 : 0x00
+    const last = (off + chunkData >= bytes.length) ? 0x02 : 0x00
+    const frame = new Uint8Array(4 + slice.length)
+    frame[0] = first | last; frame[1] = 0; frame[2] = (seq >> 8) & 0xff; frame[3] = seq & 0xff
+    frame.set(slice, 4)
+    await writeChar(LOAD_UUID, bytesToB64(frame))
+    seq++
   }
 }
 
-onBeforeUnmount(async () => { await stopScan(); await disconnect() })
+async function loadAndRun() {
+  if (!selected.value) return
+  const id = selectedModuleId.value || (modulesList.value[0] && modulesList.value[0].id)
+  if (!id) { error.value = 'Pick a module first.'; return }
+  running.value = true; error.value = ''; statusLines.value = []
+  try {
+    const signed = await portal.sign({ id })           // core signs the module with the instance key
+    if (!signed.envelope_b64) throw new Error('core did not return a signed envelope')
+    startNotifPoll()
+    await loadChunks(b64ToBytes(signed.envelope_b64))  // push the signed envelope over `load`
+    await writeChar(RUN_UUID, btoa('run'))             // trigger execution
+    flash('Module sent — watch Status below.')
+  } catch (e) { error.value = 'Load/Run failed: ' + (e.message || e) }
+  finally { running.value = false }
+}
+
+onMounted(loadLibrary)
+onBeforeUnmount(async () => { stopNotifPoll(); await stopScan(); await disconnect() })
 </script>
 
 <template>
@@ -353,9 +483,6 @@ onBeforeUnmount(async () => { await stopScan(); await disconnect() })
           <div class="truncate text-[11px] text-slate-500">{{ selected.deviceId }}</div>
         </div>
         <div class="ml-auto flex flex-wrap items-center gap-2">
-          <button v-if="connected" class="glass glass-hover px-2.5 py-1 text-xs text-slate-300 disabled:opacity-40" :disabled="registering" @click="register">
-            <Spinner v-if="registering" size="xs" class="mr-1" />Register
-          </button>
           <button class="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200" @click="clearSelection">Close</button>
         </div>
       </div>
@@ -388,10 +515,6 @@ onBeforeUnmount(async () => { await stopScan(); await disconnect() })
         </div>
       </div>
 
-      <p v-if="registeredId" class="mt-3 text-[13px] text-emerald-300">
-        Registered. <RouterLink to="/fleet" class="underline hover:text-emerald-200">Open it in the Fleet →</RouterLink>
-      </p>
-
       <!-- Optional live STATUS -->
       <div v-if="statusLines.length" class="mt-3 border-t border-white/5 pt-3">
         <h4 class="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Status</h4>
@@ -400,13 +523,43 @@ onBeforeUnmount(async () => { await stopScan(); await disconnect() })
         </div>
       </div>
 
-      <!-- Module management — deliberately not wired in v1. -->
-      <div class="mt-4 border-t border-white/5 pt-3">
-        <h4 class="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Modules</h4>
-        <div class="flex flex-wrap items-center gap-2">
-          <button class="glass px-2.5 py-1 text-xs text-slate-500" disabled title="Not wired yet">Load module</button>
-          <button class="glass px-2.5 py-1 text-xs text-slate-500" disabled title="Not wired yet">Run module</button>
-          <span class="pill border border-white/10 bg-white/5 text-[10px] text-slate-500">coming soon</span>
+      <!-- Control plane: adopt (register + pair), then load + run signed modules (PORTAL-PROTOCOL.md) -->
+      <div v-if="connected" class="mt-4 border-t border-white/5 pt-3">
+        <h4 class="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Control</h4>
+
+        <!-- Not yet adopted: one action does both sides (Fleet row + trust anchor on the dongle) -->
+        <div v-if="!adopted" class="rounded-lg border border-violet-400/20 bg-violet-400/[0.04] p-3">
+          <p class="mb-2 text-[12px] leading-relaxed text-slate-300">
+            <span class="font-semibold text-slate-100">Adopt this Portal</span> to use it. One step: it's added to
+            your <span class="text-slate-100">Fleet</span>, and your instance's signing key is stored on the dongle
+            so it will only ever run modules <span class="text-slate-100">you</span> signed — the line that keeps it
+            a tool, not a BadUSB gadget.
+          </p>
+          <button class="glass glass-hover px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40" :disabled="adopting" @click="adopt">
+            <Spinner v-if="adopting" size="xs" class="mr-1" />Adopt this Portal
+          </button>
+        </div>
+
+        <!-- Adopted: pick a signed module and load + run it -->
+        <div v-else>
+          <div class="mb-2 flex flex-wrap items-center gap-2 text-[11px]">
+            <span class="pill border border-emerald-400/30 bg-emerald-400/10 text-emerald-300">adopted</span>
+            <RouterLink to="/fleet" class="text-slate-400 underline hover:text-slate-200">Open in Fleet →</RouterLink>
+            <button class="ml-auto text-slate-500 hover:text-amber-300 disabled:opacity-40" :disabled="adopting" @click="unpair">Reset trust</button>
+          </div>
+          <div v-if="modulesList.length" class="flex flex-wrap items-center gap-2">
+            <select v-model="selectedModuleId" class="glass bg-transparent px-2.5 py-1 text-xs text-slate-200">
+              <option v-for="m in modulesList" :key="m.id" :value="m.id" class="bg-slate-900 text-slate-200">{{ m.name }} · {{ m.steps }} steps</option>
+            </select>
+            <button class="glass glass-hover px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-40" :disabled="running" @click="loadAndRun">
+              <Spinner v-if="running" size="xs" class="mr-1" />Load &amp; Run
+            </button>
+            <span class="pill border border-emerald-400/20 bg-emerald-400/5 text-[10px] text-emerald-300/80">signed by your instance</span>
+          </div>
+          <p v-else class="text-[12px] text-slate-500">
+            The core returned no module library — is asmltr core reachable? (<code class="text-slate-400">/v2/portal/modules</code>)
+          </p>
+          <p v-if="selectedDesc" class="mt-2 text-[11px] leading-relaxed text-slate-500">{{ selectedDesc }}</p>
         </div>
       </div>
     </article>

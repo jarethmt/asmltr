@@ -42,6 +42,7 @@ const trust = require('./trust/store'); // unified auth/trust/capability framewo
 const deviceStore = require('./devices/store'); // device registry — the machines asmltr drives (docs/DEVICE-REGISTRY.md)
 const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
 const deviceShell = require('./devices/shell'); // shell sessions on registered machines — one PTY, many watchers
+const portalModules = require('./portal/modules'); // Portal (BLE dongle) module signer + library (docs/PORTAL-PROTOCOL.md)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
@@ -2151,6 +2152,20 @@ app.delete('/v2/devices/:id', (req, res) => res.json({ ok: deviceStore.devices.r
 
 app.post('/v2/devices/:id/transports', (req, res) => { try { res.status(201).json(deviceStore.transports.upsert(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.delete('/v2/devices/:id/transports/:transport', (req, res) => res.json({ ok: deviceStore.transports.remove(req.params.id, req.params.transport) }));
+
+// --- Portal (BLE dongle) control plane — module signer + library (docs/PORTAL-PROTOCOL.md) ------
+// Same exposure convention as /v2/devices: core binds localhost, the dashboard fronts it with
+// session auth. The signing key's PUBLIC half is safe to return; the private half never leaves core.
+app.get('/v2/portal/signing-key', async (req, res) => { try { res.json(await portalModules.publicKey(vault)); } catch (e) { res.status(502).json({ error: e.message }); } });
+app.get('/v2/portal/modules', (req, res) => res.json({ modules: portalModules.library() }));
+app.post('/v2/portal/modules/sign', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const mod = b.module || (b.id ? portalModules.getModule(b.id) : null);
+    if (!mod) return res.status(400).json({ error: 'provide {module} or a known library {id}' });
+    res.json(await portalModules.signModule(vault, mod));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 // Mint a one-time enrollment code. The response carries the code; it is not a credential and is
 // useless after one redemption or its TTL, whichever comes first.

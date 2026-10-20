@@ -579,6 +579,13 @@ export const devices = {
   kill: (sid) => reqCore('DELETE', `/v2/device-sessions/${encodeURIComponent(sid)}`),
 }
 
+// Portal (BLE dongle) control plane — module signer + library (docs/PORTAL-PROTOCOL.md).
+export const portal = {
+  signingKey: () => getCore('/v2/portal/signing-key'),
+  modules: () => getCore('/v2/portal/modules'),
+  sign: (body) => postCore('/v2/portal/modules/sign', body),
+}
+
 const RD_TOKEN_KEY = 'asmltr.rd.token'
 export const rd = {
   // Prefer a device-local token the owner set; otherwise fall back to the token injected by nginx into
