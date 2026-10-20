@@ -26,7 +26,10 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   The matching is lexical, not embeddings, so a word has to appear in a name or a topic. Because these are cross-channel reads of the kind
   [#132](https://github.com/jarethmt/asmltr/issues/132) describes, and the gate belongs in core, they
   ship conservative: DMs and operator-disabled channels are excluded unless asked for by name, and
-  every op emits a `control` event carrying the arguments and not the messages.
+  every op emits a `control` event carrying the arguments and not the messages. `search` matches
+  plain text only: a `/regex/` query is refused with a 400 instead of compiled, because a pattern
+  from a caller runs on the connector's own child process and `(a+)+$` backtracks exponentially
+  against a few dozen characters, which no pattern-length or message-length cap bounds.
   ([#164](https://github.com/jarethmt/asmltr/issues/164))
 
 - **The Android notification reader no longer talks over you** (mobile app 0.9.0). It asks whether the

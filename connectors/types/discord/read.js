@@ -284,8 +284,32 @@ async function fetchHistory(deps, args = {}) {
 async function searchMessages(deps, args = {}) {
   const needle = String(args.q || '').trim();
   if (!needle) { const e = new Error('search needs q'); e.code = 'BAD_REQUEST'; throw e; }
-  const rx = /^\/(.+)\/([gimsu]*)$/.exec(needle);
-  const test = rx ? (s) => new RegExp(rx[1], rx[2].replace('g', '')).test(s) : (s) => lower(s).includes(lower(needle));
+  // A `/pattern/flags` needle used to be handed to `new RegExp` and tested against every message.
+  // That is a caller-supplied program running on this connector's event loop, and the scan reaches up
+  // to SCAN_CAP messages in every channel the caller can read. `(a+)+$` against a few dozen
+  // characters of 'a' backtracks exponentially and wedges the child process the manager spawned for
+  // this instance: every Discord session served by it stops, and core's proxied request hangs until
+  // it times out.
+  //
+  // No cap bounds that. The blow-up is exponential in the length of the TEXT being matched, not in
+  // the pattern -- `(a+)+$` is six characters -- so a pattern-length limit buys nothing, and a
+  // message-length limit small enough to matter would have to be shorter than a sentence. The real
+  // options are a linear-time engine or not compiling caller input. re2 is a native addon, and this
+  // repo aborted its own CI on a native addon under Node 24.19 two months ago (#120, fixed by moving
+  // better-sqlite3 to N-API); taking that risk for an unshipped convenience is the wrong trade.
+  //
+  // So the pattern is not compiled. A pattern-shaped needle is REFUSED rather than quietly searched
+  // as literal text, because silently returning zero matches for `/jam+ed/` reads as a broken
+  // search. Raised by Eve reviewing #165. If regex search is wanted later it arrives with a
+  // linear-time engine and a design note, not with `new RegExp`.
+  if (/^\/.+\/[gimsuy]*$/.test(needle)) {
+    const e = new Error('search takes plain text, not a /regex/: a caller-supplied pattern can stall this connector (docs/connectors/discord.md)');
+    e.code = 'BAD_REQUEST';
+    throw e;
+  }
+  // Folded once, not once per message: the old line called lower(needle) inside the test closure.
+  const hay = lower(needle);
+  const test = (s) => lower(s).includes(hay);
 
   const perChannel = clamp(args.scan, SCAN_DEFAULT, SCAN_CAP);
   const limit = clamp(args.limit, 50, 500);
@@ -337,7 +361,6 @@ async function searchMessages(deps, args = {}) {
 
   return {
     query: needle,
-    regex: !!rx,
     matches,
     count: matches.length,
     scanned,

@@ -215,9 +215,19 @@ those words is in its name or topic. Set a channel topic and it becomes findable
 scoring entirely.
 
 **`search` is a scan, not an index.** Discord's message search endpoint is user-only and closed to
-bot tokens, so `search` walks recent history per channel and matches text (or a `/regex/`). The
-response carries `scanned` and `truncated` for that reason: zero matches means "none in the last
+bot tokens, so `search` walks recent history per channel and matches plain text, case-insensitively.
+The response carries `scanned` and `truncated` for that reason: zero matches means "none in the last
 `scan` messages of each channel", not "not said". Raise `--scan` to look further back.
+
+**No `/regex/`.** A `/pattern/`-shaped query is refused with a 400 rather than compiled. A pattern
+from a caller is a program running on the connector child process the manager spawned, and the scan
+reaches up to 1000 messages in every channel the caller can read: `(a+)+$` against a few dozen
+characters backtracks exponentially, wedges that process so every Discord session it serves stops,
+and leaves core's proxied request hanging until it times out. No limit fixes that, because the
+blow-up is exponential in the length of the text being matched and not in the pattern, which is six
+characters long. It is refused rather than searched as literal text so a `/jam+ed/` query says why
+instead of returning nothing. Regex search can come back on a linear-time engine; it is not coming
+back on `new RegExp`.
 
 ### What it will not read by default
 

@@ -200,12 +200,26 @@ test('search finds a match and reports how much it actually scanned', async () =
   assert.match(r.note, /bounded scan/);
 });
 
-test('search accepts a /regex/ and matches case-insensitively otherwise', async () => {
+test('search matches case-insensitively', async () => {
   const plain = await read.searchMessages(deps(), { q: 'PRINTER', target: 'c-general' });
   assert.equal(plain.count, 1, 'plain text is case-insensitive');
-  const rx = await read.searchMessages(deps(), { q: '/jam+ed/', target: 'c-general' });
-  assert.equal(rx.regex, true);
-  assert.equal(rx.count, 1);
+});
+
+test('a /regex/ needle is refused, not compiled and not silently taken as literal text', async () => {
+  // The pattern would otherwise be a caller-supplied program on this connector's event loop, and no
+  // input cap bounds catastrophic backtracking: `(a+)+$` is six characters. Refusing with a reason
+  // beats returning zero matches, which reads as a broken search.
+  await assert.rejects(
+    () => read.searchMessages(deps(), { q: '/jam+ed/', target: 'c-general' }),
+    (e) => e.code === 'BAD_REQUEST' && /plain text/.test(e.message),
+  );
+  await assert.rejects(
+    () => read.searchMessages(deps(), { q: '/(a+)+$/i', target: 'c-general' }),
+    (e) => e.code === 'BAD_REQUEST',
+  );
+  // The text inside a refused pattern still searches fine as plain text.
+  const ok = await read.searchMessages(deps(), { q: 'jammed', target: 'c-general' });
+  assert.equal(ok.count, 1);
 });
 
 test('search across channels skips the ones it cannot read instead of failing', async () => {
