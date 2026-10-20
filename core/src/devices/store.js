@@ -100,7 +100,7 @@ const now = () => Date.now();
 const J = (s, d) => { try { return JSON.parse(s || ''); } catch { return d; } };
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
-const TRANSPORTS = ['rd', 'ssh', 'adb', 'device-gw', 'serial', 'http'];
+const TRANSPORTS = ['rd', 'ssh', 'adb', 'device-gw', 'serial', 'http', 'ble'];  // 'ble' = asmltr Portal control link (BLE GATT)
 const KINDS = ['workstation', 'phone', 'sbc', 'appliance', 'printer', 'other'];
 const CAPABILITIES = ['view', 'control', 'shell', 'file', 'wake'];
 
