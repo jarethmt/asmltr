@@ -7,7 +7,7 @@ const path = require('path');
 const http = require('http');
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-placefeed-'));
-process.env.ASMLTR_CORE_DB = path.join(TMP, 'core.db');
+process.env.ASMLTR_TRUST_DB = path.join(TMP, 'trust.db');   // places shares the trust DB, like devices
 const places = require('../core/src/places');
 const feed = require('../core/src/places-feed');
 

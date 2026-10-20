@@ -28,14 +28,16 @@
  * directory that says it knows nothing.
  */
 
-const Database = require('better-sqlite3');
-
-const DB_PATH = require('./db-path').coreDbPath();
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+// The trust store's handle, the way core/src/devices/store.js takes it. A place is keyed
+// (surface, scope_id), which is the SAME tuple grants(scope_surface, scope_id) uses, so living in
+// the same database is what lets a grant's scope be rendered as "3DPP#general" by a join instead of
+// a second lookup. The first cut of this used coreDbPath() alongside streams.js and drafts.js; the
+// devices registry landed on main afterwards and set the precedent that a registry of addressable
+// things sits next to principals and grants.
+const { db, DB_PATH } = require('./trust/store');
 db.exec(`CREATE TABLE IF NOT EXISTS places (
   surface      TEXT NOT NULL,              -- discord | telegram | email | … (same vocabulary as events)
-  scope_id     TEXT NOT NULL,              -- the platform's id; the SAME key trust uses for grant scopes
+  scope_id     TEXT NOT NULL,              -- the platform's id; joins grants(scope_surface, scope_id)
   kind         TEXT,                       -- guild | channel | thread | chat | mailbox
   name         TEXT,                       -- as the platform reports it; a refresh overwrites this
   parent_id    TEXT,                       -- guild/server id for a channel; null for a guild

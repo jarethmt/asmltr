@@ -9,7 +9,7 @@ const path = require('path');
 // store). Closed in test.after: a better-sqlite3 Statement whose destructor runs after the worker's
 // environment is gone aborts the process on node >= 24.19 (see reference: bs3 must be >= 13 / N-API).
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-places-'));
-process.env.ASMLTR_CORE_DB = path.join(TMP, 'core.db');
+process.env.ASMLTR_TRUST_DB = path.join(TMP, 'trust.db');   // places shares the trust DB, like devices
 const places = require('../core/src/places');
 
 test.after(() => {

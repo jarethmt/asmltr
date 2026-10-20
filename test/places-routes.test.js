@@ -8,7 +8,7 @@ const path = require('path');
 const express = require(require.resolve('express', { paths: [path.join(__dirname, '..', 'core', 'src')] }));
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'asmltr-placeroutes-'));
-process.env.ASMLTR_CORE_DB = path.join(TMP, 'core.db');
+process.env.ASMLTR_TRUST_DB = path.join(TMP, 'trust.db');   // places shares the trust DB, like devices
 const places = require('../core/src/places');
 const { mountPlaceRoutes } = require('../core/src/places-routes');
 

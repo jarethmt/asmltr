@@ -235,7 +235,9 @@ asmltr places import                   # read connectors/types/discord/channel-a
 
 asmltr has always had a directory of **who**: the trust store keys people as
 `identifiers (surface, value) -> principal`. This is the directory of **where**, keyed
-`(surface, scope_id)`, which is the same key trust already uses to scope a grant.
+`(surface, scope_id)`, which is the same key trust already uses to scope a grant. It lives in the
+trust database next to `principals`, `grants` and the `devices` registry, so a grant's scope can be
+rendered as a name by a join rather than a second lookup.
 
 Why it exists: `channel-aliases.json` maps an alias to a channel id, is read once at connector start,
 and lives inside the connector process. Its own `.example` documents a `channels` block carrying

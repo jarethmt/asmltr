@@ -17,8 +17,9 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   inside the connector process where core, the CLI and a turn cannot reach it, and the `channels`
   block its own `.example` documents (`{ server, channel, description }` per id) has never been read
   by any code. The knowledge ended up in one agent's private notes, invisible to the send path and to
-  every other session, going stale silently. New `places` and `place_labels` tables in the core DB
-  (following `streams.js`/`drafts.js`: `coreDbPath()`, own handle, own `CREATE TABLE IF NOT EXISTS`),
+  every other session, going stale silently. New `places` and `place_labels` tables in the **trust**
+  DB, taking its handle the way `core/src/devices/store.js` does, so a place sits beside the
+  `principals`, `grants` and `devices` it is keyed against,
   `/v2/places` routes, and `asmltr places [list|get|resolve|set|unset|refresh|import]`. A **role**
   names what a place is for and outlives a platform rename, because labels are a separate table from
   the names a refresh overwrites. `resolve` goes id, then alias or role, then exact name, then loose,
