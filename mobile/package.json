@@ -1,6 +1,6 @@
 {
   "name": "asmltr-mobile",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "private": true,
   "description": "asmltr mobile assistant \u2014 Capacitor shell over the voice web brain + a native assist trigger",
   "scripts": {
@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",
-    "@capacitor/core": "^6.1.2"
+    "@capacitor/core": "^6.1.2",
+    "@capacitor-community/bluetooth-le": "^6.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.1.2"
