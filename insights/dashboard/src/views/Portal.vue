@@ -184,6 +184,7 @@ async function connect(d) {
   info.value = null
   statusLines.value = []
   error.value = ''
+  if (AN) { await connectNative(d); return }
   try {
     await ensureBle()
     await BleClient.connect(d.deviceId, onDisconnect)
@@ -209,12 +210,34 @@ async function connect(d) {
   }
 }
 
+// Native (in-app) connect: GATT connect + read INFO via AsmltrNative, polling for the result.
+async function connectNative(d) {
+  const r = AN.bleConnectAndRead(d.deviceId, SVC_UUID, INFO_UUID)
+  if (r !== 'ok') { connecting.value = false; error.value = 'Connect failed (' + r + ').'; return }
+  await new Promise((resolve) => {
+    const poll = setInterval(() => {
+      let res
+      try { res = JSON.parse(AN.bleGattResult() || '{}') } catch { return }
+      if (res.state === 'done') {
+        clearInterval(poll); clearTimeout(to); connected.value = true; connecting.value = false
+        try { info.value = JSON.parse(res.value) } catch { info.value = { _raw: res.value } }
+        resolve()
+      } else if (res.state === 'error' || res.state === 'disconnected') {
+        clearInterval(poll); clearTimeout(to); connecting.value = false; connected.value = false
+        error.value = 'Connect: ' + (res.error || res.state); resolve()
+      }
+    }, 500)
+    const to = setTimeout(() => { clearInterval(poll); if (connecting.value) { connecting.value = false; error.value = 'Connect timed out.' } resolve() }, 20000)
+  })
+}
+
 function onDisconnect() {
   connected.value = false
   // Keep `selected`/`info` so the card still shows what we saw, but mark it offline.
 }
 
 async function disconnect() {
+  if (AN) { try { AN.bleDisconnect() } catch (_) { /* ignore */ } connected.value = false; return }
   const id = selected.value && selected.value.deviceId
   if (id) {
     try { await BleClient.stopNotifications(id, SVC_UUID, STATUS_UUID) } catch { /* ignore */ }

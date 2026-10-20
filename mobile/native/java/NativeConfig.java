@@ -18,6 +18,12 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothProfile;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
@@ -109,6 +115,60 @@ public class NativeConfig {
   public void bleStopScan() {
     try { if (bleScanner != null && bleCallback != null) bleScanner.stopScan(bleCallback); } catch (Exception e) {}
     bleCallback = null;
+  }
+
+  // --- BLE connect + read one characteristic (identity) -----------------------------------------
+  private BluetoothGatt gatt;
+  private volatile String gattState = "idle";   // idle|connecting|connected|reading|done|error|disconnected
+  private volatile String gattValue = "";        // last read characteristic value (UTF-8)
+  private volatile String gattError = "";
+  private java.util.UUID readSvc, readChar;
+
+  @JavascriptInterface
+  public String bleConnectAndRead(String deviceId, String serviceUuid, String charUuid) {
+    try {
+      BluetoothManager m = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+      BluetoothAdapter a = m != null ? m.getAdapter() : null;
+      if (a == null) return "no-adapter";
+      bleStopScan();
+      try { if (gatt != null) { gatt.close(); gatt = null; } } catch (Exception e) {}
+      gattState = "connecting"; gattValue = ""; gattError = "";
+      readSvc = java.util.UUID.fromString(serviceUuid);
+      readChar = java.util.UUID.fromString(charUuid);
+      BluetoothDevice dev = a.getRemoteDevice(deviceId);
+      gatt = dev.connectGatt(ctx, false, new BluetoothGattCallback() {
+        @Override public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
+          if (newState == BluetoothProfile.STATE_CONNECTED) { gattState = "connected"; try { g.discoverServices(); } catch (Exception e) {} }
+          else if (newState == BluetoothProfile.STATE_DISCONNECTED) { if (!"done".equals(gattState) && !"error".equals(gattState)) gattState = "disconnected"; }
+        }
+        @Override public void onServicesDiscovered(BluetoothGatt g, int status) {
+          try {
+            BluetoothGattService svc = g.getService(readSvc);
+            if (svc == null) { gattState = "error"; gattError = "service not found"; return; }
+            BluetoothGattCharacteristic ch = svc.getCharacteristic(readChar);
+            if (ch == null) { gattState = "error"; gattError = "characteristic not found"; return; }
+            gattState = "reading"; g.readCharacteristic(ch);
+          } catch (Exception e) { gattState = "error"; gattError = String.valueOf(e.getMessage()); }
+        }
+        @Override public void onCharacteristicRead(BluetoothGatt g, BluetoothGattCharacteristic ch, int status) {
+          if (status == BluetoothGatt.GATT_SUCCESS && ch.getValue() != null) { gattValue = new String(ch.getValue()); gattState = "done"; }
+          else { gattState = "error"; gattError = "read status " + status; }
+        }
+      });
+      return "ok";
+    } catch (Exception e) { gattState = "error"; gattError = String.valueOf(e.getMessage()); return "err:" + e.getMessage(); }
+  }
+
+  @JavascriptInterface
+  public String bleGattResult() {
+    try { JSONObject o = new JSONObject(); o.put("state", gattState); o.put("value", gattValue); o.put("error", gattError); return o.toString(); }
+    catch (Exception e) { return "{\"state\":\"error\"}"; }
+  }
+
+  @JavascriptInterface
+  public void bleDisconnect() {
+    try { if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; } } catch (Exception e) {}
+    gattState = "idle";
   }
 
   /** Start the always-on device link (idempotent). */
