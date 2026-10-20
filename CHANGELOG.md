@@ -10,19 +10,6 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
-- **`asmltr peers`: the other Claude Code sessions on the box.** Claude Code 2.1.x gave sessions a
-  name, a live status and mailboxes, and asmltr could not see any of it: a `claude --bg` session
-  started outside asmltr does not appear in `asmltr ls`, and even a hook-tracked one carries no peer
-  name or state. `asmltr peers` reads the supported `claude agents --json` roster and prints it with
-  an `ASMLTR` column saying which rows the `claude-code` connector already tracks, so an untracked
-  session is visible rather than invisible. `blocked` is called out separately from `working` because
-  "waiting on me" and "busy" are different states; whether a long-blocked session is parked on purpose
-  is the operator's call, not the listing's. Reading only: asmltr cannot deliver into a
-  running Claude session, since `SendMessage` works over a per-session socket with no supported entry
-  point from outside, and nothing here touches that socket or the daemon roster. The reverse direction
-  already worked, because a Claude session can run `asmltr send` from Bash.
-  ([#166](https://github.com/jarethmt/asmltr/issues/166))
-
 - **The Android notification reader no longer talks over you** (mobile app 0.9.0). It asks whether the
   ear is actually free before reading a synopsis: a live call (cellular or VoIP), Do Not Disturb, a
   navigation prompt, an alarm or another assistant all mean "not now". Music and podcasts are the
@@ -37,6 +24,19 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   three hours. `asmltr notify`'s spoken step goes through the same door, so a proactive message can't
   barge into a call either. New settings: hold-instead-of-interrupt, respect-DND, wait-out-navigation,
   a live gate readout, and a **Test held badge** button.
+
+- **`asmltr peers`: the other Claude Code sessions on the box.** Claude Code 2.1.x gave sessions a
+  name, a live status and mailboxes, and asmltr could not see any of it: a `claude --bg` session
+  started outside asmltr does not appear in `asmltr ls`, and even a hook-tracked one carries no peer
+  name or state. `asmltr peers` reads the supported `claude agents --json` roster and prints it with
+  an `ASMLTR` column saying which rows the `claude-code` connector already tracks, so an untracked
+  session is visible rather than invisible. `blocked` is called out separately from `working` because
+  "waiting on me" and "busy" are different states; whether a long-blocked session is parked on purpose
+  is the operator's call, not the listing's. Reading only: asmltr cannot deliver into a
+  running Claude session, since `SendMessage` works over a per-session socket with no supported entry
+  point from outside, and nothing here touches that socket or the daemon roster. The reverse direction
+  already worked, because a Claude session can run `asmltr send` from Bash.
+  ([#166](https://github.com/jarethmt/asmltr/issues/166))
 
 - **Integrations are now the home for outward-facing capability**, defined as an *optional,
   per-install capability the agent reaches outward to use* — see
