@@ -20,6 +20,7 @@ const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { isImage } = require('../../../shared/mimeguess');
 const { MediaGroupCoalescer } = require('./media-group'); // batch album photos into one turn
+const tgfmt = require('../../../shared/telegram-format'); // render model markdown -> Telegram HTML
 
 const meta = {
   type: 'telegram',
@@ -100,7 +101,7 @@ async function start(ctx) {
         channel_context: { chatId },
       });
       for (const a of actions) {
-        if (a.type === 'reply') await sendChunked(bot, chatId, a.text);
+        if (a.type === 'reply') await sendChunked(bot, chatId, a.text, ctx);
         else if (a.type === 'status') await bot.sendMessage(chatId, `_${a.text}_`, { parse_mode: 'Markdown' }).catch(() => {});
         // notify/suppress: not surfaced to the user
       }
@@ -245,11 +246,22 @@ async function start(ctx) {
   };
 }
 
-async function sendChunked(bot, chatId, textRaw) {
+// Render the reply as Telegram HTML and send it in <=cap chunks. The model emits generic markdown
+// (the core is formatting-agnostic); raw, it shows literal `**`/`#`/backticks/pipes, and
+// parse_mode:'Markdown' on raw model output 400s and drops the message. So we convert to Telegram's
+// HTML flavor (shared/telegram-format), and if a chunk still won't parse we resend THAT chunk tag-free
+// so a reply is never dropped over a formatting error.
+async function sendChunked(bot, chatId, textRaw, ctx) {
   const text = String(textRaw || '');
-  const MAX = 3900;
-  if (text.length <= MAX) { await bot.sendMessage(chatId, text).catch(async () => { await bot.sendMessage(chatId, text, {}); }); return; }
-  for (let i = 0; i < text.length; i += MAX) await bot.sendMessage(chatId, text.slice(i, i + MAX)).catch(() => {});
+  if (!text.trim()) return;
+  for (const chunk of tgfmt.toTelegramChunks(text)) {
+    try {
+      await bot.sendMessage(chatId, chunk, { parse_mode: 'HTML', disable_web_page_preview: true });
+    } catch (e) {
+      if (ctx && ctx.log) ctx.log(`html send failed, plain fallback: ${e.message}`);
+      await bot.sendMessage(chatId, tgfmt.htmlToPlain(chunk)).catch(() => {});
+    }
+  }
 }
 
 // node-telegram-bot-api sets e.code === 'EFATAL' on an unrecoverable polling failure (the loop has
