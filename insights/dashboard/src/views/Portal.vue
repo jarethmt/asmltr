@@ -9,9 +9,16 @@
 // placeholders — this ships discovery + register, nothing more.
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { BleClient } from '@capacitor-community/bluetooth-le'
+import { Capacitor } from '@capacitor/core'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
 import { devices } from '@/services/api'
+
+// Are we running inside the asmltr app (native webview) vs a desktop browser? When in-app,
+// BleClient routes scan/connect to the app's NATIVE Bluetooth bridge (the Capacitor plugin in the
+// APK) — no Web Bluetooth, so no Chrome/Edge requirement. In a browser it uses Web Bluetooth.
+const inApp = Capacitor.isNativePlatform()
+const bleModeLabel = inApp ? 'asmltr app · native Bluetooth' : 'browser · Web Bluetooth (Chrome/Edge)'
 
 // --- The Portal dongle's GATT (exact — do not change) -------------------------------------------
 const NAME_PREFIX = 'asmltr-portal-'
@@ -54,7 +61,9 @@ async function ensureBle() {
 function bleUnavailableMsg(e) {
   const m = (e && e.message) || String(e)
   if (/not .*(available|supported)|undefined|bluetooth/i.test(m)) {
-    return 'Bluetooth is unavailable here. Use Chrome or Edge on desktop (Firefox/Safari have no Web Bluetooth), or open the asmltr app.'
+    return inApp
+      ? 'Bluetooth is unavailable — grant the asmltr app Bluetooth + Location permission and make sure Bluetooth is on.'
+      : 'Bluetooth is unavailable here. Use Chrome or Edge on desktop (Firefox/Safari have no Web Bluetooth), or open the asmltr app.'
   }
   return m
 }
@@ -230,9 +239,13 @@ onBeforeUnmount(async () => { await stopScan(); await disconnect() })
       <span class="pill border border-white/10 bg-white/5 text-slate-400">{{ found.length }} found</span>
       <span v-if="connected" class="pill border border-emerald-400/30 bg-emerald-400/10 text-emerald-300">connected</span>
       <span class="pill border border-white/10 bg-white/5 text-slate-500">looks for service …727401</span>
+      <span class="pill border" :class="inApp ? 'border-brand-violet/30 bg-brand-violet/10 text-violet-200' : 'border-white/10 bg-white/5 text-slate-400'">{{ bleModeLabel }}</span>
     </div>
 
-    <p class="mb-3 text-[12px] leading-relaxed text-slate-500">
+    <p v-if="inApp" class="mb-3 text-[12px] leading-relaxed text-slate-500">
+      Running inside the asmltr app — scanning over the device's <span class="text-slate-300">native Bluetooth</span>.
+    </p>
+    <p v-else class="mb-3 text-[12px] leading-relaxed text-slate-500">
       Desktop needs <span class="text-slate-300">Chrome</span> or <span class="text-slate-300">Edge</span> (Web Bluetooth) —
       Firefox and Safari aren't supported. On Android/iOS, open the asmltr app for native Bluetooth.
     </p>

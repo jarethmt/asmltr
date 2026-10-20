@@ -18,7 +18,7 @@ import {
   faCircleArrowUp, faCircleCheck, faCircleXmark, faCoins, faSitemap,
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
   faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
-  faDatabase, faRightFromBracket, faLayerGroup,
+  faDatabase, faRightFromBracket, faLayerGroup, faTowerBroadcast,
 } from '@fortawesome/free-solid-svg-icons'
 import { faDiscord, faTelegram, faGithub } from '@fortawesome/free-brands-svg-icons'
 
@@ -31,7 +31,7 @@ library.add(
   faCircleArrowUp, faCircleCheck, faCircleXmark, faCoins, faSitemap,
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
   faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
-  faDatabase, faRightFromBracket, faLayerGroup,
+  faDatabase, faRightFromBracket, faLayerGroup, faTowerBroadcast,
   faDiscord, faTelegram, faGithub,
 )
 
@@ -64,6 +64,7 @@ const GLYPH_TO_FA = {
   '🐙': ['fab', 'github'],
   '⌨': ['fas', 'keyboard'],
   '🖥': ['fas', 'desktop'],
+  '🌀': ['fas', 'tower-broadcast'],   // Portal (BLE dongle — advertises to be discovered)
   '•': ['fas', 'circle'],
   // ---- session event / activity icons ----
   '›': ['fas', 'angle-right'],
