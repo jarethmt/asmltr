@@ -590,6 +590,7 @@ function cmdHelp() {
   asmltr ls              list active sessions
   asmltr map             active sessions grouped by working dir (collision radar)
   asmltr who <path>      which sessions recently touched a file/dir
+  asmltr peers           live Claude Code sessions on this box (--all, --cwd P)
   asmltr brief           compact summary
   asmltr events [..]     recent events  (--surface --identity --session --limit)
   asmltr tail            live global event stream
@@ -614,7 +615,6 @@ function cmdHelp() {
        drafts show <id> · send <id> · discard <id>
   asmltr mail [list]                   browse the mailbox (-n N, --unseen)
        mail read <uid> [--seen] · mail search "<q>"
-  asmltr peers                         live Claude Code sessions on this box (--all, --cwd P)
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -1012,6 +1012,7 @@ async function cmdVault(rest, f) {
       case 'ls': return await cmdLs();
       case 'map': return await cmdMap();
       case 'who': return await cmdWho(rest);
+      case 'peers': return await cmdPeers(rest, f);   // sibling of ls/map/who: other sessions, not ours
       case 'brief': return await cmdBrief();
       case 'events': return await cmdEvents(f);
       case 'system': return await cmdSystem();
@@ -1026,7 +1027,6 @@ async function cmdVault(rest, f) {
       case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
-      case 'peers': return await cmdPeers(rest, f);
       case 'steer': return await cmdSteer(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
