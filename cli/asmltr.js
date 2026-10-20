@@ -278,6 +278,41 @@ async function cmdSend(rest) {
   }
   console.log(r.ok ? A.grn(`✓ sent ${file ? 'file ' + file : 'text'} to ${channel}:${target}${r.via ? ' (' + r.via + ')' : ''}${r.assimilated ? ' · assimilated' : ''}`) : A.red('send failed: ' + (r.error || JSON.stringify(r))));
 }
+async function cmdPeers(rest, f) {
+  // Live Claude Code sessions on this box, from `claude agents --json` (issue #166). These are PEERS,
+  // not asmltr sessions: asmltr did not start them and cannot message them, so they are listed
+  // separately rather than mixed into `asmltr ls`.
+  const { listAgents, tagKnown } = require('../shared/claude-agents');
+  const r = await listAgents({ all: !!f.all, cwd: f.cwd });
+  if (!r.agents.length) {
+    // Say WHY it is empty. "no claude binary" and "nothing running" are different answers.
+    return console.log(A.dim(r.error ? `no claude peers (${r.error})` : 'no claude peers running'));
+  }
+  let sessions = [];
+  try { sessions = (await api('/api/sessions?active=1')).sessions || []; } catch (_) { /* peers still list */ }
+  const rows = tagKnown(r.agents, sessions);
+
+  // pad() counts raw characters, so a coloured cell has to be padded on its PLAIN text and painted
+  // after, or the escape bytes eat the column.
+  const cell = (text, width, paint) => (paint ? paint(text) : text) + ' '.repeat(Math.max(1, width - text.length));
+  console.log(A.bold(pad('ID', 10) + pad('KIND', 12) + pad('AGE', 6) + pad('STATE', 9) + pad('ASMLTR', 8) + 'NAME  (@where)'));
+  for (const a of rows) {
+    const where = a.cwd ? String(a.cwd).split('/').filter(Boolean).pop() : '';
+    const stateTxt = a.blocked ? 'blocked' : a.working ? 'working' : (a.state || a.status || 'idle');
+    const paintState = a.blocked ? A.red : a.working ? A.grn : A.dim;
+    const label = (a.name || a.session_id || a.id) + (where ? '  @' + where : '');
+    // started_unix is seconds (it lines up with asmltr's event timestamps); ageOf wants ms.
+    console.log(pad(a.id, 10) + pad(a.kind || '?', 12) + pad(a.started_unix ? ageOf(a.started_unix * 1000) : '?', 6) +
+      cell(stateTxt, 9, paintState) +
+      cell(a.tracked_by_asmltr ? 'tracked' : 'no', 8, a.tracked_by_asmltr ? null : A.dim) + label);
+  }
+  const untracked = rows.filter((a) => !a.tracked_by_asmltr).length;
+  console.log(A.dim(`\n  ${rows.length} peer(s)${untracked ? `, ${untracked} not tracked by asmltr` : ''}`));
+  // asmltr cannot deliver into a running claude session; there is no supported interface for it.
+  // The other direction works today, so say so instead of leaving it to be discovered.
+  console.log(A.dim('  asmltr cannot message a peer; from inside one, `asmltr send` / `asmltr announce` reaches asmltr'));
+}
+
 async function cmdMap() {
   // WHAT each currently-active agent is doing + WHERE — grouped by repo (collision radar).
   const r = await api('/api/map');
@@ -443,41 +478,6 @@ async function cmdSteer(rest) {
   console.log(A.grn(`↪ steered ${key}${interrupt ? ' (interrupted its turn)' : ''}`));
   if (r.reply) console.log(A.dim('  its reply: ') + String(r.reply).replace(/\s+/g, ' ').slice(0, 200));
 }
-async function cmdPeers(rest, f) {
-  // Live Claude Code sessions on this box, from `claude agents --json` (issue #166). These are PEERS,
-  // not asmltr sessions: asmltr did not start them and cannot message them, so they are listed
-  // separately rather than mixed into `asmltr ls`.
-  const { listAgents, tagKnown } = require('../shared/claude-agents');
-  const r = await listAgents({ all: !!f.all, cwd: f.cwd });
-  if (!r.agents.length) {
-    // Say WHY it is empty. "no claude binary" and "nothing running" are different answers.
-    return console.log(A.dim(r.error ? `no claude peers (${r.error})` : 'no claude peers running'));
-  }
-  let sessions = [];
-  try { sessions = (await api('/api/sessions?active=1')).sessions || []; } catch (_) { /* peers still list */ }
-  const rows = tagKnown(r.agents, sessions);
-
-  // pad() counts raw characters, so a coloured cell has to be padded on its PLAIN text and painted
-  // after, or the escape bytes eat the column.
-  const cell = (text, width, paint) => (paint ? paint(text) : text) + ' '.repeat(Math.max(1, width - text.length));
-  console.log(A.bold(pad('ID', 10) + pad('KIND', 12) + pad('AGE', 6) + pad('STATE', 9) + pad('ASMLTR', 8) + 'NAME  (@where)'));
-  for (const a of rows) {
-    const where = a.cwd ? String(a.cwd).split('/').filter(Boolean).pop() : '';
-    const stateTxt = a.blocked ? 'blocked' : a.working ? 'working' : (a.state || a.status || 'idle');
-    const paintState = a.blocked ? A.red : a.working ? A.grn : A.dim;
-    const label = (a.name || a.session_id || a.id) + (where ? '  @' + where : '');
-    // started_unix is seconds (it lines up with asmltr's event timestamps); ageOf wants ms.
-    console.log(pad(a.id, 10) + pad(a.kind || '?', 12) + pad(a.started_unix ? ageOf(a.started_unix * 1000) : '?', 6) +
-      cell(stateTxt, 9, paintState) +
-      cell(a.tracked_by_asmltr ? 'tracked' : 'no', 8, a.tracked_by_asmltr ? null : A.dim) + label);
-  }
-  const untracked = rows.filter((a) => !a.tracked_by_asmltr).length;
-  console.log(A.dim(`\n  ${rows.length} peer(s)${untracked ? `, ${untracked} not tracked by asmltr` : ''}`));
-  // asmltr cannot deliver into a running claude session; there is no supported interface for it.
-  // The other direction works today, so say so instead of leaving it to be discovered.
-  console.log(A.dim('  asmltr cannot message a peer; from inside one, `asmltr send` / `asmltr announce` reaches asmltr'));
-}
-
 async function cmdMail(rest) {
   // asmltr mail [list] [-n N] [--unseen] | read <uid> [--seen] | search "<query>" [-n N]
   const sub = rest[0] === 'read' || rest[0] === 'search' || rest[0] === 'list' ? rest[0] : 'list';
