@@ -6,8 +6,9 @@
 import { ref, onMounted } from 'vue'
 
 const DISMISS_KEY = 'asmltr.androidBannerDismissed'
-const APK_URL = import.meta.env.VITE_ANDROID_APK_URL
-  || 'https://github.com/jarethmt/asmltr/releases/latest/download/asmltr.apk'
+// Default to the connector's live APK on this instance (always the current signed build) rather than
+// a GitHub release asset — we publish to /app/gw/download, not GitHub Releases. Override with env if needed.
+const APK_URL = import.meta.env.VITE_ANDROID_APK_URL || '/app/gw/download'
 
 const show = ref(false)
 const mode = ref('install')       // 'install' | 'update'
