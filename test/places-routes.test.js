@@ -149,3 +149,80 @@ test('the import route ignores a caller-supplied file path', async () => {
     assert.equal(seen[0].surface, 'discord', 'but surface still does');
   } finally { s2.close(); }
 });
+
+// --- a label's note is the one gated field ---------------------------------------------------
+// Names and ids leak nothing a send does not already require, so the reads stay open. A note is
+// free text a human wrote about a place, so it rides only on a request presenting the manager token.
+const getAuth = (p, tok) => fetch(base() + p, { headers: tok ? { Authorization: 'Bearer ' + tok } : {} })
+  .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+const postAuth = (p, body, tok) => fetch(base() + p, {
+  method: 'POST',
+  headers: Object.assign({ 'Content-Type': 'application/json' }, tok ? { Authorization: 'Bearer ' + tok } : {}),
+  body: JSON.stringify(body),
+}).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+const withToken = async (tok, fn) => {
+  const had = process.env.ASMLTR_MANAGER_TOKEN;
+  if (tok == null) delete process.env.ASMLTR_MANAGER_TOKEN; else process.env.ASMLTR_MANAGER_TOKEN = tok;
+  try { await fn(); } finally {
+    if (had === undefined) delete process.env.ASMLTR_MANAGER_TOKEN; else process.env.ASMLTR_MANAGER_TOKEN = had;
+  }
+};
+
+const seedNoted = async () => {
+  wipe();
+  await post('/v2/places', { surface: 'discord', scope_id: 'c9', kind: 'channel', name: 'escalations', parent_name: 'Shop' });
+  await post('/v2/places/label', { surface: 'discord', scope_id: 'c9', label: 'escalate', kind: 'role', note: 'ring Jareth first' });
+};
+
+test('with no manager token configured, notes never leave the host', async () => {
+  await withToken(null, async () => {
+    await seedNoted();
+    const l = await get('/v2/places');
+    assert.deepEqual(l.body.places[0].notes, undefined);
+    assert.equal('note' in l.body.roles[0], false);
+    assert.equal(l.body.roles[0].label, 'escalate');          // the binding itself is still public
+    const one = await get('/v2/places/discord/c9');
+    assert.deepEqual(one.body.notes, undefined);
+    const r = await get('/v2/places/resolve?ref=escalate');
+    assert.deepEqual(r.body.place.notes, undefined);
+  });
+});
+
+test('a token configured but not presented is still no access', async () => {
+  await withToken('s3cret', async () => {
+    await seedNoted();
+    assert.deepEqual((await get('/v2/places')).body.places[0].notes, undefined);
+    // A wrong token is the same answer as none, and the length mismatch must not throw.
+    assert.deepEqual((await getAuth('/v2/places', 'nope')).body.places[0].notes, undefined);
+    assert.deepEqual((await getAuth('/v2/places', 's3crez')).body.places[0].notes, undefined);
+  });
+});
+
+test('the manager token reads notes back', async () => {
+  await withToken('s3cret', async () => {
+    await seedNoted();
+    const l = await getAuth('/v2/places', 's3cret');
+    assert.deepEqual(l.body.places[0].notes, ['ring Jareth first']);
+    assert.equal(l.body.roles[0].note, 'ring Jareth first');
+    assert.deepEqual((await getAuth('/v2/places/discord/c9', 's3cret')).body.notes, ['ring Jareth first']);
+    assert.deepEqual((await getAuth('/v2/places/resolve?ref=escalate', 's3cret')).body.place.notes, ['ring Jareth first']);
+  });
+});
+
+test('a write response is not a note read oracle', async () => {
+  // setLabel and upsert both return the whole hydrated row, which carries every note already on the
+  // place. Without scrubbing the write response, a caller who can write would read notes by adding
+  // one throwaway alias.
+  await withToken('s3cret', async () => {
+    await seedNoted();
+    const unauth = await post('/v2/places/label', { surface: 'discord', scope_id: 'c9', label: 'throwaway' });
+    assert.equal(unauth.status, 200);
+    assert.deepEqual(unauth.body.place.notes, undefined);
+    const up = await post('/v2/places', { surface: 'discord', scope_id: 'c9', topic: 'x' });
+    assert.deepEqual(up.body.place.notes, undefined);
+    // The operator presenting the token still gets them.
+    const authed = await postAuth('/v2/places/label', { surface: 'discord', scope_id: 'c9', label: 'throwaway2' }, 's3cret');
+    assert.deepEqual(authed.body.place.notes, ['ring Jareth first']);
+  });
+});

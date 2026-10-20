@@ -36,7 +36,7 @@ test('the block names ids, because the id is what `asmltr send` needs', () => {
   assert.match(b, /asmltr places resolve/, 'and says how to find what is not listed');
 });
 
-test('roles lead, with what the place is for', () => {
+test('roles lead, naming the place they point at', () => {
   const b = buildPlacesBlock(store(
     [place('discord', 'c1', 'gianni-remote-work-log', 'Shop')],
     [{ surface: 'discord', scope_id: 'c1', label: 'shift-log', name: 'gianni-remote-work-log', parent_name: 'Shop', note: 'end-of-shift logs' }],
@@ -45,7 +45,18 @@ test('roles lead, with what the place is for', () => {
   const knownLine = b.indexOf('Known places');
   assert.ok(roleLine >= 0 && knownLine > roleLine, 'roles come before the raw list');
   assert.match(b, /shift-log = discord c1 \(Shop#gianni-remote-work-log\)/);
-  assert.match(b, /end-of-shift logs/);
+});
+
+test('a note stays out of the block even when the role carries one', () => {
+  // Two reasons, and the module header states both: every turn on every channel pays for this block,
+  // and a note is operator context gated on the HTTP read (core/src/places-routes.js), so a cached
+  // prompt resent to a model is the wrong carrier for it. An earlier cut appended it here.
+  const b = buildPlacesBlock(store(
+    [place('discord', 'c1', 'escalations', 'Shop')],
+    [{ surface: 'discord', scope_id: 'c1', label: 'escalate', name: 'escalations', parent_name: 'Shop', note: 'ring Jareth first' }],
+  ));
+  assert.match(b, /escalate = discord c1/, 'the binding is still there');
+  assert.equal(/ring Jareth first/.test(b), false, 'the note is not');
 });
 
 test('aliases ride along so an alias in the alias file is usable without a lookup', () => {

@@ -112,7 +112,12 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   connectors through the manager's existing `/instances/:id/{servers,channels}` proxies;
   `places import` reads the alias file including that unread block. A compact roles-first version
   rides the STABLE part of the system prompt, bounded by `ASMLTR_PLACES_PROMPT_MAX` (default 40) and
-  switchable off with `ASMLTR_PLACES_IN_PROMPT=off`.
+  switchable off with `ASMLTR_PLACES_IN_PROMPT=off`. Reads are open like `/v2/drafts` — a name
+  directory is not an authority, and `asmltr send` already takes a raw id — with one exception: a
+  label's `--note` is free text a human wrote about a place, so it comes back only to a request
+  presenting `ASMLTR_MANAGER_TOKEN`, stays out of the prompt block, and is filtered out of write
+  responses too, which would otherwise return every note already on the row. With no token
+  configured the field is hidden rather than open.
 
 ### Changed
 

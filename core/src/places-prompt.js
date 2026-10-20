@@ -11,7 +11,9 @@
  * `asmltr send <channel> <target>` with "target = id/alias" and never says which ids exist, so the
  * minimum useful content is the roles (what a place is FOR) and the named places with their ids.
  * Topics and notes stay out and live behind `asmltr places`, because every turn on every channel pays
- * for this block and a 300-channel server would otherwise bloat all of them.
+ * for this block and a 300-channel server would otherwise bloat all of them. Notes have a second
+ * reason now: they are operator context, gated on the HTTP read (see core/src/places-routes.js), and
+ * a block that is cached and resent to a model is not where gated text belongs.
  *
  * Bounded by ASMLTR_PLACES_PROMPT_MAX (default 40 rows) and switchable off entirely with
  * ASMLTR_PLACES_IN_PROMPT=off, so an operator who decides the tokens are not worth it keeps the
@@ -56,7 +58,7 @@ function buildPlacesBlock(store, o = {}) {
     lines.push('Roles (what a place is for):');
     for (const r of roles.slice(0, cap)) {
       const where = r.parent_name ? `${flat(r.parent_name)}#${flat(r.name || r.scope_id)}` : flat(r.name || r.scope_id);
-      lines.push(`• ${flat(r.label, 64)} = ${flat(r.surface, 32)} ${flat(r.scope_id, 64)} (${where})${r.note ? ' — ' + flat(r.note) : ''}`);
+      lines.push(`• ${flat(r.label, 64)} = ${flat(r.surface, 32)} ${flat(r.scope_id, 64)} (${where})`);
     }
   }
 

@@ -226,7 +226,7 @@ Returns the announcement id, resolved target, and creation time. List live ones 
 asmltr places                          # every server/channel/chat asmltr knows, roles first
 asmltr places -q shop                  # filter by name, topic, alias or role
 asmltr places resolve "shift log"      # one place, by id, alias, role or a loose name
-asmltr places get discord <id>         # one place in full, with its notes and when it was last seen
+asmltr places get discord <id>         # one place in full, with when it was last seen
 asmltr places set discord <id> shift-log --role --note "end-of-shift logs"
 asmltr places unset discord shift-log
 asmltr places refresh                  # ask live connectors what they can see
@@ -271,7 +271,19 @@ a description you wrote does not.
 A turn also carries a compact version of this in its system prompt, roles first, so an agent does not
 have to look up the channel it was just asked about. That block is bounded by
 `ASMLTR_PLACES_PROMPT_MAX` (default 40 rows) and can be switched off with `ASMLTR_PLACES_IN_PROMPT=off`,
-which keeps the store and the CLI without the per-turn cost.
+which keeps the store and the CLI without the per-turn cost. Names, ids and aliases go in it; a
+`--note` does not.
+
+**Who can read a note.** The `/v2/places` reads are open, like `/v2/drafts`: a name directory is not
+an authority, and `asmltr send` already takes a raw id, so an id-to-name map gives away nothing a
+send does not already need. A `--note` is the exception. It is the one field a human writes *about* a
+place, and it can carry what a channel is really for, who to escalate to or which client owns it, so
+it comes back only to a request presenting `ASMLTR_MANAGER_TOKEN` as a bearer token — the host secret
+core already shares with the connector manager. The CLI runs on the host and presents it for you.
+With no token configured the field stays hidden, which makes `--note` write-only on a default
+install: a hidden note costs a convenience, a leaked one cannot be recalled. Write responses are
+filtered the same way, because `places set` returns the whole row and would otherwise hand back every
+note already on it.
 
 ---
 

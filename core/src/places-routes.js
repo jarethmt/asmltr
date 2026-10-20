@@ -13,12 +13,16 @@
  *   DELETE /v2/places/:surface/label/:label
  *   DELETE /v2/places/:surface/:scope_id
  *   POST   /v2/places/refresh               { instance_id?, surface? }  ask connectors what they see
- *   POST   /v2/places/import                { file?, surface? }         read channel-aliases.json
+ *   POST   /v2/places/import                { surface? }                read the alias file
  *
  * Reads are open, like /v2/drafts: a name directory is not an authority. Writes emit a `control`
  * event so the stream says which session labelled a place, which is the audit trail standing in for
  * a permission model while cross-channel data access is still ungated (#132).
+ *
+ * The one exception to "reads are open" is a label's `note`; see `notesVisible` below.
  */
+
+const crypto = require('crypto');
 
 /**
  * @param {object} app      an express app
@@ -30,14 +34,47 @@ function mountPlaceRoutes(app, deps = {}) {
   const record = typeof deps.record === 'function' ? deps.record : () => {};
   const CODES = { BAD_REQUEST: 400, NOT_FOUND: 404, AMBIGUOUS: 409 };
 
+  // A `note` is the one free-text field a HUMAN writes about a place ("why this place matters"), so
+  // unlike a platform-reported name or an id it can carry context that was never meant to leave the
+  // host: who to escalate to, what a channel is really for, which client it belongs to. Names and
+  // ids leak nothing a send already requires, which is why the reads are open; a note is not in that
+  // class. Raised by Eve in review of #172 and she is right.
+  //
+  // So a note rides only on a request presenting ASMLTR_MANAGER_TOKEN, the shared host secret core
+  // already uses to talk to the connector manager. With no token configured there is nothing to
+  // verify and the field stays hidden, which makes `--note` write-only on a default install. That is
+  // the intended failure direction: a hidden note costs a convenience, a leaked one cannot be
+  // recalled.
+  //
+  // Scrubbed from WRITE responses too. `setLabel` and `upsert` return the whole hydrated row, which
+  // carries every note already on that place, so without this one throwaway label POST would be a
+  // note read oracle for a caller who can write but may not read.
+  const notesVisible = (req) => {
+    const want = process.env.ASMLTR_MANAGER_TOKEN || '';
+    if (!want) return false;
+    const m = /^Bearer\s+(.+)$/i.exec(String((req.headers || {}).authorization || ''));
+    if (!m) return false;
+    // Equal length first: timingSafeEqual throws on a mismatch, and the length is not the secret.
+    const got = Buffer.from(m[1].trim(), 'utf8');
+    const exp = Buffer.from(want, 'utf8');
+    return got.length === exp.length && crypto.timingSafeEqual(got, exp);
+  };
+  const scrubPlace = (p, ok) => {
+    if (!p || ok) return p;
+    const { notes, ...rest } = p;   // eslint-disable-line no-unused-vars
+    return rest;
+  };
+  const scrubRoles = (rows, ok) => (ok ? (rows || []) : (rows || []).map(({ note, ...rest }) => rest)); // eslint-disable-line no-unused-vars
+
   // --- PLACES (directory of guilds/channels/chats; see core/src/places.js) -----
   // Read is open like /v2/drafts: this is a name directory, not an authority. Writes carry a `by` so
   // the audit event says which session labelled a place.
   app.get('/v2/places', (req, res) => {
     const q = req.query || {};
+    const notes = notesVisible(req);
     res.json({
-      places: places.list({ surface: q.surface, kind: q.kind, role: q.role, q: q.q }),
-      roles: places.roles(),
+      places: places.list({ surface: q.surface, kind: q.kind, role: q.role, q: q.q }).map((p) => scrubPlace(p, notes)),
+      roles: scrubRoles(places.roles(), notes),
       count: places.count(),
     });
   });
@@ -46,7 +83,7 @@ function mountPlaceRoutes(app, deps = {}) {
     // carrying the candidates: the caller has to choose, and it needs the list to choose from.
     try {
       const r = places.resolve(req.query.ref, req.query.surface || null);
-      res.json({ ok: true, ...r });
+      res.json({ ok: true, ...r, place: scrubPlace(r.place, notesVisible(req)) });
     } catch (e) {
       const code = CODES[e.code] || 500;
       res.status(code).json({ ok: false, error: e.message, code: e.code || null, candidates: e.candidates || undefined });
@@ -78,7 +115,7 @@ function mountPlaceRoutes(app, deps = {}) {
   });
 
   app.get('/v2/places/:surface/:scope_id', (req, res) => {
-    const p = places.get(req.params.surface, req.params.scope_id);
+    const p = scrubPlace(places.get(req.params.surface, req.params.scope_id), notesVisible(req));
     return p ? res.json(p) : res.status(404).json({ error: 'unknown place' });
   });
   app.post('/v2/places', (req, res) => {
@@ -86,7 +123,7 @@ function mountPlaceRoutes(app, deps = {}) {
       const p = places.upsert(req.body || {});
       record({ surface: 'core', session_id: null, event_type: 'control', identity: String((req.body || {}).by || 'operator'), source: 'core',
         payload: { action: 'place-upsert', surface: p.surface, scope_id: p.scope_id, name: p.name || null } });
-      res.json({ ok: true, place: p });
+      res.json({ ok: true, place: scrubPlace(p, notesVisible(req)) });
     } catch (e) { res.status(e.code === 'BAD_REQUEST' ? 400 : 500).json({ ok: false, error: e.message, code: e.code || null }); }
   });
   app.post('/v2/places/label', (req, res) => {
@@ -95,7 +132,7 @@ function mountPlaceRoutes(app, deps = {}) {
       const p = places.setLabel({ ...b, set_by: b.by || null });
       record({ surface: 'core', session_id: null, event_type: 'control', identity: String(b.by || 'operator'), source: 'core',
         payload: { action: 'place-label', surface: p.surface, scope_id: p.scope_id, label: String(b.label || '').toLowerCase(), kind: b.kind === 'role' ? 'role' : 'alias' } });
-      res.json({ ok: true, place: p });
+      res.json({ ok: true, place: scrubPlace(p, notesVisible(req)) });
     } catch (e) { res.status(e.code === 'BAD_REQUEST' ? 400 : 500).json({ ok: false, error: e.message, code: e.code || null }); }
   });
   app.delete('/v2/places/:surface/label/:label', (req, res) => {

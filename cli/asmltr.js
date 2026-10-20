@@ -250,7 +250,7 @@ async function cmdPlaces(rest, f) {
   // asmltr places [list] [-q X] [--surface S] [--kind K] [--role R]
   //             | get <surface> <id> | resolve <ref> [--surface S]
   //             | set <surface> <id> <label> [--role] [--note "…"] | unset <surface> <label>
-  //             | refresh [--instance ID] [--surface S] | import [--file PATH]
+  //             | refresh [--instance ID] [--surface S] | import [--surface S]
   // The directory of WHERE (core/src/places.js): what asmltr can talk to, by id, with the roles and
   // aliases a human gave it. Talks to the core over HTTP like every other asmltr subcommand.
   const subs = ['list', 'get', 'resolve', 'set', 'unset', 'refresh', 'import'];
@@ -278,8 +278,20 @@ async function cmdPlaces(rest, f) {
     return t ? '?' + t : '';
   };
   const url = (p) => CORE_BASE + p;
+  // A label's `note` comes back only to a request carrying the manager token (see
+  // core/src/places-routes.js). The CLI is the operator's own tool and runs on the host, so it
+  // presents it; .env is read lazily here, the way the vault subcommands do it, rather than moving
+  // loadenv to startup and changing env resolution for every other subcommand. Without a configured
+  // token the listing simply has no notes in it.
+  const placesToken = () => {
+    if (MANAGER_TOKEN) return MANAGER_TOKEN;
+    try { require('../shared/loadenv'); } catch (_) {}
+    return process.env.ASMLTR_MANAGER_TOKEN || '';
+  };
   const hit = async (method, p, body) => {
     const init = { method, headers: { Accept: 'application/json' } };
+    const tok = placesToken();
+    if (tok) init.headers.Authorization = 'Bearer ' + tok;
     if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
     try {
       const r = await fetch(url(p), init);
