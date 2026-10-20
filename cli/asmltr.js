@@ -710,6 +710,10 @@ function cmdHelp() {
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
        ... --subject "<subj>"           set the subject (email)
+  asmltr places [list]                 the servers/channels/chats asmltr knows (-q X, --surface S)
+       places resolve "<name|role>"    one place, by id, alias, role or loose name
+       places set <surface> <id> <label> [--role] [--note "…"]
+       places refresh · places import   fill it from live connectors / channel-aliases.json
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr steer <key> "<guidance>"      push guidance into another session's LIVE turn (COERCIVE;
@@ -721,10 +725,6 @@ function cmdHelp() {
        drafts show <id> · send <id> · discard <id>
   asmltr mail [list]                   browse the mailbox (-n N, --unseen)
        mail read <uid> [--seen] · mail search "<q>"
-  asmltr places [list]                 the servers/channels/chats asmltr knows (-q X, --surface S)
-       places resolve "<name|role>"    one place, by id, alias, role or loose name
-       places set <surface> <id> <label> [--role] [--note "…"]
-       places refresh · places import   fill it from live connectors / channel-aliases.json
   ${A.bold('control / takeover:')}
   asmltr attach <key>    claim a channel session + resume it in tmux (attach/detach)
   asmltr release <key>   end a takeover; channel resumes
@@ -1129,6 +1129,7 @@ async function cmdVault(rest, f) {
       case 'watch': return liveStream(rest[0]);
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
+      case 'places': return await cmdPlaces(rest, f);   // where `send` can send: ids, aliases, roles
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
@@ -1136,7 +1137,6 @@ async function cmdVault(rest, f) {
       case 'streams': return await cmdStreams(rest);
       case 'drafts': return await cmdDrafts(rest);
       case 'mail': return await cmdMail(rest);
-      case 'places': return await cmdPlaces(rest, f);
       case 'steer': return await cmdSteer(rest);
       case 'attach': return await cmdAttach(rest[0], f);
       case 'release': return await cmdRelease(rest[0]);
