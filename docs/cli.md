@@ -220,6 +220,73 @@ Returns the announcement id, resolved target, and creation time. List live ones 
 
 ---
 
+## Places: the directory of where
+
+```
+asmltr places                          # every server/channel/chat asmltr knows, roles first
+asmltr places -q shop                  # filter by name, topic, alias or role
+asmltr places resolve "shift log"      # one place, by id, alias, role or a loose name
+asmltr places get discord <id>         # one place in full, with when it was last seen
+asmltr places set discord <id> shift-log --role --note "end-of-shift logs"
+asmltr places unset discord shift-log
+asmltr places refresh                  # ask live connectors what they can see
+asmltr places import                   # read connectors/types/discord/channel-aliases.json
+```
+
+asmltr has always had a directory of **who**: the trust store keys people as
+`identifiers (surface, value) -> principal`. This is the directory of **where**, keyed
+`(surface, scope_id)`, which is the same key trust already uses to scope a grant. It lives in the
+trust database next to `principals`, `grants` and the `devices` registry, so a grant's scope can be
+rendered as a name by a join rather than a second lookup.
+
+Why it exists: `channel-aliases.json` maps an alias to a channel id, is read once at connector start,
+and lives inside the connector process. Its own `.example` documents a `channels` block carrying
+`{ server, channel, description }` per id that no code ever read. So "which channel is the shift log"
+had no answer anywhere in asmltr, and the knowledge ended up in one agent's notes, invisible to the
+send path and to every other session.
+
+**Roles are the point.** A role is a name for what a place is *for*, and it outlives a rename:
+
+```
+$ asmltr places set discord 1534195903924146250 shift-log --role --note "end-of-shift logs"
+role shift-log → discord 1534195903924146250  3D Print Pittsburgh#general
+
+$ asmltr places resolve shift-log
+discord  1534195903924146250  3D Print Pittsburgh#general  [channel role:shift-log]  (matched on label)
+```
+
+`resolve` goes id, then alias or role, then exact name, then loose. Two channels called `#general` is
+an error listing both, never a pick, because resolving the wrong channel sends a message to the wrong
+room. Naming the guild or passing the id breaks the tie.
+
+**Filling it.** `places refresh` asks each running connector what it can see, through the manager's
+existing `/instances/:id/servers` and `/instances/:id/channels` proxies. `places import` reads the
+alias file, including that unread `channels` block, so whatever you already typed there carries over.
+Which file it reads is server-side config (`ASMLTR_DISCORD_ALIASES_FILE`) and deliberately not a
+command-line or request argument: the core runs as you, so a caller-supplied path there is an
+arbitrary file read.
+Both are idempotent, and a refresh only overwrites the platform's own facts: a name changes, a note or
+a description you wrote does not.
+
+A turn also carries a compact version of this in its system prompt, roles first, so an agent does not
+have to look up the channel it was just asked about. That block is bounded by
+`ASMLTR_PLACES_PROMPT_MAX` (default 40 rows) and can be switched off with `ASMLTR_PLACES_IN_PROMPT=off`,
+which keeps the store and the CLI without the per-turn cost. Names, ids and aliases go in it; a
+`--note` does not.
+
+**Who can read a note.** The `/v2/places` reads are open, like `/v2/drafts`: a name directory is not
+an authority, and `asmltr send` already takes a raw id, so an id-to-name map gives away nothing a
+send does not already need. A `--note` is the exception. It is the one field a human writes *about* a
+place, and it can carry what a channel is really for, who to escalate to or which client owns it, so
+it comes back only to a request presenting `ASMLTR_MANAGER_TOKEN` as a bearer token — the host secret
+core already shares with the connector manager. The CLI runs on the host and presents it for you.
+With no token configured the field stays hidden, which makes `--note` write-only on a default
+install: a hidden note costs a convenience, a leaked one cannot be recalled. Write responses are
+filtered the same way, because `places set` returns the whole row and would otherwise hand back every
+note already on it.
+
+---
+
 ## Control / takeover
 
 Reach into a running session — claim it, stop it, or inspect its changes.
