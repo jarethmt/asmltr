@@ -38,6 +38,13 @@ const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET',
   // getUserMedia binds to the phone's built-in mic no matter which communication device we nominate.
   'android.permission.BLUETOOTH_CONNECT'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
+// BLE device discovery (the Portal scanner) needs BLUETOOTH_SCAN on Android 12+. It carries the
+// neverForLocation flag — we assert we don't derive physical location from BLE results — so Android
+// does NOT also require ACCESS_FINE_LOCATION, and the scan-time grant is a single clean prompt.
+if (!x.includes('BLUETOOTH_SCAN')) {
+  permXml += (permXml ? '\n' : '') +
+    '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />';
+}
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 
 // Package visibility (Android 11+/API 30): without this, queryIntentActivities only returns a few

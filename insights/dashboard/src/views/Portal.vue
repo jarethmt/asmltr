@@ -54,7 +54,10 @@ function flash(msg) { notice.value = msg; setTimeout(() => { if (notice.value ==
 // where it isn't — we surface a clear message rather than a silent dead button.
 async function ensureBle() {
   if (bleReady) return
-  await BleClient.initialize()
+  // androidNeverForLocation pairs with the manifest's BLUETOOTH_SCAN neverForLocation flag — the
+  // plugin then requests BLUETOOTH_SCAN (not location) the first time we scan, so the system prompt
+  // appears on scan rather than failing silently.
+  await BleClient.initialize({ androidNeverForLocation: true })
   bleReady = true
 }
 
