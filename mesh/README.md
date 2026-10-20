@@ -34,6 +34,8 @@ asmltr mesh enroll <device> --os windows|linux
                                       # register a device as a newt site; prints its install command
 asmltr mesh resource <device> <name> --tcp <ports> [--to <dest>] [--client <name>]
                                       # expose a private service on a site to a client (SSH, RDP, …)
+asmltr mesh sshkey [status|create]    # the host's main SSH identity — the key the Portal installs on
+                                      # a target's authorized_keys so asmltr can SSH in afterwards
 ```
 
 `provision` is also run by `setup.d/050-provision-mesh.sh` during install/update (no-op when the mesh
@@ -65,3 +67,4 @@ punch — all in `deviceinstall.olmLinux()`.
 | `pangolin.js` | authenticated Pangolin API client (static-CSRF header, cookie jar, typed ops) |
 | `index.js` | `provision` / `ensureHostClient` / `enrollSite` / `addResource` / `status` |
 | `deviceinstall.js` | generate device install commands (Windows SYSTEM task, Linux systemd olm/newt) |
+| `sshkey.js` | detect / create the host's main SSH identity; expose its public key (never the private) |

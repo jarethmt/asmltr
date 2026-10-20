@@ -734,6 +734,8 @@ async function cmdMesh(rest, f) {
       console.log(A.bold('  sites:     ') + (s.sites.map((x) => x.name + dot(x.online)).join('  ') || A.dim('(none)')));
       console.log(A.bold('  clients:   ') + (s.clients.map((x) => x.name + dot(x.online)).join('  ') || A.dim('(none)')));
       console.log(A.bold('  resources: ') + (s.resources.map((r) => `${r.name}${A.dim(' ' + r.alias + '→' + r.dest + ':' + (r.tcp || ''))}`).join('  ') || A.dim('(none)')));
+      const key = require('../mesh/sshkey').detect();
+      console.log(A.bold('  ssh key:   ') + (key.exists ? A.dim(key.fingerprint || key.path) : A.yel('none — `asmltr mesh sshkey create`')));
       return;
     }
     case 'provision': {
@@ -767,8 +769,30 @@ async function cmdMesh(rest, f) {
       console.log(A.grn(`✓ resource '${name}'`) + A.dim(` alias ${r.alias} (${r.aliasAddress}) → ${r.destination}`));
       return;
     }
+    case 'sshkey': {
+      const sshkey = require('../mesh/sshkey');
+      const sub = pos[0] || 'status';
+      if (sub === 'create') {
+        const r = sshkey.ensure({ create: true });
+        if (r.created) { console.log(A.grn('✓ created mesh SSH identity') + A.dim(` ${r.path}`)); }
+        else console.log(A.yel('· identity already present') + A.dim(` ${r.path}`));
+        console.log(A.dim('  ' + (r.fingerprint || '')) + '\n  ' + r.publicKey);
+        return;
+      }
+      const d = sshkey.detect();
+      if (!d.exists) {
+        console.log(A.yel('✗ no mesh SSH identity found') + A.dim(` (looked for ${d.suggestedPath} …)`));
+        console.log(A.dim('  Portal provisioning installs this key on targets so asmltr can SSH in.'));
+        console.log('  run ' + A.bold('asmltr mesh sshkey create') + ' to generate one.');
+        return;
+      }
+      console.log(A.grn('✓ mesh SSH identity') + A.dim(` ${d.path}`));
+      console.log(A.dim('  ' + (d.fingerprint || '')));
+      console.log('  ' + d.publicKey);
+      return;
+    }
     default:
-      console.log('asmltr mesh <status|provision|enroll <device> [--os ...]|resource <device> <name> --tcp N [--to dest] [--client c]|host-client [name]>');
+      console.log('asmltr mesh <status|provision|enroll <device> [--os ...]|resource <device> <name> --tcp N [--to dest] [--client c]|sshkey [status|create]|host-client [name]>');
   }
 }
 
