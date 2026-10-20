@@ -559,6 +559,7 @@ export const devices = {
   list: () => getCore('/v2/devices'),
   get: (id) => getCore(`/v2/devices/${encodeURIComponent(id)}`),
   create: (body) => postCore('/v2/devices', body),
+  addTransport: (id, body) => postCore(`/v2/devices/${encodeURIComponent(id)}/transports`, body),
   update: (id, body) => reqCore('PATCH', `/v2/devices/${encodeURIComponent(id)}`, body),
   remove: (id) => reqCore('DELETE', `/v2/devices/${encodeURIComponent(id)}`),
   enroll: (id, transport = 'rd') => postCore(`/v2/devices/${encodeURIComponent(id)}/enroll`, { transport }),
