@@ -11,11 +11,16 @@ import android.webkit.WebView;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
 import com.getcapacitor.BridgeActivity;
+import com.capacitorjs.community.plugins.bluetoothle.BluetoothLe;
 /** The app shell — loads the embedded dashboard. Enables WebView WebAuthn so passkeys work in-app
  *  (paired with the /.well-known/assetlinks.json Digital Asset Links on the host), and exposes
  *  AsmltrNative so config persists to SharedPreferences for the system overlay session. */
 public class MainActivity extends BridgeActivity {
   @Override public void onCreate(Bundle savedInstanceState) {
+    // Register the BLE plugin EXPLICITLY (before super builds the bridge). Auto-registration via
+    // capacitor.plugins.json wasn't taking in this custom shell, so the native plugin never landed in
+    // PluginHeaders and JS calls failed with "not implemented on android". Explicit = bulletproof.
+    registerPlugin(BluetoothLe.class);
     super.onCreate(savedInstanceState);
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
       requestPermissions(new String[]{ Manifest.permission.RECORD_AUDIO }, 7);
