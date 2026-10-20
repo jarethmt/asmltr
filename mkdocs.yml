@@ -111,6 +111,11 @@ nav:
     - Cross-channel send: coordination/cross-channel.md
     - Announcements: coordination/announcements.md
     - Session awareness: coordination/awareness.md
+  - Networking & devices:
+    - Overview: NETWORKING.md
+    - Pangolin backbone (design): PANGOLIN-BACKBONE-DESIGN.md
+    - Portal (BLE dongle): PORTAL.md
+    - Remote desktop: REMOTE-DESKTOP.md
   - Identity, auth & trust:
     - The cast — identity & trust: CAST.md
     - Auth & identity provider: AUTH.md
