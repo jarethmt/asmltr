@@ -152,3 +152,58 @@ returns the `deviceinstall.js` body for that device+OS); `deviceinstall.js` has 
 (the endpoint supplies the launchd plist); the SSH user for the victory lap defaults to
 `ASMLTR_PORTAL_SSH_USER` (fallback `root`); `baseUrl` resolves from `ASMLTR_PORTAL_BASE_URL` →
 `ASMLTR_PUBLIC_URL` → `BASE_URL` → the mesh dashboard URL → `http://127.0.0.1:3000`.
+
+## 7. Status — what's actually tested (2026-10-21)
+
+This section is the **as-built record**: what has run on real hardware vs. what is built-but-unverified
+vs. designed. Keep it honest as we expand.
+
+### ✅ Proven end-to-end on hardware (Yoga / Windows, `asmltr-portal-66DA`)
+
+The full bidirectional drive loop works:
+
+```
+Eve (server)  →  POST /v2/portal/default/exec   (core relay queue)
+              →  phone app background relay polls GET …/exec/next
+              →  BLE write to the dongle's `exec` characteristic
+              →  dongle: keystroke-script → USB-HID into the focused host window
+host output   →  typed cmd writes to the dongle's own CDC serial port
+              →  dongle `ioback` NOTIFY  →  phone relay drains it
+              →  POST …/io  →  Eve reads GET …/io
+```
+
+Verified actions:
+- **OS detection** — the dongle fingerprints the host at USB enumeration (Windows via MS-OS-2.0) and
+  shows `host: windows` on its own screen at plug-in.
+- **HID drive (Eve → host)** — typed text into Notepad; opened an app blind (`Win+R → notepad → Enter`);
+  drove PowerShell. Keystrokes are reliable after the fix (each press/release held ~30 ms, past the
+  ~10 ms HID poll interval — an earlier 14 ms hold dropped occasional characters).
+- **CDC return (host → Eve)** — wrote to the dongle's serial port from the host and **read it back here**
+  (`ASMLTR-CDC-TEST from JARETHSYOGA`), and ran a real command whose output returned
+  (`whoami=jarethsyoga\jaret`). This is the feedback loop closing.
+- **On-dongle feedback** — the dongle shows each incoming remote command on-screen ("Remote: keys" +
+  snippet, cyan→green LED).
+- **The relay** — a poll-relay both ends hit. Three bugs were fixed live to make it work: retry GATT
+  writes on `rc 201` (BUSY) + settle after the ioback-subscribe; drop a stale native connection before
+  scanning (a held connection stops the dongle advertising, and the native gatt survives app reloads);
+  hold the link 45 s + keep-alive while `ioback` streams.
+
+### 🔨 Built but not yet live-tested
+- **Mesh enroll / uninstall / victory-lap** (`core/src/portal/enroll.js`) — joins a host onto the
+  Pangolin mesh, registers ssh/rd, tears down. The install-script endpoint is a flagged placeholder.
+- **Vault-kill-switch** (dongle-only credential tier, §8b of the asmltr-portal DESIGN).
+
+### 📐 Designed, not built
+- **The hidden session-bridge REPL** — the efficiency + non-interference fix. Today every command is
+  HID-typed: slow, and it steals the user's focus/input. The plan is a one-time short HID bootstrap that
+  launches a **hidden** `powershell -WindowStyle Hidden` REPL reading the dongle's serial; thereafter
+  commands flow over CDC (fast, reliable, invisible) and screenshots/clipboard come back over CDC. This
+  is the next build.
+
+### Known limitations (today)
+- Driving is **HID into the user's active session** → it steals focus and is visible while typing. Fine
+  when the user is away; the hidden REPL (above) is the fix for background, non-interfering use.
+- Commands are HID-typed one at a time → slow (~30 ms/char) and length-sensitive. The session bridge
+  removes this.
+- The relay keys a single dongle on the channel id `default`; multi-dongle keys by portal name later.
+- Relay transport is poll-based over core HTTP (not the device-gateway push) — simple and it works.
