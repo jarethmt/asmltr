@@ -44,6 +44,7 @@ const deviceEnroll = require('./devices/enroll'); // device credential issuance 
 const deviceShell = require('./devices/shell'); // shell sessions on registered machines — one PTY, many watchers
 const portalModules = require('./portal/modules'); // Portal (BLE dongle) module signer + library (docs/PORTAL-PROTOCOL.md)
 const portalDrive = require('./portal/drive'); // Portal generic-driver relay + recipes (docs/PORTAL-DRIVE.md)
+const portalEnroll = require('./portal/enroll'); // Portal persistent track — enroll/teardown/victory (PORTAL-DRIVE.md §6)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
