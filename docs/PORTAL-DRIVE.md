@@ -207,3 +207,53 @@ Verified actions:
   removes this.
 - The relay keys a single dongle on the channel id `default`; multi-dongle keys by portal name later.
 - Relay transport is poll-based over core HTTP (not the device-gateway push) — simple and it works.
+
+---
+
+## Transport: BLE bootstrap + Wi-Fi Direct fast path (R5 — built 2026-10-21, not yet flashed/tested)
+
+The BLE notify return channel can't carry bulk data reliably (a screenshot streamed back dropped
+mid-transfer; see the firmware reliability notes). Rather than keep fighting BLE throughput, R5 adds a
+**Wi-Fi Direct (Wi-Fi P2P) data transport** and keeps BLE as the bootstrap + fallback. This also
+reflects that Portal management is now native-app-only (the browser-BLE, device-agnostic rationale was
+dropped) — so the Portal nav item is hidden unless `window.AsmltrNative` is present.
+
+### Model (mirrors Riley's Power Wheels)
+- **Phone = Wi-Fi Direct Group Owner (GO); dongle = legacy STA client.** The phone keeps its normal
+  Wi-Fi station for internet; the P2P group is a separate interface. **No SoftAP** (that would steal the
+  phone's internet station). Group is pinned to **2.4 GHz** — the ESP32-S3 is 2.4 GHz-only.
+- Creds are **not hardcoded** (Power Wheels hardcodes them): the app generates a per-session passphrase,
+  creates the group, and hands `{ssid, pass, ip, port}` to the dongle over the **BLE WIFI char (0x0A)**.
+  The dongle joins as STA and opens a **TCP client socket to the GO** (default `192.168.49.1:9790`).
+
+### Smart selection (transparent — one "Adopt", no extra UX)
+The relay connects over BLE + pairs as before, then on the first drive **tries to upgrade**: create
+group → hand creds over BLE → wait for the dongle's TCP socket. If it lands within ~12 s, exec/ioback
+route over TCP (`transport='wifi'`); otherwise it silently stays on BLE. If the socket drops mid-session,
+it falls back to BLE for subsequent commands. Absent the `wifiP2p*` native methods (older APK), it's
+pure BLE — unchanged.
+
+### Wire protocol
+- **BLE char 0x0A `WIFI`** (WRITE, chunked `[flags][rsvd][seqBE]` like exec): payload is creds JSON
+  `{"ssid","pass","ip","port"}`, or `{"off":true}` to tear Wi-Fi down.
+- **TCP framing, both directions:** `[len:2 big-endian][payload]`.
+  - app→dongle payload = `[mode:1][data]` (same as the BLE exec char) → `engine_submit_exec`.
+  - dongle→app payload = raw ioback bytes (same as a BLE ioback notification) → one `portal.io` chunk.
+- The dongle's ioback task is the transport selector: Wi-Fi socket if up, else BLE notify.
+
+### Native bridge (`window.AsmltrNative`) additions
+`wifiP2pStart()` · `wifiP2pInfo()` (→ `{state,ssid,pass,goIp,port,error}`) · `wifiP2pSockConnected()` ·
+`wifiP2pWrite(b64[mode][data])` (native prepends the length frame) · `wifiP2pReadIo()` (JSON array of
+base64 ioback frames, mirrors `bleNotificationsIo`) · `wifiP2pStop()`.
+
+### Firmware build facts
+- New `wifi_link.{c,h}`; BT/Wi-Fi software coexistence on; **custom 3 MB app partition** (the app
+  outgrew the 1 MB default once Wi-Fi was linked). Binary ~1.22 MB. Wi-Fi is brought up lazily and any
+  failure leaves it inactive → BLE fallback. **Flashing a partition-table change needs all three images**
+  (`0x0` bootloader, `0x8000` partition-table, `0x10000` app).
+
+### ⚠️ Status: built + compiles on both sides; NOT flashed or hardware-tested.
+Morning bring-up must verify: Wi-Fi+BLE+USB coexistence boots & stays up (RAM is the top risk — if
+`esp_wifi_init` ENOMEMs we stay on BLE, or enable PSRAM); the 2.4 GHz group creation + NEARBY_WIFI_DEVICES
+runtime prompt on Android; the dongle associates + the TCP socket lands; a large return (the 800-char
+pattern, then a screenshot) arrives **intact** over Wi-Fi; and clean BLE fallback when Wi-Fi is refused.

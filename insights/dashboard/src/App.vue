@@ -24,7 +24,10 @@ useTurnNotifications(store)
 const { status: updProgress, active: updActive, begin: updBegin, dismiss: updDismiss } = useUpdateProgress()
 
 // Notifications lives as a bell icon in the header (not a nav row), so filter it out of the menu.
-const navItems = computed(() => NAV_ROUTES.filter((r) => r.name !== 'notifications'))
+// Portal management only makes sense inside the native app: the dongle link (BLE + Wi-Fi Direct) runs
+// through window.AsmltrNative, which a desktop browser doesn't have — so hide it unless the bridge is present.
+const isNativeApp = typeof window !== 'undefined' && !!window.AsmltrNative
+const navItems = computed(() => NAV_ROUTES.filter((r) => r.name !== 'notifications' && (r.name !== 'portal' || isNativeApp)))
 
 // --- responsive nav: mobile drawer + collapsible desktop sidebar -------------------------------------
 const drawerOpen = ref(false)                 // mobile: slide-in navigation drawer
