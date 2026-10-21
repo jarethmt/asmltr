@@ -53,8 +53,16 @@ async function chunkWriteExec(payload) {
     const frame = new Uint8Array(4 + slice.length)
     frame[0] = first | last; frame[1] = 0; frame[2] = (seq >> 8) & 0xff; frame[3] = seq & 0xff
     frame.set(slice, 4)
-    const r = AN.bleWrite(SVC_UUID, EXEC_UUID, bytesToB64(frame))
-    if (r !== 'ok') throw new Error('exec write: ' + r)
+    // Issue the write, retrying on GATT BUSY (rc 201) — e.g. the ioback-subscribe CCCD write may still
+    // be in flight on the first frame; Android serializes GATT ops to one at a time.
+    let r = 'init', tries = 0
+    while (tries++ < 25) {
+      r = AN.bleWrite(SVC_UUID, EXEC_UUID, bytesToB64(frame))
+      if (r === 'ok') break
+      if (/write-rc:201/.test(r)) { await sleep(150); continue }   // busy — back off + retry
+      throw new Error('exec write: ' + r)
+    }
+    if (r !== 'ok') throw new Error('exec write: stuck busy (rc 201)')
     // wait for the write to ack before the next frame (write-with-response ordering)
     let done = false
     for (let i = 0; i < 50; i++) {
@@ -91,6 +99,10 @@ function emit(msg) {
 // Short scan → return the first in-range asmltr-portal-* advertiser, or null.
 async function scanForPortal() {
   if (!AN) return null
+  // Drop any stale native connection first — a held connection stops the dongle advertising (it
+  // supports one central), and AsmltrNative's gatt survives dashboard reloads. Then it re-advertises.
+  try { AN.bleDisconnect() } catch (_) { /* ignore */ }
+  await sleep(600)
   if (AN.bleStartScan() !== 'ok') return null
   try {
     const deadline = Date.now() + SCAN_MS
@@ -155,12 +167,12 @@ async function ensureConnectedPaired() {
   busy = true
   try {
     const dev = await scanForPortal()
-    if (!dev) return false
+    if (!dev) { emit({ type: 'portal.io', error: 'scan: no asmltr-portal-* advertising (dongle connected elsewhere, or BT off)' }); return false }
     currentInfo = await connectAndReadInfo(dev.deviceId)
-    if (!currentInfo || currentInfo.trust !== 'paired') { dropConnection(); return false }
+    if (!currentInfo || currentInfo.trust !== 'paired') { emit({ type: 'portal.io', error: 'connected but trust=' + (currentInfo && currentInfo.trust) }); dropConnection(); return false }
     return true
-  } catch (_) {
-    dropConnection(); return false
+  } catch (e) {
+    emit({ type: 'portal.io', error: 'connect: ' + String(e.message || e) }); dropConnection(); return false
   } finally { busy = false }
 }
 
@@ -172,6 +184,7 @@ export async function handleServerMessage(msg) {
   if (!msg || !running) return
   if (msg.type === 'portal.exec') {
     if (!(await ensureConnectedPaired())) { emit({ type: 'portal.io', data: '', error: 'no paired portal in range' }); return }
+    await sleep(450)   // let the ioback-subscribe (CCCD write) settle before the first exec write (avoids GATT busy)
     try {
       const mode = EXEC_MODE[msg.mode] != null ? EXEC_MODE[msg.mode] : EXEC_MODE.hid
       const data = msg.data ? b64ToBytes(msg.data) : new Uint8Array(0)
@@ -223,8 +236,11 @@ async function relayPost(path, body) {
 }
 setServerSink((msg) => {
   if (!msg || !msg.type) return
-  if (msg.type === 'portal.io') relayPost(`/v2/portal/${RELAY_ID}/io`, { data: msg.data || '' })
-  else if (msg.type === 'portal.present') relayPost(`/v2/portal/${RELAY_ID}/present`, { paired: msg.paired, name: msg.name, host_os: msg.host_os })
+  if (msg.type === 'portal.io') {
+    // Surface relay-side errors (e.g. "no paired portal in range") server-side as readable io.
+    const payload = msg.error ? btoa('[relay] ' + msg.error) : (msg.data || '')
+    relayPost(`/v2/portal/${RELAY_ID}/io`, { data: payload })
+  } else if (msg.type === 'portal.present') relayPost(`/v2/portal/${RELAY_ID}/present`, { paired: msg.paired, name: msg.name, host_os: msg.host_os })
 })
 if (AN) {
   setInterval(async () => {
