@@ -36,7 +36,15 @@ const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET',
   // Capture from a Bluetooth headset mic. WITHOUT BLUETOOTH_CONNECT, Chromium's media stack refuses to
   // touch the BT adapter at all ("cr_media: BLUETOOTH_CONNECT permission is missing") and every
   // getUserMedia binds to the phone's built-in mic no matter which communication device we nominate.
-  'android.permission.BLUETOOTH_CONNECT'];
+  'android.permission.BLUETOOTH_CONNECT',
+  // Wi-Fi Direct (Wi-Fi P2P) fast path: the phone is the Group Owner, the dongle joins as a legacy STA,
+  // and a TCP socket carries bulk drive data. Needs Wi-Fi + network state to create/manage the group.
+  // INTERNET is already requested above; the filter below drops the dupe.
+  'android.permission.ACCESS_WIFI_STATE', 'android.permission.CHANGE_WIFI_STATE',
+  'android.permission.ACCESS_NETWORK_STATE', 'android.permission.INTERNET',
+  // Pre-33 Wi-Fi Direct discovery/group creation requires fine location (on 33+ NEARBY_WIFI_DEVICES
+  // below replaces it). Keep it available so the P2P group works on older Android too.
+  'android.permission.ACCESS_FINE_LOCATION'];
 let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 // BLE device discovery (the Portal scanner) needs BLUETOOTH_SCAN on Android 12+. It carries the
 // neverForLocation flag — we assert we don't derive physical location from BLE results — so Android
@@ -44,6 +52,12 @@ let permXml = perms.filter((p) => !x.includes(p)).map((p) => `    <uses-permissi
 if (!x.includes('BLUETOOTH_SCAN')) {
   permXml += (permXml ? '\n' : '') +
     '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />';
+}
+// Wi-Fi Direct on Android 13+ (API 33): NEARBY_WIFI_DEVICES replaces the location grant, and carries
+// neverForLocation (we don't derive physical location from the P2P peer) so the runtime prompt is clean.
+if (!x.includes('NEARBY_WIFI_DEVICES')) {
+  permXml += (permXml ? '\n' : '') +
+    '    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />';
 }
 if (permXml) x = x.replace(/<application/, permXml + '\n\n    <application');
 

@@ -297,6 +297,20 @@ public class NativeConfig {
   @JavascriptInterface
   public int bleMtuSize() { return bleMtu; }
 
+  // --- Wi-Fi Direct (Wi-Fi P2P) fast path -------------------------------------------------------
+  // BLE bootstraps + hands the dongle the group creds; this is the ordered/reliable TCP channel for
+  // bulk data (screenshots, file contents). Phone = Group Owner, dongle = legacy STA. All the real
+  // work lives in WifiP2pLink; these are the frozen @JavascriptInterface wrappers JS drives.
+  private WifiP2pLink wifiLink;
+  private synchronized WifiP2pLink wifi() { if (wifiLink == null) wifiLink = new WifiP2pLink(ctx); return wifiLink; }
+
+  @JavascriptInterface public String  wifiP2pStart()                    { return wifi().start(); }
+  @JavascriptInterface public String  wifiP2pInfo()                     { return wifi().info(); }
+  @JavascriptInterface public boolean wifiP2pSockConnected()            { return wifi().sockConnected(); }
+  @JavascriptInterface public String  wifiP2pWrite(String base64Payload){ return wifi().write(base64Payload); }
+  @JavascriptInterface public String  wifiP2pReadIo()                   { return wifi().readIo(); }
+  @JavascriptInterface public void    wifiP2pStop()                     { wifi().stop(); }
+
   @JavascriptInterface
   public void bleDisconnect() {
     try { if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; } } catch (Exception e) {}

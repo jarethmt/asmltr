@@ -208,7 +208,13 @@ async function ensureConnectedPaired() {
 async function tryWifiUpgrade() {
   if (!hasWifi || transport === 'wifi' || !connected) return
   try {
-    if (AN.wifiP2pStart() !== 'ok') return
+    const started = AN.wifiP2pStart()
+    if (started !== 'ok') {
+      // Not yet granted the Wi-Fi/nearby-devices permission — the native side fired the prompt; the grant
+      // persists, so the next drive upgrades. Surface a hint; stay on BLE meanwhile.
+      if (/err:perm/.test(started)) emit({ type: 'portal.io', error: 'wifi: grant the nearby-devices permission, then drive again to use the fast path' })
+      return
+    }
     let info = null
     for (let i = 0; i < 40; i++) {               // ~12s for the group to come up
       try { info = JSON.parse(AN.wifiP2pInfo() || '{}') } catch { info = {} }
