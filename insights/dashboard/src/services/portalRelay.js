@@ -179,6 +179,11 @@ function dropConnection() {
 
 function bumpIdle() {
   if (idleTimer) clearTimeout(idleTimer)
+  // Wi-Fi is negotiated ONCE per connection and then HELD for all subsequent commands — tearing it
+  // down on idle would force a ~20s P2P re-handshake on the next command. So once we're on Wi-Fi we do
+  // not arm the idle-drop; the link persists until the socket actually drops (the ioback pump flips us
+  // back to BLE then) or the view/app backgrounds (pausePortalRelay). BLE-only links still idle-drop.
+  if (transport === 'wifi') return
   idleTimer = setTimeout(() => { dropConnection() }, IDLE_DISCONNECT_MS)
 }
 

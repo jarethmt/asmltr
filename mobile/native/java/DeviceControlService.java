@@ -53,6 +53,7 @@ public class DeviceControlService extends Service {
   private static final long PORTAL_PRESENCE_INTERVAL_MS = 5 * 60 * 1000;
   private volatile boolean portalRunning = false;
   private Thread portalWorker;
+  private Thread portalPumpThread;         // continuous ioback drain while a backgrounded link is held
   private NativeConfig portalBle;          // the relay's own BLE/Wi-Fi bridge (its own GATT)
   private boolean portalHeld = false;      // true while we hold a connection to a paired dongle
   private String portalTransport = "ble";  // 'ble' | 'wifi' — active data path for the current connection
@@ -72,7 +73,11 @@ public class DeviceControlService extends Service {
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
     if (intent != null && ACTION_STOP.equals(intent.getAction())) { running = false; portalRunning = false; stopSelf(); return START_NOT_STICKY; }
     if (!running) { running = true; worker = new Thread(this::loop, "asmltr-control"); worker.start(); }
-    if (!portalRunning) { portalRunning = true; portalWorker = new Thread(this::portalLoop, "asmltr-portal"); portalWorker.start(); }
+    if (!portalRunning) {
+      portalRunning = true;
+      portalWorker = new Thread(this::portalLoop, "asmltr-portal"); portalWorker.start();
+      portalPumpThread = new Thread(this::portalPumpLoop, "asmltr-portal-pump"); portalPumpThread.start();
+    }
     try { WakeWord.refresh(this); } catch (Throwable t) {} // (re)configure always-on wake word if enabled
     try { NotifBadgeOverlay.restore(this); } catch (Throwable t) {} // re-raise the held-notification badge after a restart
     return START_STICKY; // Android restarts us if killed → the link is meant to be always-on
@@ -181,6 +186,7 @@ public class DeviceControlService extends Service {
     try { WakeWord.stop(); } catch (Throwable t) {}
     if (worker != null) worker.interrupt();
     if (portalWorker != null) portalWorker.interrupt();
+    if (portalPumpThread != null) portalPumpThread.interrupt();
     try { portalDrop(); } catch (Throwable t) {}
     super.onDestroy();
   }
@@ -203,8 +209,11 @@ public class DeviceControlService extends Service {
         String base = portalBase();
         if (base.isEmpty()) { sleep(5000); continue; }
         long nowMs = System.currentTimeMillis();
-        // Release an idle-held link (battery; and frees the dongle to advertise again).
-        if (portalHeld && nowMs - portalLastActivity > PORTAL_IDLE_DISCONNECT_MS) portalDrop();
+        // Release an idle-held BLE link (battery; frees the dongle to advertise). Wi-Fi is negotiated
+        // ONCE and HELD for all subsequent commands — never idle-dropped (that would force a ~20s P2P
+        // re-handshake next command). A dropped Wi-Fi socket flips us back to BLE via the pump, and then
+        // this idle-drop applies again.
+        if (portalHeld && !"wifi".equals(portalTransport) && nowMs - portalLastActivity > PORTAL_IDLE_DISCONNECT_MS) portalDrop();
         // Opportunistic presence probe on a long interval (refreshes the kill-switch presence).
         if (!portalHeld && nowMs - portalLastPresence > PORTAL_PRESENCE_INTERVAL_MS) {
           portalLastPresence = nowMs;
@@ -267,7 +276,8 @@ public class DeviceControlService extends Service {
         portalChunkWrite(PORTAL_EXEC, payload, "exec");
       }
       portalLastActivity = System.currentTimeMillis();
-      portalPumpIoback(base);   // capture the host's return stream for a short window
+      // The host's return stream is drained by the continuous portalPumpLoop (runs while connected),
+      // not a per-command window — so async output that arrives between commands isn't missed.
     } catch (Exception e) {
       portalPostIo(base, String.valueOf(e.getMessage()), true);
     }
@@ -421,29 +431,34 @@ public class DeviceControlService extends Service {
     }
   }
 
-  /** Drain the dongle's ioback (CDC return stream) for a short window, forwarding each chunk to the core.
-   *  Keeps pumping while data flows; stops after a quiet window, if the app comes foreground, or on stop. */
-  private void portalPumpIoback(String base) {
-    long quietDeadline = System.currentTimeMillis() + PORTAL_IOBACK_WINDOW_MS;
-    while (portalRunning && !MainActivity.appForeground && System.currentTimeMillis() < quietDeadline) {
+  /** Continuous ioback pump: while we hold a backgrounded dongle link, drain its CDC return stream and
+   *  forward each chunk to the core — every ~300ms, not just in a window after a command. So the host's
+   *  async output (and a command's response, however delayed) is never missed. Runs on its own thread;
+   *  only reads the notification/socket QUEUES (thread-safe), never issues GATT ops, so it can't race the
+   *  portalLoop's connect/write. */
+  private void portalPumpLoop() {
+    while (portalRunning) {
       try {
-        String raw = "wifi".equals(portalTransport) ? portalBle.wifiP2pReadIo() : portalBle.bleNotificationsIo();
-        JSONArray arr = new JSONArray((raw == null || raw.isEmpty()) ? "[]" : raw);
-        if (arr.length() > 0) {
-          portalLastActivity = System.currentTimeMillis();
-          quietDeadline = portalLastActivity + PORTAL_IOBACK_WINDOW_MS;   // keep pumping while output streams back
-          for (int i = 0; i < arr.length(); i++) {
-            String b64 = arr.optString(i, "");
-            if (!b64.isEmpty()) portalPostIo(base, b64, false);
+        if (portalHeld && !MainActivity.appForeground) {
+          String base = portalBase();
+          String raw = "wifi".equals(portalTransport) ? portalBle.wifiP2pReadIo() : portalBle.bleNotificationsIo();
+          JSONArray arr = new JSONArray((raw == null || raw.isEmpty()) ? "[]" : raw);
+          if (arr.length() > 0) {
+            portalLastActivity = System.currentTimeMillis();   // keep the link alive while output streams back
+            for (int i = 0; i < arr.length(); i++) {
+              String b64 = arr.optString(i, "");
+              if (!b64.isEmpty() && !base.isEmpty()) portalPostIo(base, b64, false);
+            }
+          }
+          // If the Wi-Fi socket dropped mid-session, fall back to BLE for subsequent commands (and this
+          // re-enables the BLE idle-drop in portalLoop).
+          if ("wifi".equals(portalTransport) && !portalBle.wifiP2pSockConnected()) {
+            portalTransport = "ble";
+            if (!base.isEmpty()) portalPostIo(base, "wifi-direct dropped; back on BLE", true);
           }
         }
-        // If the Wi-Fi socket dropped mid-session, fall back to BLE for subsequent commands.
-        if ("wifi".equals(portalTransport) && !portalBle.wifiP2pSockConnected()) {
-          portalTransport = "ble";
-          portalPostIo(base, "wifi-direct dropped; back on BLE", true);
-        }
-      } catch (Exception e) { /* ignore */ }
-      sleep(PORTAL_IOBACK_POLL_MS);
+      } catch (Throwable t) { /* ignore */ }
+      sleep(300);
     }
   }
 
