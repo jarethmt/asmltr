@@ -8,12 +8,14 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Base64;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -31,17 +33,46 @@ public class DeviceControlService extends Service {
   private Thread worker;
   private DeviceTools tools;
 
+  // --- Portal background relay (ported from insights/dashboard/src/services/portalRelay.js) ---------
+  // A SECOND worker that drives a paired asmltr-portal-* dongle while the app is backgrounded/locked —
+  // where the WebView relay's JS timers are suspended, so it goes deaf. Battery-cheap: one held
+  // long-poll to the core (GET …/exec/next?wait=25) instead of tight polling, and the dongle link is
+  // on-demand + idle-dropped. Owns its OWN NativeConfig (and therefore its own single GATT); it only
+  // ever holds the dongle while the app is NOT foreground, so it never contends with the WebView relay.
+  private static final String PORTAL_SVC    = "00657665-5f61-736d-6c74-72706f727401";
+  private static final String PORTAL_INFO   = "00657665-5f61-736d-6c74-72706f727402";
+  private static final String PORTAL_EXEC   = "00657665-5f61-736d-6c74-72706f727408";
+  private static final String PORTAL_IOBACK = "00657665-5f61-736d-6c74-72706f727409";
+  private static final String PORTAL_WIFI   = "00657665-5f61-736d-6c74-72706f72740a";
+  private static final String PORTAL_NAME_PREFIX = "asmltr-portal-";
+  private static final String PORTAL_ID = "default";          // single-dongle channel id (matches RELAY_ID)
+  private static final int  PORTAL_SCAN_MS = 4000;
+  private static final int  PORTAL_IOBACK_POLL_MS = 500;
+  private static final int  PORTAL_IOBACK_WINDOW_MS = 6000;   // quiet window after a command before we stop pumping
+  private static final long PORTAL_IDLE_DISCONNECT_MS = 45000;
+  private static final long PORTAL_PRESENCE_INTERVAL_MS = 5 * 60 * 1000;
+  private volatile boolean portalRunning = false;
+  private Thread portalWorker;
+  private NativeConfig portalBle;          // the relay's own BLE/Wi-Fi bridge (its own GATT)
+  private boolean portalHeld = false;      // true while we hold a connection to a paired dongle
+  private String portalTransport = "ble";  // 'ble' | 'wifi' — active data path for the current connection
+  private JSONObject portalInfo;           // last-read dongle identity { kind,name,fw,trust,host_os? }
+  private long portalLastActivity = 0;
+  private long portalLastPresence = 0;
+
   @Override public IBinder onBind(Intent i) { return null; }
 
   @Override public void onCreate() {
     super.onCreate();
     tools = new DeviceTools(this);
+    portalBle = new NativeConfig(this);   // its own instance → its own single GATT, owned by this service
     startForeground(43, buildNotification("Connecting…"));
   }
 
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
-    if (intent != null && ACTION_STOP.equals(intent.getAction())) { running = false; stopSelf(); return START_NOT_STICKY; }
+    if (intent != null && ACTION_STOP.equals(intent.getAction())) { running = false; portalRunning = false; stopSelf(); return START_NOT_STICKY; }
     if (!running) { running = true; worker = new Thread(this::loop, "asmltr-control"); worker.start(); }
+    if (!portalRunning) { portalRunning = true; portalWorker = new Thread(this::portalLoop, "asmltr-portal"); portalWorker.start(); }
     try { WakeWord.refresh(this); } catch (Throwable t) {} // (re)configure always-on wake word if enabled
     try { NotifBadgeOverlay.restore(this); } catch (Throwable t) {} // re-raise the held-notification badge after a restart
     return START_STICKY; // Android restarts us if killed → the link is meant to be always-on
@@ -145,5 +176,330 @@ public class DeviceControlService extends Service {
     try { ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(43, buildNotification(text)); } catch (Exception e) {}
   }
 
-  @Override public void onDestroy() { running = false; try { WakeWord.stop(); } catch (Throwable t) {} if (worker != null) worker.interrupt(); super.onDestroy(); }
+  @Override public void onDestroy() {
+    running = false; portalRunning = false;
+    try { WakeWord.stop(); } catch (Throwable t) {}
+    if (worker != null) worker.interrupt();
+    if (portalWorker != null) portalWorker.interrupt();
+    try { portalDrop(); } catch (Throwable t) {}
+    super.onDestroy();
+  }
+
+  // ================================ Portal background relay ========================================
+  // Logic ported from insights/dashboard/src/services/portalRelay.js. The WebView relay there posts to
+  // /v2/portal/* RELATIVE to the loaded dashboard page origin; this worker needs that SAME absolute
+  // origin. See portalBase() for the derivation.
+
+  private void portalLoop() {
+    while (portalRunning) {
+      try {
+        // Foreground: the WebView relay owns the single dongle GATT. Drop ours (so the dongle
+        // re-advertises for the WebView to reclaim) and idle — we only drive while backgrounded.
+        if (MainActivity.appForeground) {
+          if (portalHeld) portalDrop();
+          sleep(1500);
+          continue;
+        }
+        String base = portalBase();
+        if (base.isEmpty()) { sleep(5000); continue; }
+        long nowMs = System.currentTimeMillis();
+        // Release an idle-held link (battery; and frees the dongle to advertise again).
+        if (portalHeld && nowMs - portalLastActivity > PORTAL_IDLE_DISCONNECT_MS) portalDrop();
+        // Opportunistic presence probe on a long interval (refreshes the kill-switch presence).
+        if (!portalHeld && nowMs - portalLastPresence > PORTAL_PRESENCE_INTERVAL_MS) {
+          portalLastPresence = nowMs;
+          boolean ok = portalEnsureConnectedPaired(base, false);
+          portalPostPresent(base, ok && portalInfo != null && "paired".equals(portalInfo.optString("trust")));
+        }
+        // Battery-cheap wait: one held request up to 25s (the core long-polls, capped at 30s server-side).
+        long t0 = System.currentTimeMillis();
+        JSONObject cmd;
+        try { cmd = portalHttpGetJson(base + "/v2/portal/" + PORTAL_ID + "/exec/next?wait=25", 35000); }
+        catch (Exception e) { sleep(3000); continue; }
+        long elapsed = System.currentTimeMillis() - t0;
+        String mode = cmd != null ? cmd.optString("mode", "") : "";
+        if (mode.isEmpty()) {
+          // No command. If the response came back fast, the core isn't honoring the long-poll (older
+          // build) — back off so we don't tight-loop and burn battery.
+          if (elapsed < 2000) sleep(3000);
+          continue;
+        }
+        portalHandleExec(base, mode, cmd.optString("data", ""));
+      } catch (Throwable t) {
+        sleep(3000);
+      }
+    }
+    try { portalDrop(); } catch (Throwable t) {}
+  }
+
+  /** Absolute base for /v2/portal/* — the dashboard page ORIGIN the WebView relay posts to.
+   *  SharedPreferences "baseUrl" is the android-connector base (…/app, reaches /gw/*); the core's
+   *  /v2/portal/* lives at the origin root (…), i.e. baseUrl with the trailing "/app" removed. This is
+   *  exactly what www/index.html computes as `dash = base.replace(/\/app$/,'')` before loading the SPA,
+   *  so the native worker hits the same URLs the WebView relay does. */
+  private String portalBase() {
+    String base = prefs().getString("baseUrl", "");
+    if (base == null) return "";
+    base = base.trim();
+    while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+    if (base.endsWith("/app")) base = base.substring(0, base.length() - 4);
+    return base;
+  }
+
+  private void portalHandleExec(String base, String mode, String dataB64) {
+    if (!portalEnsureConnectedPaired(base, true)) { portalPostIo(base, "no paired portal in range", true); return; }
+    portalTryWifiUpgrade(base);
+    try {
+      int m = "cdc".equals(mode) ? 0x02 : 0x01;
+      byte[] data = (dataB64 == null || dataB64.isEmpty()) ? new byte[0] : Base64.decode(dataB64, Base64.DEFAULT);
+      byte[] payload = new byte[1 + data.length];
+      payload[0] = (byte) m;
+      System.arraycopy(data, 0, payload, 1, data.length);
+      if ("wifi".equals(portalTransport)) {
+        String r = portalBle.wifiP2pWrite(Base64.encodeToString(payload, Base64.NO_WRAP));  // native frames [len:2BE]
+        if (!"ok".equals(r)) {   // wifi write failed — fall back to BLE for this command and the rest
+          portalTransport = "ble"; try { portalBle.wifiP2pStop(); } catch (Throwable t) {}
+          portalPostIo(base, "wifi write failed (" + r + "); back on BLE", true);
+          sleep(450); portalChunkWrite(PORTAL_EXEC, payload, "exec");
+        }
+      } else {
+        sleep(450);   // let the ioback-subscribe (CCCD write) settle before the first BLE exec write
+        portalChunkWrite(PORTAL_EXEC, payload, "exec");
+      }
+      portalLastActivity = System.currentTimeMillis();
+      portalPumpIoback(base);   // capture the host's return stream for a short window
+    } catch (Exception e) {
+      portalPostIo(base, String.valueOf(e.getMessage()), true);
+    }
+  }
+
+  /** Ensure we hold a connection to a PAIRED dongle (scan+connect+read INFO if needed). */
+  private boolean portalEnsureConnectedPaired(String base, boolean emitErrors) {
+    if (portalHeld) return true;
+    String[] dev = portalScan();
+    if (dev == null) {
+      if (emitErrors) portalPostIo(base, "scan: no asmltr-portal-* advertising (dongle connected elsewhere, or BT off)", true);
+      return false;
+    }
+    try {
+      JSONObject info = portalConnectAndReadInfo(dev[0]);
+      if (info == null || !"paired".equals(info.optString("trust"))) {
+        if (emitErrors) portalPostIo(base, "connected but trust=" + (info == null ? "?" : info.optString("trust")), true);
+        portalDrop();
+        return false;
+      }
+      portalInfo = info; portalHeld = true; portalTransport = "ble";
+      portalLastActivity = System.currentTimeMillis();
+      return true;
+    } catch (Exception e) {
+      if (emitErrors) portalPostIo(base, "connect: " + e.getMessage(), true);
+      portalDrop();
+      return false;
+    }
+  }
+
+  /** Short scan → the first in-range asmltr-portal-* advertiser, or null. Drops any stale link first
+   *  (a held connection stops the dongle advertising; it supports one central), then re-discovers. */
+  private String[] portalScan() {
+    try { portalBle.bleDisconnect(); } catch (Throwable t) {}
+    sleep(600);
+    if (!"ok".equals(portalBle.bleStartScan())) return null;
+    try {
+      long deadline = System.currentTimeMillis() + PORTAL_SCAN_MS;
+      while (System.currentTimeMillis() < deadline && portalRunning) {
+        try {
+          JSONArray arr = new JSONArray(portalBle.bleResults());
+          for (int i = 0; i < arr.length(); i++) {
+            JSONObject d = arr.getJSONObject(i);
+            String name = d.optString("name", "");
+            if (name.toLowerCase().startsWith(PORTAL_NAME_PREFIX)) return new String[]{ d.optString("id"), name };
+          }
+        } catch (Exception e) { /* transient */ }
+        sleep(600);
+      }
+    } finally { try { portalBle.bleStopScan(); } catch (Throwable t) {} }
+    return null;
+  }
+
+  /** Connect + read INFO. Returns the parsed identity or throws. Subscribes ioback on success. */
+  private JSONObject portalConnectAndReadInfo(String deviceId) throws Exception {
+    if (!"ok".equals(portalBle.bleConnectAndRead(deviceId, PORTAL_SVC, PORTAL_INFO))) throw new Exception("connect failed");
+    long deadline = System.currentTimeMillis() + 20000;
+    while (System.currentTimeMillis() < deadline && portalRunning) {
+      JSONObject res;
+      try { res = new JSONObject(portalBle.bleGattResult()); } catch (Exception e) { res = new JSONObject(); }
+      String state = res.optString("state", "");
+      if ("done".equals(state)) {
+        try { portalBle.bleSubscribeIo(PORTAL_SVC, PORTAL_IOBACK); } catch (Throwable t) { /* best-effort */ }
+        try { return new JSONObject(res.optString("value", "{}")); }
+        catch (Exception e) { JSONObject o = new JSONObject(); try { o.put("_raw", res.optString("value")); } catch (Exception ex) {} return o; }
+      }
+      if ("error".equals(state) || "disconnected".equals(state)) throw new Exception("connect: " + res.optString("error", state));
+      sleep(400);
+    }
+    throw new Exception("connect timed out");
+  }
+
+  /** One-time-per-connection attempt to upgrade the data path from BLE to Wi-Fi Direct. Any failure
+   *  leaves us on BLE. Mirrors portalRelay.js tryWifiUpgrade. */
+  private void portalTryWifiUpgrade(String base) {
+    if ("wifi".equals(portalTransport) || !portalHeld) return;
+    try {
+      String started = portalBle.wifiP2pStart();
+      if (!"ok".equals(started)) {
+        // Not yet granted the nearby-devices/Wi-Fi permission — the native side fired the prompt; the
+        // grant persists so the next drive upgrades. Surface a hint; stay on BLE meanwhile.
+        if (started != null && started.contains("err:perm")) portalPostIo(base, "wifi: grant the nearby-devices permission, then drive again to use the fast path", true);
+        return;
+      }
+      JSONObject info = null;
+      for (int i = 0; i < 40 && portalRunning; i++) {   // ~12s for the group to come up
+        try { info = new JSONObject(portalBle.wifiP2pInfo()); } catch (Exception e) { info = new JSONObject(); }
+        String st = info.optString("state", "");
+        if ("ready".equals(st) || "error".equals(st)) break;
+        sleep(300);
+      }
+      if (info == null || !"ready".equals(info.optString("state")) || info.optString("ssid", "").isEmpty()) {
+        try { portalBle.wifiP2pStop(); } catch (Throwable t) {}
+        return;
+      }
+      JSONObject creds = new JSONObject();
+      creds.put("ssid", info.optString("ssid"));
+      creds.put("pass", info.optString("pass"));
+      creds.put("ip", info.optString("goIp", "").isEmpty() ? "192.168.49.1" : info.optString("goIp"));
+      creds.put("port", info.optInt("port", 9790));
+      portalChunkWrite(PORTAL_WIFI, creds.toString().getBytes("UTF-8"), "wifi-creds");  // dongle joins + dials the GO
+      for (int i = 0; i < 40 && portalRunning; i++) {   // ~12s for the dongle's TCP socket to land
+        if (portalBle.wifiP2pSockConnected()) { portalTransport = "wifi"; portalPostIo(base, "transport: wifi-direct up", true); return; }
+        sleep(300);
+      }
+      try { portalBle.wifiP2pStop(); } catch (Throwable t) {}   // socket never arrived — stay on BLE
+    } catch (Exception e) {
+      try { portalBle.wifiP2pStop(); } catch (Throwable t) {}
+    }
+  }
+
+  /** Chunked write with the dongle's [flags][rsvd][seqBE] reassembly framing (exec + wifi-creds chars).
+   *  Ported verbatim from portalRelay.js chunkWriteChar — retries GATT BUSY (rc 201) and waits for each
+   *  write-with-response to ack before the next frame. */
+  private void portalChunkWrite(String uuid, byte[] payload, String label) throws Exception {
+    int mtu = portalBle.bleMtuSize();
+    if (mtu <= 0) mtu = 23;
+    int chunkData = Math.max(16, Math.min(180, mtu - 3 - 4));
+    int seq = 0;
+    for (int off = 0; off < payload.length; off += chunkData) {
+      int end = Math.min(off + chunkData, payload.length);
+      int sliceLen = end - off;
+      int first = (off == 0) ? 0x01 : 0x00;
+      int last = (off + chunkData >= payload.length) ? 0x02 : 0x00;
+      byte[] frame = new byte[4 + sliceLen];
+      frame[0] = (byte) (first | last);
+      frame[1] = 0;
+      frame[2] = (byte) ((seq >> 8) & 0xff);
+      frame[3] = (byte) (seq & 0xff);
+      System.arraycopy(payload, off, frame, 4, sliceLen);
+      String b64 = Base64.encodeToString(frame, Base64.NO_WRAP);
+      String r = "init"; int tries = 0;
+      while (tries++ < 25) {
+        r = portalBle.bleWrite(PORTAL_SVC, uuid, b64);
+        if ("ok".equals(r)) break;
+        if (r != null && r.contains("write-rc:201")) { sleep(150); continue; }   // busy — back off + retry
+        throw new Exception(label + " write: " + r);
+      }
+      if (!"ok".equals(r)) throw new Exception(label + " write: stuck busy (rc 201)");
+      boolean done = false;
+      for (int i = 0; i < 50; i++) {
+        JSONObject st;
+        try { st = new JSONObject(portalBle.bleWriteState()); } catch (Exception e) { st = new JSONObject(); }
+        String s = st.optString("state", "");
+        if ("done".equals(s)) { done = true; break; }
+        if ("error".equals(s)) throw new Exception(st.optString("error", label + " write error"));
+        sleep(80);
+      }
+      if (!done) throw new Exception(label + " write timed out");
+      seq++;
+    }
+  }
+
+  /** Drain the dongle's ioback (CDC return stream) for a short window, forwarding each chunk to the core.
+   *  Keeps pumping while data flows; stops after a quiet window, if the app comes foreground, or on stop. */
+  private void portalPumpIoback(String base) {
+    long quietDeadline = System.currentTimeMillis() + PORTAL_IOBACK_WINDOW_MS;
+    while (portalRunning && !MainActivity.appForeground && System.currentTimeMillis() < quietDeadline) {
+      try {
+        String raw = "wifi".equals(portalTransport) ? portalBle.wifiP2pReadIo() : portalBle.bleNotificationsIo();
+        JSONArray arr = new JSONArray((raw == null || raw.isEmpty()) ? "[]" : raw);
+        if (arr.length() > 0) {
+          portalLastActivity = System.currentTimeMillis();
+          quietDeadline = portalLastActivity + PORTAL_IOBACK_WINDOW_MS;   // keep pumping while output streams back
+          for (int i = 0; i < arr.length(); i++) {
+            String b64 = arr.optString(i, "");
+            if (!b64.isEmpty()) portalPostIo(base, b64, false);
+          }
+        }
+        // If the Wi-Fi socket dropped mid-session, fall back to BLE for subsequent commands.
+        if ("wifi".equals(portalTransport) && !portalBle.wifiP2pSockConnected()) {
+          portalTransport = "ble";
+          portalPostIo(base, "wifi-direct dropped; back on BLE", true);
+        }
+      } catch (Exception e) { /* ignore */ }
+      sleep(PORTAL_IOBACK_POLL_MS);
+    }
+  }
+
+  private void portalDrop() {
+    try { portalBle.wifiP2pStop(); } catch (Throwable t) {}
+    try { portalBle.bleDisconnect(); } catch (Throwable t) {}
+    portalHeld = false; portalInfo = null; portalTransport = "ble";
+  }
+
+  /** POST one ioback chunk (already base64) or a relay-side error (base64 of "[relay] <msg>", so it
+   *  surfaces as readable io server-side) to the core. Mirrors portalRelay.js setServerSink portal.io. */
+  private void portalPostIo(String base, String text, boolean isError) {
+    try {
+      String data = isError ? Base64.encodeToString(("[relay] " + text).getBytes("UTF-8"), Base64.NO_WRAP) : text;
+      JSONObject b = new JSONObject();
+      b.put("data", data);
+      portalHttpPostJson(base + "/v2/portal/" + PORTAL_ID + "/io", b.toString());
+    } catch (Exception e) {}
+  }
+
+  private void portalPostPresent(String base, boolean paired) {
+    try {
+      JSONObject b = new JSONObject();
+      b.put("paired", paired);
+      b.put("name", portalInfo != null ? portalInfo.optString("name", "") : "");
+      b.put("host_os", portalInfo != null ? portalInfo.optString("host_os", "") : "");
+      portalHttpPostJson(base + "/v2/portal/" + PORTAL_ID + "/present", b.toString());
+    } catch (Exception e) {}
+  }
+
+  private JSONObject portalHttpGetJson(String urlStr, int readTimeout) throws Exception {
+    HttpURLConnection c = null;
+    try {
+      c = (HttpURLConnection) new URL(urlStr).openConnection();
+      c.setConnectTimeout(15000); c.setReadTimeout(readTimeout);
+      c.setRequestProperty("Accept", "application/json");
+      if (c.getResponseCode() != 200) return null;
+      BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
+      StringBuilder sb = new StringBuilder(); String line;
+      while ((line = r.readLine()) != null) sb.append(line);
+      r.close();
+      String s = sb.toString().trim();
+      return s.isEmpty() ? new JSONObject() : new JSONObject(s);
+    } finally { if (c != null) try { c.disconnect(); } catch (Exception e) {} }
+  }
+
+  private void portalHttpPostJson(String urlStr, String body) {
+    HttpURLConnection c = null;
+    try {
+      c = (HttpURLConnection) new URL(urlStr).openConnection();
+      c.setRequestMethod("POST"); c.setDoOutput(true);
+      c.setRequestProperty("Content-Type", "application/json");
+      c.setConnectTimeout(10000); c.setReadTimeout(10000);
+      OutputStream os = c.getOutputStream(); os.write(body.getBytes("UTF-8")); os.close();
+      c.getResponseCode(); // fire
+    } catch (Exception e) { /* core offline / idle */ }
+    finally { if (c != null) try { c.disconnect(); } catch (Exception e) {} }
+  }
 }

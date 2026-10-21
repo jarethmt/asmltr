@@ -280,6 +280,18 @@ export function setServerSink(fn) { serverSink = typeof fn === 'function' ? fn :
 export function pausePortalRelay() { paused = true; if (connected) dropConnection() }
 export function resumePortalRelay() { paused = false }
 
+// Native-app handoff hooks. In the Capacitor shell the app's foreground lifecycle drives a SECOND,
+// native background relay (DeviceControlService) that owns the dongle while the app is locked —
+// where the WebView's JS timers are suspended, so this relay goes deaf. The single dongle advertises
+// to ONE central, so exactly one relay may hold the GATT at a time. MainActivity pauses THIS relay in
+// onPause (dropping our BLE link so the dongle re-advertises for the native service to grab) and
+// resumes it in onResume (so the WebView reclaims the GATT in the foreground). No-op in a desktop
+// browser (no AsmltrNative, so the relay is already dormant) — these are just window hooks for the shell.
+if (typeof window !== 'undefined') {
+  window.__portalRelayPause = pausePortalRelay
+  window.__portalRelayResume = resumePortalRelay
+}
+
 export function startPortalRelay() {
   if (running || !AN) return
   running = true

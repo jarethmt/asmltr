@@ -26,6 +26,9 @@ let x = fs.readFileSync(mf, 'utf8');
 const perms = ['android.permission.RECORD_AUDIO', 'android.permission.INTERNET', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.REQUEST_INSTALL_PACKAGES',
   // persistent floating overlay (survives swipe-home) + its foreground service
   'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+  // connectedDevice FGS type — the DeviceControlService also drives a paired Portal dongle over BLE in
+  // the background (the always-on Portal relay), which is a connected-device foreground use on API 34+.
+  'android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE',
   // full app visibility so the assistant can find/launch ANY installed app by name (this IS a device
   // controller; the <queries> below covers launcher apps, this guarantees the rest).
   'android.permission.QUERY_ALL_PACKAGES',
@@ -117,9 +120,10 @@ const overlaySvc = `
 if (!x.includes('.OverlayService')) x = x.replace(/<\/application>/, overlaySvc + '    </application>');
 
 // The always-on device-control link (persistent foreground service) + a boot receiver to restart it.
+// Two FGS types: specialUse (the SSE control link) + connectedDevice (the background Portal BLE relay).
 const controlSvc = `
         <service android:name=".DeviceControlService"
-            android:exported="false" android:foregroundServiceType="specialUse">
+            android:exported="false" android:foregroundServiceType="specialUse|connectedDevice">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="device_control_link" />
         </service>
         <receiver android:name=".BootReceiver" android:exported="true">
@@ -127,6 +131,9 @@ const controlSvc = `
         </receiver>
 `;
 if (!x.includes('.DeviceControlService')) x = x.replace(/<\/application>/, controlSvc + '    </application>');
+// Idempotent upgrade: a project patched before the Portal relay has the service with specialUse ONLY.
+// Add connectedDevice to it in place (no match once it already reads specialUse|connectedDevice).
+x = x.replace(/(<service android:name="\.DeviceControlService"[^>]*android:foregroundServiceType=")specialUse(")/, '$1specialUse|connectedDevice$2');
 
 // Phase 2: the accessibility service (on-screen control: gestures, read screen, screenshots). The user
 // must enable it in Settings → Accessibility; it's inert until then.
