@@ -30,7 +30,8 @@ const EXEC_MODE = { hid: 0x01, cdc: 0x02 }
 const SCAN_MS = 4000          // short discovery window
 const PRESENCE_INTERVAL = 5 * 60 * 1000 // opportunistic presence probe — long interval (battery)
 const IOBACK_POLL_MS = 500    // only while connected during/after a drive
-const IDLE_DISCONNECT_MS = 15000 // drop the link this long after the last activity
+const IDLE_DISCONNECT_MS = 45000 // drop the link this long after the last activity (a slow HID-typed
+// command + its response can take a while; the ioback pump also keep-alives this while data flows)
 
 const AN = (typeof window !== 'undefined' && window.AsmltrNative && typeof window.AsmltrNative.bleStartScan === 'function')
   ? window.AsmltrNative : null
@@ -141,6 +142,7 @@ function startIobackPump() {
   iobackTimer = setInterval(() => {
     try {
       const arr = JSON.parse(AN.bleNotificationsIo() || '[]')
+      if (arr.length) bumpIdle()   // keep the link alive while the host is streaming output back
       for (const b64 of arr) if (b64) emit({ type: 'portal.io', data: b64 }) // already base64 — forward verbatim
     } catch (_) { /* ignore */ }
   }, IOBACK_POLL_MS)
