@@ -2175,12 +2175,14 @@ app.post('/v2/portal/:id/io', (req, res) => { portalDrive.appendIo(req.params.id
 app.get('/v2/portal/:id/io', (req, res) => res.json({ data: portalDrive.drainIo(req.params.id) }));
 app.post('/v2/portal/:id/present', (req, res) => { portalDrive.setPresent(req.params.id, req.body || {}); res.json({ ok: true }); });
 app.get('/v2/portal/:id/present', (req, res) => res.json(portalDrive.getPresent(req.params.id)));
-// Enrollment entry (persistent track): the per-OS bootstrap that opens a shell then runs `asmltr mesh enroll`.
-app.post('/v2/portal/enroll', (req, res) => {
-  const os = (req.body || {}).os || 'linux';
-  const r = portalDrive.recipes.getRecipe(os);
-  res.json({ os, recipe: r ? { terminalOpen: r.terminalOpen, probe: r.probe, transport: r.transport } : null,
-             note: 'enroll-over-bridge: open a shell via terminalOpen, then run the mesh bootstrap (asmltr mesh enroll). Full token-mint + script-serve is the persistent-track TODO.' });
+// Portal persistent track (PORTAL-DRIVE.md §6): enroll a host onto the mesh, tear it down, victory lap.
+app.post('/v2/portal/enroll',   async (req, res) => { try { res.json(await portalEnroll.enroll(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/portal/teardown', async (req, res) => { try { res.json(await portalEnroll.teardown(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/v2/portal/:id/victory', async (req, res) => { try { res.json(await portalEnroll.victoryLap(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); } });
+// The per-device mesh-client install script the bootstrap fetches. Device-credential plumbing (from
+// `asmltr mesh enroll` → mesh/deviceinstall.installPlan) is the persistent track's remaining piece.
+app.get('/v2/portal/enroll/script', (req, res) => {
+  res.status(503).type('text/plain').send('# asmltr Portal enroll script — mesh device-credential plumbing pending (persistent track).\n# See core/src/portal/enroll.js + mesh/deviceinstall.js (installPlan).\n');
 });
 
 // Mint a one-time enrollment code. The response carries the code; it is not a credential and is

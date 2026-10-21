@@ -83,3 +83,72 @@ Driving is remote keyboard control of an arbitrary machine → the trust gate is
 Portal runs modules/commands only from its **paired** instance, one up-front consent per drive session,
 and the **vault-kill-switch** (unplug the Portal → Eve can't use dongle-only credentials) is the physical
 counterweight. Never bypass OS elevation (UAC/sudo) — assisted, consented provisioning only.
+
+## 6. Install / uninstall (persistent track)
+
+The DRIVE track (§3) runs a host with no agent over the dongle. The **persistent track**
+(`core/src/portal/enroll.js`) is the other half: it JOINS a host onto asmltr's self-hosted mesh so
+asmltr can reach it by SSH/RDP afterwards — and tears that down cleanly. The installer is just one
+script riding the same bridge (§2): `exec:hid` to open a shell, then the one-liner below.
+
+**Ownership:** `enroll.js` owns only the *logic*. `core/src/server.js` (core owner, NOT this module)
+wires `POST /v2/portal/enroll` and the script-serving endpoint. The per-OS install/uninstall
+one-liners live in `recipes.js` (`recipe.install(token, baseUrl)` / `recipe.uninstall(org)`) so the
+shapes stay in one place.
+
+### enroll({ os, deviceName, deviceId })
+asmltr-SIDE steps, in order:
+1. find/create the device row (`devices/store.js`), platform = normalized OS — it lands in the Fleet
+   immediately.
+2. register `ssh` (:22) and `rd` (:3389) transports at their mesh aliases `<slug>-ssh.mesh` /
+   `<slug>-rd.mesh` — the addresses asmltr reaches it on once the tunnel is up.
+3. mint a **short-lived, revocable one-time token** (`devices/enroll.js` → `enrollments`, 15 min). The
+   token is not a credential — it only authorizes the host to fetch its install script.
+4. drive the already-shipped `asmltr mesh enroll <device> --os <os>` + `asmltr mesh resource …`
+   (via `execFile`). **Tolerant:** if the mesh isn't provisioned the CLI says so and enroll returns
+   `mesh.status='not-configured'` instead of failing — the device + token stay valid for a later
+   bring-up.
+
+Returns `{ token, bootstrapCommand, device, mesh }`.
+
+### bootstrapCommand(os, token, baseUrl)
+The ONE line the host runs. Thin by design: it fetches the per-device mesh-client install script
+(authorized by `token`) from `{baseUrl}/v2/portal/enroll/script?os=<os>` and runs it.
+- **Windows:** elevated-PowerShell `iwr … | iex`. The fetched script registers newt as a **SYSTEM
+  scheduled task** (`mesh/deviceinstall.newtWindows`).
+- **Linux:** `curl -fsSL -H 'Authorization: Bearer <token>' … | sudo sh` → a systemd newt unit.
+- **macOS:** same `curl | sudo sh` → a launchd olm daemon.
+- **Android:** no shell one-liner — enrollment is the ADB path; `install()` returns a note.
+
+### teardown({ os, deviceName, deviceId })
+The reverse. Returns `{ uninstallCommand, ok, mesh, revoked, dropped_transports }`:
+- `uninstallCommand` — the per-OS host one-liner that stops + removes the newt/olm unit/task and
+  leaves the mesh (`recipe.uninstall(org)`; unit/task names match `mesh/deviceinstall.js` exactly:
+  `newt-<org>-mesh`, `olm-<org>-mesh`).
+- asmltr-side deregistration — revoke the device's credentials/token (vault delete + hash drop via
+  `devices/enroll.revoke`), remove the mesh ssh/rd resources, and drop the ssh/rd transports.
+
+### victoryLap(deviceId)
+After enroll, connect BACK over the mesh and paint SUCCESS on the target's own screen — the moment
+that proves the round trip end to end. It SSHes to the device's `ssh` transport alias using the
+asmltr host's **mesh SSH identity** (`mesh/sshkey`; its PUBLIC key is what Portal provisioning dropped
+into the target's `authorized_keys`), and runs a remote one-liner that prints a bold ASCII
+`ENROLLED ✓ / asmltr` banner to the SSH session and broadcasts it to any logged-in console (`wall` on
+Linux/macOS, `msg *` on Windows). A **GUI variant** (noted, not built) would instead push a desktop
+toast: `notify-send` / `osascript -e 'display notification …'` / BurntToast. Best-effort by design —
+a freshly joined tunnel may need a few seconds, so a failure is informational, never fatal to enroll.
+Returns `{ ok, method }`.
+
+### The two gotchas (baked into the scripts, never re-debug)
+1. **Windows newt MUST run as a SYSTEM scheduled task** or the WireGuard adapter is created but never
+   transmits (tunnel one-way). The Windows bootstrap targets an elevated shell; the server-generated
+   script registers the SYSTEM task (`RunLevel Highest`).
+2. **A host-mode mesh resource MUST have a non-empty `alias`** or it never routes (every packet
+   silently dropped). enroll always passes a resource *name* so the mesh CLI derives `<name>.mesh`;
+   we never create an empty-alias resource.
+
+**Assumptions:** the enrollment token authorizes a `GET …/enroll/script` the core owner serves (it
+returns the `deviceinstall.js` body for that device+OS); `deviceinstall.js` has no macOS generator yet
+(the endpoint supplies the launchd plist); the SSH user for the victory lap defaults to
+`ASMLTR_PORTAL_SSH_USER` (fallback `root`); `baseUrl` resolves from `ASMLTR_PORTAL_BASE_URL` →
+`ASMLTR_PUBLIC_URL` → `BASE_URL` → the mesh dashboard URL → `http://127.0.0.1:3000`.
