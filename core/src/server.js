@@ -43,6 +43,7 @@ const deviceStore = require('./devices/store'); // device registry — the machi
 const deviceEnroll = require('./devices/enroll'); // device credential issuance (vault-backed; replaces keys.json)
 const deviceShell = require('./devices/shell'); // shell sessions on registered machines — one PTY, many watchers
 const portalModules = require('./portal/modules'); // Portal (BLE dongle) module signer + library (docs/PORTAL-PROTOCOL.md)
+const portalDrive = require('./portal/drive'); // Portal generic-driver relay + recipes (docs/PORTAL-DRIVE.md)
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
@@ -2165,6 +2166,21 @@ app.post('/v2/portal/modules/sign', async (req, res) => {
     if (!mod) return res.status(400).json({ error: 'provide {module} or a known library {id}' });
     res.json(await portalModules.signModule(vault, mod));
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// --- Portal generic driver: an HTTP relay both the driver (Eve) and the phone app poll (PORTAL-DRIVE.md §2)
+app.post('/v2/portal/:id/exec', (req, res) => { const b = req.body || {}; portalDrive.pushExec(req.params.id, b.mode, b.data); res.json({ ok: true }); });
+app.get('/v2/portal/:id/exec/next', (req, res) => res.json(portalDrive.nextExec(req.params.id) || {}));
+app.post('/v2/portal/:id/io', (req, res) => { portalDrive.appendIo(req.params.id, (req.body || {}).data); res.json({ ok: true }); });
+app.get('/v2/portal/:id/io', (req, res) => res.json({ data: portalDrive.drainIo(req.params.id) }));
+app.post('/v2/portal/:id/present', (req, res) => { portalDrive.setPresent(req.params.id, req.body || {}); res.json({ ok: true }); });
+app.get('/v2/portal/:id/present', (req, res) => res.json(portalDrive.getPresent(req.params.id)));
+// Enrollment entry (persistent track): the per-OS bootstrap that opens a shell then runs `asmltr mesh enroll`.
+app.post('/v2/portal/enroll', (req, res) => {
+  const os = (req.body || {}).os || 'linux';
+  const r = portalDrive.recipes.getRecipe(os);
+  res.json({ os, recipe: r ? { terminalOpen: r.terminalOpen, probe: r.probe, transport: r.transport } : null,
+             note: 'enroll-over-bridge: open a shell via terminalOpen, then run the mesh bootstrap (asmltr mesh enroll). Full token-mint + script-serve is the persistent-track TODO.' });
 });
 
 // Mint a one-time enrollment code. The response carries the code; it is not a credential and is
