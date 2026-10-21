@@ -257,3 +257,14 @@ Morning bring-up must verify: Wi-Fi+BLE+USB coexistence boots & stays up (RAM is
 `esp_wifi_init` ENOMEMs we stay on BLE, or enable PSRAM); the 2.4 GHz group creation + NEARBY_WIFI_DEVICES
 runtime prompt on Android; the dongle associates + the TCP socket lands; a large return (the 800-char
 pattern, then a screenshot) arrives **intact** over Wi-Fi; and clean BLE fallback when Wi-Fi is refused.
+
+### 2026-10-21 — single-owner relay + self-heal (built; partially hardware-confirmed)
+The relay is now **single-owner**: the phone's native foreground service (DeviceControlService) is the
+SOLE dongle driver, foreground and locked. The webview relay's driving and the foreground/background
+handoff are gone (that onPause/evaluateJavascript race left the dongle clamped on lock). The service
+yields the dongle only while the in-app Portal/Adopt screen is open (`portalYielded` via
+`NativeConfig.portalServiceYield`, driven by Portal.vue mount/unmount). Wi-Fi is now **negotiated once and
+held** (no per-command re-handshake), and the background ioback pump is **continuous while connected**.
+Dongle **self-heals** a dead link via a ~6s BLE supervision timeout (re-advertises on its own — no replug).
+**Confirmed live:** HID drive, Wi-Fi upgrade, CDC round-trip, locked-phone driving, held-Wi-Fi speedup.
+**To confirm:** lock-survival with zero replug, and the Portal-screen yield handoff. (APK 0.10.11.)
