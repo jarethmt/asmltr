@@ -2171,7 +2171,11 @@ app.post('/v2/portal/modules/sign', async (req, res) => {
 
 // --- Portal generic driver: an HTTP relay both the driver (Eve) and the phone app poll (PORTAL-DRIVE.md §2)
 app.post('/v2/portal/:id/exec', (req, res) => { const b = req.body || {}; portalDrive.pushExec(req.params.id, b.mode, b.data); res.json({ ok: true }); });
-app.get('/v2/portal/:id/exec/next', (req, res) => res.json(portalDrive.nextExec(req.params.id) || {}));
+app.get('/v2/portal/:id/exec/next', async (req, res) => {
+  const wait = Math.min(parseInt(req.query.wait || '0', 10) || 0, 30);   // ?wait=N → long-poll up to N s (cap 30)
+  if (wait > 0) return res.json((await portalDrive.waitExec(req.params.id, wait * 1000)) || {});
+  res.json(portalDrive.nextExec(req.params.id) || {});
+});
 app.post('/v2/portal/:id/io', (req, res) => { portalDrive.appendIo(req.params.id, (req.body || {}).data); res.json({ ok: true }); });
 app.get('/v2/portal/:id/io', (req, res) => res.json({ data: portalDrive.drainIo(req.params.id) }));
 app.post('/v2/portal/:id/present', (req, res) => { portalDrive.setPresent(req.params.id, req.body || {}); res.json({ ok: true }); });
