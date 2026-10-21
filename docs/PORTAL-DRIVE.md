@@ -22,6 +22,19 @@ Existing service `00657665-5f61-736d-6c74-72706f72` + a last byte:
 UUIDs: `exec` = `…727408`, `ioback` = `…727409`. The dongle also keeps the existing
 `info/load/run/status/pair` chars; `exec`/`ioback` are the generic-driver additions.
 
+### exec `mode 0x01` (HID) keystroke-script format
+
+`data` is a UTF-8 **keystroke script**, not raw ASCII — literal text types as-is, and `{…}` tokens are
+special keys / combos / delays, so recipes can open terminals:
+
+- Literals: `powershell` → types those chars.
+- Keys: `{ENTER}` `{TAB}` `{ESC}` `{SPACE}` `{BKSP}`
+- Combos: `{GUI+r}` (Win/Cmd+R) `{CTRL+ALT+t}` `{GUI}` `{CTRL+c}` — `GUI`=Windows/Command key.
+- Timing: `{DELAY:500}` (ms) — wait between steps (needed after opening a dialog).
+
+Example (open PowerShell on Windows): `{GUI+r}{DELAY:400}powershell{ENTER}{DELAY:800}`.
+The firmware parses this → HID reports. `mode 0x02` (CDC) `data` is written to the host verbatim.
+
 ## 2. Relay message shape (core ↔ app, over the device-gateway)
 
 - **Server → app:** `{ "type": "portal.exec", "mode": "hid"|"cdc", "data": "<base64>" }`
