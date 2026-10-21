@@ -281,28 +281,26 @@ export async function handleServerMessage(msg) {
 // The app's device-gateway glue sets this so app→server messages (portal.io/portal.present) get sent.
 export function setServerSink(fn) { serverSink = typeof fn === 'function' ? fn : null }
 
-// Pause/resume so the foreground Portal view can own the single native gatt without contention.
+// Pause/resume kept for API compatibility (Portal.vue still imports them). The relay no longer drives
+// the dongle on-device, so these are effectively inert now — the native service's yield (see
+// portalServiceYield) is what actually frees the dongle for the Portal screen.
 export function pausePortalRelay() { paused = true; if (connected) dropConnection() }
 export function resumePortalRelay() { paused = false }
 
-// Native-app handoff hooks. In the Capacitor shell the app's foreground lifecycle drives a SECOND,
-// native background relay (DeviceControlService) that owns the dongle while the app is locked —
-// where the WebView's JS timers are suspended, so this relay goes deaf. The single dongle advertises
-// to ONE central, so exactly one relay may hold the GATT at a time. MainActivity pauses THIS relay in
-// onPause (dropping our BLE link so the dongle re-advertises for the native service to grab) and
-// resumes it in onResume (so the WebView reclaims the GATT in the foreground). No-op in a desktop
-// browser (no AsmltrNative, so the relay is already dormant) — these are just window hooks for the shell.
+// Legacy no-op hooks. These once backed a foreground/background GATT handoff with a native background
+// relay; that handoff is gone — DeviceControlService is now the SOLE dongle driver (it yields only for
+// the Portal screen). MainActivity no longer calls these; left defined as harmless no-ops.
 if (typeof window !== 'undefined') {
   window.__portalRelayPause = pausePortalRelay
   window.__portalRelayResume = resumePortalRelay
 }
 
 export function startPortalRelay() {
-  if (running || !AN) return
-  running = true
-  // Opportunistic presence probe on a long interval — proves a paired Portal is around (and refreshes
-  // the kill-switch presence) without holding a connection. Connects only to answer, then idles out.
-  presenceTimer = setInterval(() => { handleServerMessage({ type: 'portal.present' }) }, PRESENCE_INTERVAL)
+  // On-device driving is RETIRED: the native DeviceControlService now owns the dongle at all times
+  // (foreground AND background), so this WebView relay no longer polls exec/next or probes presence —
+  // that second driver raced the webview's suspension on lock and left the dongle clamped. Kept as a
+  // no-op so main.js can still call it (and Portal.vue can still import the pause/resume helpers). A
+  // desktop browser has no native bridge and no dongle, so there was never anything to start there.
 }
 
 export function stopPortalRelay() {
@@ -327,13 +325,8 @@ setServerSink((msg) => {
     relayPost(`/v2/portal/${RELAY_ID}/io`, { data: payload })
   } else if (msg.type === 'portal.present') relayPost(`/v2/portal/${RELAY_ID}/present`, { paired: msg.paired, name: msg.name, host_os: msg.host_os })
 })
-if (AN) {
-  setInterval(async () => {
-    if (paused) return
-    try {
-      const r = await fetch(`/v2/portal/${RELAY_ID}/exec/next`)
-      const cmd = await r.json()
-      if (cmd && cmd.data != null && cmd.mode) await handleServerMessage({ type: 'portal.exec', mode: cmd.mode, data: cmd.data })
-    } catch (_) { /* core offline / idle */ }
-  }, 1200)
-}
+// NOTE: the WebView exec/next poll loop that used to live here is RETIRED. In the app the native
+// DeviceControlService.portalLoop now long-polls exec/next and drives the dongle at all times (it
+// yields only while the Portal screen is open, via portalServiceYield). Running a second poller here
+// would double-drive the single dongle and reintroduce the lock-time contention we removed. A desktop
+// browser has no native bridge (AN === null) and so never drove the dongle anyway.

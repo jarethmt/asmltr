@@ -14,7 +14,6 @@ import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
 import PortalConsole from '@/components/PortalConsole.vue'
 import { devices, portal } from '@/services/api'
-import { pausePortalRelay, resumePortalRelay } from '@/services/portalRelay'
 
 const inApp = Capacitor.isNativePlatform()
 const bleModeLabel = inApp ? 'asmltr app · native Bluetooth' : 'browser · Web Bluetooth (Chrome/Edge)'
@@ -494,10 +493,17 @@ async function loadAndRun() {
   finally { running.value = false }
 }
 
-// The background relay and this view share the single native gatt — pause the relay while the user is
-// here driving manually, resume it when they leave so auto-connect takes over again.
-onMounted(() => { pausePortalRelay(); loadLibrary() })
-onBeforeUnmount(async () => { stopNotifPoll(); stopIobackPoll(); await stopScan(); await disconnect(); resumePortalRelay() })
+// The native DeviceControlService owns the single dongle at all times — so tell it to YIELD while this
+// screen is open (we drive BLE directly here), and reclaim on leave. Tied to this screen's lifecycle,
+// not to app foreground/lock. Desktop-safe: no AsmltrNative bridge → the guarded calls are no-ops.
+onMounted(() => {
+  window.AsmltrNative && window.AsmltrNative.portalServiceYield && window.AsmltrNative.portalServiceYield(true)
+  loadLibrary()
+})
+onBeforeUnmount(async () => {
+  stopNotifPoll(); stopIobackPoll(); await stopScan(); await disconnect()
+  window.AsmltrNative && window.AsmltrNative.portalServiceYield && window.AsmltrNative.portalServiceYield(false)
+})
 </script>
 
 <template>

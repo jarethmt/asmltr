@@ -16,11 +16,10 @@ import com.capacitorjs.community.plugins.bluetoothle.BluetoothLe;
  *  (paired with the /.well-known/assetlinks.json Digital Asset Links on the host), and exposes
  *  AsmltrNative so config persists to SharedPreferences for the system overlay session. */
 public class MainActivity extends BridgeActivity {
-  // True while the app UI is in the foreground. The native Portal relay (DeviceControlService) reads
-  // this to decide ownership of the single dongle GATT: the WebView relay drives in the foreground,
-  // the native service drives while backgrounded/locked. Volatile — written on the UI thread, read on
-  // the service's relay worker thread.
-  public static volatile boolean appForeground = false;
+  // Dongle ownership no longer depends on app foreground state: DeviceControlService is the SOLE Portal
+  // driver (foreground AND background), yielding only while the in-app Portal/Adopt screen is open (that
+  // screen flips DeviceControlService.portalYielded via NativeConfig.portalServiceYield). So there's no
+  // onResume/onPause handoff here anymore — locking the phone changes nothing.
 
   @Override public void onCreate(Bundle savedInstanceState) {
     // Register the BLE plugin EXPLICITLY (before super builds the bridge). Auto-registration via
@@ -73,32 +72,4 @@ public class MainActivity extends BridgeActivity {
     }
   }
 
-  // --- Portal relay foreground/background handoff (single dongle GATT, one owner at a time) ---------
-  // Foreground: the WebView relay (portalRelay.js) owns the dongle; the native service idles + drops
-  // its link. Background/locked: the native DeviceControlService relay takes over (the WebView's JS
-  // timers are suspended then). The handoff is the fiddly part — a held GATT stops the dongle
-  // advertising, so the outgoing owner MUST drop its connection before the incoming one can scan it.
-
-  @Override public void onResume() {
-    super.onResume();
-    appForeground = true;   // the service's relay worker sees this and drops its own GATT, freeing the dongle
-    portalRelayJs("window.__portalRelayResume&&window.__portalRelayResume()");  // WebView reclaims the GATT
-  }
-
-  @Override public void onPause() {
-    appForeground = false;  // the native relay may now take the dongle
-    // Drop the WebView relay's BLE link so the dongle re-advertises and the native service can grab it.
-    portalRelayJs("window.__portalRelayPause&&window.__portalRelayPause()");
-    super.onPause();
-  }
-
-  /** Run a one-liner against the dashboard WebView, tolerating an un-ready bridge (early lifecycle) and
-   *  an older dashboard build that doesn't expose the hooks yet (the && guard makes the call a no-op). */
-  private void portalRelayJs(String js) {
-    try {
-      if (getBridge() == null) return;
-      final WebView wv = getBridge().getWebView();
-      if (wv != null) wv.post(() -> { try { wv.evaluateJavascript(js, null); } catch (Exception e) {} });
-    } catch (Exception e) {}
-  }
 }

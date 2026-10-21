@@ -326,6 +326,13 @@ public class NativeConfig {
     } catch (Exception e) {}
   }
 
+  /** Yield (or reclaim) the single Portal dongle. The DeviceControlService relay owns the dongle at all
+   *  times EXCEPT while the in-app Portal/Adopt screen is open driving BLE directly: that screen calls
+   *  yield(true) on mount so the service drops its link + idles, and yield(false) on unmount so the
+   *  service resumes driving. Tied to the screen, NOT to app foreground/background or lock. */
+  @JavascriptInterface
+  public void portalServiceYield(boolean yield) { DeviceControlService.portalYielded = yield; }
+
   /** Re-apply wake-word config immediately (after changing it in-app). Pokes the control service, whose
    *  onStartCommand re-runs WakeWord.refresh with the new phrase/enabled state. */
   @JavascriptInterface

@@ -33,12 +33,13 @@ public class DeviceControlService extends Service {
   private Thread worker;
   private DeviceTools tools;
 
-  // --- Portal background relay (ported from insights/dashboard/src/services/portalRelay.js) ---------
-  // A SECOND worker that drives a paired asmltr-portal-* dongle while the app is backgrounded/locked —
-  // where the WebView relay's JS timers are suspended, so it goes deaf. Battery-cheap: one held
-  // long-poll to the core (GET …/exec/next?wait=25) instead of tight polling, and the dongle link is
-  // on-demand + idle-dropped. Owns its OWN NativeConfig (and therefore its own single GATT); it only
-  // ever holds the dongle while the app is NOT foreground, so it never contends with the WebView relay.
+  // --- Portal relay (ported from insights/dashboard/src/services/portalRelay.js) ---------------------
+  // The SOLE driver of a paired asmltr-portal-* dongle — foreground AND background/locked. Because the
+  // service always owns the dongle, locking the phone changes nothing (no owner handoff, no race that
+  // left the dongle clamped). Battery-cheap: one held long-poll to the core (GET …/exec/next?wait=25)
+  // instead of tight polling, and the dongle link is on-demand + idle-dropped. Owns its OWN NativeConfig
+  // (its own single GATT). It yields the dongle ONLY while the in-app Portal/Adopt screen is open (see
+  // portalYielded) — the one time BLE is driven directly from the WebView.
   private static final String PORTAL_SVC    = "00657665-5f61-736d-6c74-72706f727401";
   private static final String PORTAL_INFO   = "00657665-5f61-736d-6c74-72706f727402";
   private static final String PORTAL_EXEC   = "00657665-5f61-736d-6c74-72706f727408";
@@ -53,8 +54,14 @@ public class DeviceControlService extends Service {
   private static final long PORTAL_PRESENCE_INTERVAL_MS = 5 * 60 * 1000;
   private volatile boolean portalRunning = false;
   private Thread portalWorker;
-  private Thread portalPumpThread;         // continuous ioback drain while a backgrounded link is held
+  private Thread portalPumpThread;         // continuous ioback drain while a dongle link is held
   private NativeConfig portalBle;          // the relay's own BLE/Wi-Fi bridge (its own GATT)
+  // Single-owner gate: the native service owns the dongle ALWAYS (foreground AND background) EXCEPT
+  // while the in-app Portal/Adopt screen is open driving BLE directly. That screen flips this via the
+  // JS bridge (NativeConfig.portalServiceYield → sets this static); when true the relay drops its link
+  // and idles so the screen can scan/connect the single dongle. Volatile — written on the bridge/UI
+  // thread, read on the relay + pump threads.
+  public static volatile boolean portalYielded = false;
   private boolean portalHeld = false;      // true while we hold a connection to a paired dongle
   private String portalTransport = "ble";  // 'ble' | 'wifi' — active data path for the current connection
   private JSONObject portalInfo;           // last-read dongle identity { kind,name,fw,trust,host_os? }
@@ -199,9 +206,10 @@ public class DeviceControlService extends Service {
   private void portalLoop() {
     while (portalRunning) {
       try {
-        // Foreground: the WebView relay owns the single dongle GATT. Drop ours (so the dongle
-        // re-advertises for the WebView to reclaim) and idle — we only drive while backgrounded.
-        if (MainActivity.appForeground) {
+        // Yielded: the in-app Portal/Adopt screen owns the single dongle GATT. Drop ours (so the dongle
+        // re-advertises for that screen to reclaim) and idle. Otherwise we drive — foreground AND
+        // background/locked (ownership never changes on lock, so there's no handoff race).
+        if (portalYielded) {
           if (portalHeld) portalDrop();
           sleep(1500);
           continue;
@@ -431,7 +439,7 @@ public class DeviceControlService extends Service {
     }
   }
 
-  /** Continuous ioback pump: while we hold a backgrounded dongle link, drain its CDC return stream and
+  /** Continuous ioback pump: while we hold a dongle link, drain its CDC return stream and
    *  forward each chunk to the core — every ~300ms, not just in a window after a command. So the host's
    *  async output (and a command's response, however delayed) is never missed. Runs on its own thread;
    *  only reads the notification/socket QUEUES (thread-safe), never issues GATT ops, so it can't race the
@@ -439,7 +447,7 @@ public class DeviceControlService extends Service {
   private void portalPumpLoop() {
     while (portalRunning) {
       try {
-        if (portalHeld && !MainActivity.appForeground) {
+        if (portalHeld && !portalYielded) {
           String base = portalBase();
           String raw = "wifi".equals(portalTransport) ? portalBle.wifiP2pReadIo() : portalBle.bleNotificationsIo();
           JSONArray arr = new JSONArray((raw == null || raw.isEmpty()) ? "[]" : raw);
