@@ -131,6 +131,12 @@ public class NativeConfig {
   private volatile String writeError = "";
   private volatile int    bleMtu = 23;           // negotiated ATT MTU (payload = mtu-3)
   private final java.util.concurrent.ConcurrentLinkedQueue<String> bleNotif = new java.util.concurrent.ConcurrentLinkedQueue<>();
+  // Second, independent notify path for the Portal `ioback` char (the host's CDC return stream).
+  // Kept separate from `bleNotif` (status) so both can be subscribed on the same GATT at once and
+  // drained without racing. ioback may be binary (e.g. JPEG screenshots over CDC), so entries are
+  // stored base64-encoded (binary-safe) and the JS side decodes — unlike status, which is UTF-8 text.
+  private final java.util.concurrent.ConcurrentLinkedQueue<String> bleIoNotif = new java.util.concurrent.ConcurrentLinkedQueue<>();
+  private volatile java.util.UUID ioChar;   // when set, notifications from this char route to bleIoNotif
   private java.util.UUID readSvc, readChar;
 
   private final BluetoothGattCallback gattCb = new BluetoothGattCallback() {
@@ -167,7 +173,12 @@ public class NativeConfig {
       else { writeState = "error"; writeError = "write status " + status; }
     }
     @Override public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic ch) {
-      try { byte[] v = ch.getValue(); if (v != null) bleNotif.add(new String(v)); } catch (Exception e) {}
+      try {
+        byte[] v = ch.getValue();
+        if (v == null) return;
+        if (ioChar != null && ioChar.equals(ch.getUuid())) bleIoNotif.add(Base64.encodeToString(v, Base64.NO_WRAP));
+        else bleNotif.add(new String(v));   // status: UTF-8 text, unchanged (backward compatible)
+      } catch (Exception e) {}
     }
   };
 
@@ -179,7 +190,7 @@ public class NativeConfig {
       if (a == null) return "no-adapter";
       bleStopScan();
       try { if (gatt != null) { gatt.close(); gatt = null; } } catch (Exception e) {}
-      gattState = "connecting"; gattValue = ""; gattError = ""; writeState = "idle"; writeError = ""; bleMtu = 23; bleNotif.clear();
+      gattState = "connecting"; gattValue = ""; gattError = ""; writeState = "idle"; writeError = ""; bleMtu = 23; bleNotif.clear(); bleIoNotif.clear(); ioChar = null;
       readSvc = java.util.UUID.fromString(serviceUuid);
       readChar = java.util.UUID.fromString(charUuid);
       BluetoothDevice dev = a.getRemoteDevice(deviceId);
@@ -236,9 +247,9 @@ public class NativeConfig {
     catch (Exception e) { return "{\"state\":\"error\"}"; }
   }
 
-  // Subscribe to a NOTIFY characteristic (status); lines arrive via bleNotifications().
-  @JavascriptInterface
-  public String bleSubscribe(String serviceUuid, String charUuid) {
+  // Shared CCCD-enable routine for any NOTIFY characteristic. Both the status and ioback subscribes
+  // use it; the only difference is which drain queue the char's data lands in (see onCharacteristicChanged).
+  private String enableNotify(String serviceUuid, String charUuid) {
     if (gatt == null) return "not-connected";
     try {
       BluetoothGattService svc = gatt.getService(java.util.UUID.fromString(serviceUuid));
@@ -255,11 +266,31 @@ public class NativeConfig {
     } catch (Exception e) { return "err:" + e.getMessage(); }
   }
 
+  // Subscribe to a NOTIFY characteristic (status); lines arrive via bleNotifications().
+  @JavascriptInterface
+  public String bleSubscribe(String serviceUuid, String charUuid) { return enableNotify(serviceUuid, charUuid); }
+
+  // Subscribe to the Portal `ioback` NOTIFY char (the CDC return stream). Marks it as the ioback source
+  // so its (possibly binary) data routes to the separate bleIoNotif queue, drained via bleNotificationsIo().
+  @JavascriptInterface
+  public String bleSubscribeIo(String serviceUuid, String charUuid) {
+    try { ioChar = java.util.UUID.fromString(charUuid); } catch (Exception e) { return "err:" + e.getMessage(); }
+    return enableNotify(serviceUuid, charUuid);
+  }
+
   // Drain accumulated status notifications as a JSON array of strings (clears the buffer).
   @JavascriptInterface
   public String bleNotifications() {
     StringBuilder sb = new StringBuilder("["); boolean first = true; String s;
     while ((s = bleNotif.poll()) != null) { if (!first) sb.append(","); sb.append(JSONObject.quote(s)); first = false; }
+    return sb.append("]").toString();
+  }
+
+  // Drain accumulated ioback notifications as a JSON array of base64 strings (binary-safe; JS decodes).
+  @JavascriptInterface
+  public String bleNotificationsIo() {
+    StringBuilder sb = new StringBuilder("["); boolean first = true; String s;
+    while ((s = bleIoNotif.poll()) != null) { if (!first) sb.append(","); sb.append(JSONObject.quote(s)); first = false; }
     return sb.append("]").toString();
   }
 
@@ -269,7 +300,7 @@ public class NativeConfig {
   @JavascriptInterface
   public void bleDisconnect() {
     try { if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; } } catch (Exception e) {}
-    gattState = "idle"; writeState = "idle"; bleNotif.clear();
+    gattState = "idle"; writeState = "idle"; bleNotif.clear(); bleIoNotif.clear(); ioChar = null;
   }
 
   /** Start the always-on device link (idempotent). */

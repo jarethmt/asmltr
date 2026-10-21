@@ -12,7 +12,9 @@ import { BleClient } from '@capacitor-community/bluetooth-le'
 import { Capacitor } from '@capacitor/core'
 import PageHeader from '@/components/PageHeader.vue'
 import Spinner from '@/components/Spinner.vue'
+import PortalConsole from '@/components/PortalConsole.vue'
 import { devices, portal } from '@/services/api'
+import { pausePortalRelay, resumePortalRelay } from '@/services/portalRelay'
 
 const inApp = Capacitor.isNativePlatform()
 const bleModeLabel = inApp ? 'asmltr app · native Bluetooth' : 'browser · Web Bluetooth (Chrome/Edge)'
@@ -32,6 +34,10 @@ const LOAD_UUID = '00657665-5f61-736d-6c74-72706f727403' // WRITE — stubbed
 const RUN_UUID = '00657665-5f61-736d-6c74-72706f727404' // WRITE — stubbed
 const STATUS_UUID = '00657665-5f61-736d-6c74-72706f727405' // NOTIFY — status lines
 const PAIR_UUID = '00657665-5f61-736d-6c74-72706f727406' // WRITE — 32-byte trust anchor (TOFU)
+// Generic remote-driver chars (docs/PORTAL-DRIVE.md §1): drive the host through the dongle's HID/CDC.
+const EXEC_UUID = '00657665-5f61-736d-6c74-72706f727408'   // WRITE  — chunked [flags][rsvd][seqBE] → payload [u8 mode][data]
+const IOBACK_UUID = '00657665-5f61-736d-6c74-72706f727409' // NOTIFY — raw bytes the host wrote back over CDC
+const EXEC_MODE = { hid: 0x01, cdc: 0x02 }                 // mode byte: 0x01 = HID keystroke-script, 0x02 = CDC serial
 
 const SCAN_MS = 8000
 
@@ -48,7 +54,12 @@ const modulesList = ref([])  // built-in module library from the core
 const selectedModuleId = ref('')
 const adopting = ref(false)  // register + pair in one action
 const running = ref(false)
+// Portal console: the live ioback stream + manual exec sender (docs/PORTAL-DRIVE.md §1–2).
+const consoleLines = ref([]) // [{ dir: 'in'|'out'|'sys', text }]
+const consoleBusy = ref(false)
 let notifTimer = null
+let iobackTimer = null       // native: polls bleNotificationsIo()
+let iobackSubbed = false     // guard against double-subscribe
 const isPaired = computed(() => !!(info.value && info.value.trust === 'paired'))
 const selectedDesc = computed(() => { const m = modulesList.value.find((x) => x.id === selectedModuleId.value); return m ? m.description : '' })
 const adopted = computed(() => isPaired.value && !!registeredId.value) // in the Fleet AND trust-paired
@@ -174,6 +185,8 @@ async function connect(d) {
   connected.value = false
   info.value = null
   statusLines.value = []
+  consoleLines.value = []
+  iobackSubbed = false
   error.value = ''
   if (AN) { await connectNative(d); return }
   try {
@@ -194,6 +207,8 @@ async function connect(d) {
         if (line) statusLines.value = [...statusLines.value.slice(-49), line]
       })
     } catch { /* NOTIFY not available on this unit */ }
+    // ioback (driver return stream) → the console. Separate char, best-effort.
+    subscribeIoback()
   } catch (e) {
     error.value = bleUnavailableMsg(e)
     await disconnect()
@@ -215,6 +230,8 @@ async function connectNative(d) {
         try { info.value = JSON.parse(res.value) } catch { info.value = { _raw: res.value } }
         try { AN.bleSubscribe(SVC_UUID, STATUS_UUID) } catch (_) { /* best-effort */ }
         startNotifPoll()   // drain STATUS notifications (pair/run output) into the log
+        // ioback comes after a beat — Android serializes GATT ops, so let the STATUS CCCD write settle.
+        setTimeout(() => { subscribeIoback() }, 600)
         detectRegistered() // reflect prior adoption
         resolve()
       } else if (res.state === 'error' || res.state === 'disconnected') {
@@ -233,10 +250,12 @@ function onDisconnect() {
 
 async function disconnect() {
   stopNotifPoll()
+  stopIobackPoll()
   if (AN) { try { AN.bleDisconnect() } catch (_) { /* ignore */ } connected.value = false; return }
   const id = selected.value && selected.value.deviceId
   if (id) {
     try { await BleClient.stopNotifications(id, SVC_UUID, STATUS_UUID) } catch { /* ignore */ }
+    try { await BleClient.stopNotifications(id, SVC_UUID, IOBACK_UUID) } catch { /* ignore */ }
     try { await BleClient.disconnect(id) } catch { /* ignore */ }
   }
   connected.value = false
@@ -247,6 +266,7 @@ async function clearSelection() {
   selected.value = null
   info.value = null
   statusLines.value = []
+  consoleLines.value = []
   registeredId.value = ''
 }
 
@@ -294,6 +314,17 @@ async function detectRegistered() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 function b64ToBytes(b64) { const bin = atob(b64); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a }
 function bytesToB64(bytes) { let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s) }
+function utf8ToBytes(s) { return new TextEncoder().encode(s) }
+// ioback may carry binary (e.g. a JPEG screenshot over CDC); decode text leniently and summarize
+// anything that isn't printable so the console never dumps raw binary into the DOM.
+function iobackToText(bytes) {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  // eslint-disable-next-line no-control-regex
+  const binary = /[\x00-\x08\x0e-\x1f]/.test(text)
+  return binary ? `[${bytes.length} bytes binary]` : text
+}
+function pushConsole(dir, text) { consoleLines.value = [...consoleLines.value.slice(-199), { dir, text }] }
+function clearConsole() { consoleLines.value = [] }
 
 async function loadLibrary() {
   try { modulesList.value = (await portal.modules()).modules || [] ; if (!selectedModuleId.value && modulesList.value[0]) selectedModuleId.value = modulesList.value[0].id } catch (_) { /* core offline — leave empty */ }
@@ -306,6 +337,37 @@ function startNotifPoll() {
   }, 400)
 }
 function stopNotifPoll() { if (notifTimer) { clearInterval(notifTimer); notifTimer = null } }
+
+// Subscribe to the `ioback` NOTIFY char and stream it into the console. Native uses the dedicated
+// second queue (bleSubscribeIo/bleNotificationsIo — see NativeConfig.java); web uses a callback.
+// Staggered after the STATUS subscribe: Android serializes GATT ops, so we let the first CCCD write
+// settle before issuing the second (the native layer is fire-and-poll, it doesn't await the descriptor).
+async function subscribeIoback() {
+  if (iobackSubbed || !connected.value) return
+  iobackSubbed = true
+  if (AN) {
+    try { AN.bleSubscribeIo(SVC_UUID, IOBACK_UUID) } catch (_) { /* best-effort */ }
+    if (!iobackTimer) iobackTimer = setInterval(() => {
+      try {
+        const arr = JSON.parse(AN.bleNotificationsIo() || '[]')
+        for (const b64 of arr) if (b64) pushConsole('in', iobackToText(b64ToBytes(b64)))
+      } catch (_) { /* ignore */ }
+    }, 400)
+    return
+  }
+  // Web Bluetooth: direct notification callback (value is a DataView).
+  try {
+    await BleClient.startNotifications(selected.value.deviceId, SVC_UUID, IOBACK_UUID, (value) => {
+      const bytes = new Uint8Array(value.buffer || value)
+      pushConsole('in', iobackToText(bytes))
+    })
+  } catch { iobackSubbed = false /* NOTIFY not available — allow a retry */ }
+}
+
+function stopIobackPoll() {
+  if (iobackTimer) { clearInterval(iobackTimer); iobackTimer = null }
+  iobackSubbed = false
+}
 
 // Write a base64 value to one characteristic (native bridge or Web Bluetooth), awaiting completion.
 async function writeChar(charUuid, base64Value) {
@@ -376,8 +438,10 @@ async function unpair() {
   finally { adopting.value = false }
 }
 
-// Load a signed module in chunks, then trigger run; STATUS lines stream into the log.
-async function loadChunks(bytes) {
+// Chunk `bytes` to a characteristic with the load-style framing header `[flags][rsvd][seqBE]`
+// (flags: 0x01 = first, 0x02 = last). Shared by `load` (signed modules) and `exec` (driver payloads)
+// so both use the exact same reassembly on the firmware side (docs/PORTAL-DRIVE.md §1).
+async function chunkWrite(charUuid, bytes) {
   const mtu = (AN && AN.bleMtuSize) ? (AN.bleMtuSize() || 23) : 185
   const chunkData = Math.max(16, Math.min(180, mtu - 3 - 4)) // minus ATT overhead (3) + our 4-byte header
   let seq = 0
@@ -388,9 +452,30 @@ async function loadChunks(bytes) {
     const frame = new Uint8Array(4 + slice.length)
     frame[0] = first | last; frame[1] = 0; frame[2] = (seq >> 8) & 0xff; frame[3] = seq & 0xff
     frame.set(slice, 4)
-    await writeChar(LOAD_UUID, bytesToB64(frame))
+    await writeChar(charUuid, bytesToB64(frame))
     seq++
   }
+}
+
+// Load a signed module in chunks, then trigger run; STATUS lines stream into the log.
+async function loadChunks(bytes) { await chunkWrite(LOAD_UUID, bytes) }
+
+// Send a manual driver command from the console: build the payload `[mode byte][utf8 data]` and
+// chunk it to `exec`. mode 'hid' = keystroke-script (0x01), 'cdc' = raw serial (0x02).
+async function sendExec({ mode, text }) {
+  if (!connected.value || consoleBusy.value || !text) return
+  const modeByte = EXEC_MODE[mode] != null ? EXEC_MODE[mode] : EXEC_MODE.hid
+  const data = utf8ToBytes(text)
+  const payload = new Uint8Array(1 + data.length)
+  payload[0] = modeByte; payload.set(data, 1)
+  consoleBusy.value = true
+  try {
+    await subscribeIoback()                        // make sure we're listening before we drive
+    await chunkWrite(EXEC_UUID, payload)
+    pushConsole('out', `[${mode}] ${text}`)
+  } catch (e) {
+    pushConsole('sys', 'send failed: ' + (e.message || e))
+  } finally { consoleBusy.value = false }
 }
 
 async function loadAndRun() {
@@ -409,8 +494,10 @@ async function loadAndRun() {
   finally { running.value = false }
 }
 
-onMounted(loadLibrary)
-onBeforeUnmount(async () => { stopNotifPoll(); await stopScan(); await disconnect() })
+// The background relay and this view share the single native gatt — pause the relay while the user is
+// here driving manually, resume it when they leave so auto-connect takes over again.
+onMounted(() => { pausePortalRelay(); loadLibrary() })
+onBeforeUnmount(async () => { stopNotifPoll(); stopIobackPoll(); await stopScan(); await disconnect(); resumePortalRelay() })
 </script>
 
 <template>
@@ -562,6 +649,15 @@ onBeforeUnmount(async () => { stopNotifPoll(); await stopScan(); await disconnec
           <p v-if="selectedDesc" class="mt-2 text-[11px] leading-relaxed text-slate-500">{{ selectedDesc }}</p>
         </div>
       </div>
+
+      <!-- Drive the host directly: live ioback stream + manual exec sender (docs/PORTAL-DRIVE.md) -->
+      <PortalConsole
+        v-if="connected"
+        :connected="connected"
+        :lines="consoleLines"
+        :busy="consoleBusy"
+        @send="sendExec"
+        @clear="clearConsole" />
     </article>
   </div>
 </template>
