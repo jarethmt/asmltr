@@ -1,0 +1,2 @@
+version: "0.9.0"
+description: "Vendored trombik/esp_wireguard v0.9.0 (BSD-3) with src/ headers exported for esp_olm"

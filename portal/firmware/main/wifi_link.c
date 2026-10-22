@@ -25,6 +25,10 @@ static SemaphoreHandle_t s_ip_sem   = NULL;    // given by the IP event; taken b
 static SemaphoreHandle_t s_tx_mtx   = NULL;    // serialize socket writes
 static TaskHandle_t      s_task     = NULL;
 static int               s_retries  = 0;
+static volatile bool     s_direct   = false;   // direct-STA-to-AP mode (olm internet), not P2P-to-phone
+static volatile bool     s_have_ip  = false;   // STA has an IP (direct mode)
+
+bool wifi_link_sta_got_ip(void) { return s_have_ip; }
 
 bool wifi_link_active(void) { return s_active && s_sock >= 0; }
 
@@ -34,10 +38,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_active = false;
-        if (s_want && s_retries++ < 20) { esp_wifi_connect(); }   // keep trying while a session wants us up
+        s_have_ip = false;
+        if (s_want && (s_direct || s_retries++ < 20)) { esp_wifi_connect(); }  // keep retrying (direct mode: forever)
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_retries = 0;
-        if (s_ip_sem) xSemaphoreGive(s_ip_sem);                    // wake the socket task to dial the GO
+        s_have_ip = true;
+        if (!s_direct && s_ip_sem) xSemaphoreGive(s_ip_sem);       // P2P mode: wake the socket task to dial the GO
     }
 }
 
@@ -141,6 +147,30 @@ bool wifi_link_start(const char *ssid, const char *pass, const char *go_ip, int 
     if (e != ESP_OK && e != ESP_ERR_WIFI_CONN /* already started */) { ESP_LOGW(TAG, "wifi_start %d", e); }
     esp_wifi_connect();
     ESP_LOGI(TAG, "joining P2P group ssid='%s' -> %s:%d", ssid, go_ip, port);
+    return true;
+}
+
+// Direct-STA mode: join a normal Wi-Fi AP for internet (the olm mesh path), NOT the phone's P2P
+// group. Reuses the same esp_wifi STA stack; the P2P socket task stays idle (s_direct gates it).
+// Returns false if Wi-Fi can't even start (low RAM) so the caller can stay on BLE.
+bool wifi_link_sta_join(const char *ssid, const char *pass) {
+    if (!ssid || !ssid[0]) return false;
+    if (!ensure_inited()) return false;
+    s_direct  = true;
+    s_have_ip = false;
+    s_retries = 0;
+
+    wifi_config_t wc = {0};
+    strlcpy((char *)wc.sta.ssid, ssid, sizeof wc.sta.ssid);
+    if (pass) strlcpy((char *)wc.sta.password, pass, sizeof wc.sta.password);
+    wc.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;   // accept WPA2 and above
+    if (esp_wifi_set_config(WIFI_IF_STA, &wc) != ESP_OK) return false;
+
+    s_want = true;
+    esp_err_t e = esp_wifi_start();
+    if (e != ESP_OK && e != ESP_ERR_WIFI_CONN) { ESP_LOGW(TAG, "wifi_start %d", e); }
+    esp_wifi_connect();
+    ESP_LOGI(TAG, "direct STA join ssid='%s'", ssid);
     return true;
 }
 

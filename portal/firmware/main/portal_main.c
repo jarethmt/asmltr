@@ -17,6 +17,8 @@
 #include "engine.h"
 #include "usb_hid.h"
 #include "wifi_link.h"
+#include "portal_olm.h"
+#include "esp_heap_caps.h"
 #include "freertos/semphr.h"
 
 #define PIN_LED 38
@@ -480,6 +482,12 @@ void app_main(void){
     engine_init();   // the step-DSL loader engine (its own task)
     xTaskCreate(status_dot_task, "portal-dot", 2560, NULL, 3, NULL);   // persistent link-status glow
     xTaskCreate(led_task, "portal-led", 2048, NULL, 3, NULL);           // sole writer of the WS2812 (ambient + flashes)
+
+    printf("[boot] free heap=%u largest=%u internal=%u\n",
+           (unsigned)esp_get_free_heap_size(),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    portal_olm_start();   // R5: join the asmltr mesh as an olm client IF provisioned in NVS (else no-op)
 
     int sel=0;
     while(1){

@@ -33,3 +33,8 @@ CONFIG_TINYUSB_HID_COUNT=1
 # (only when creds arrive) and any failure falls back to BLE, so this is purely additive.
 CONFIG_ESP_WIFI_ENABLED=y
 CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+
+# --- R5: olm mesh client (esp_olm + vendored esp_wireguard, relay mode) ---
+# olm sends one WG peer per granted site (all relayed through the exit node), so raise the
+# peer cap above the single-peer default.
+CONFIG_WIREGUARD_MAX_PEERS=8

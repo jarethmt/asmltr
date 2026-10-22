@@ -30,3 +30,7 @@ bool wifi_link_active(void);
 
 // Send ioback bytes to the app over the TCP socket (framed). Returns bytes sent, or -1 if not active.
 int wifi_link_send(const uint8_t *data, int len);
+
+// --- Direct-STA mode (olm mesh internet path): join a normal AP, not the phone's P2P group. ---
+bool wifi_link_sta_join(const char *ssid, const char *pass);
+bool wifi_link_sta_got_ip(void);

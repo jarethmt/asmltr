@@ -1,0 +1,7 @@
+version: "0.1.0"
+description: Native ESP-IDF client for the Pangolin olm mesh protocol (relay mode)
+url: https://github.com/jarethmt/asmltr/tree/main/portal/firmware/components/esp_olm
+dependencies:
+  idf: ">=5.5"
+  espressif/esp_websocket_client: "*"
+  espressif/zlib: "*"
