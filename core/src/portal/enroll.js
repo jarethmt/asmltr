@@ -36,8 +36,13 @@ const execFileP = promisify(execFile);
 const recipes = require('./recipes');
 const store = require('../devices/store');
 const deviceEnroll = require('../devices/enroll');
+const meshIndex = require('../../../mesh'); // enrollSite / ensureHostClient / addResource — structured results
 const { meshConfig, nameSlug } = require('../../../mesh/config');
 const sshkey = require('../../../mesh/sshkey');
+
+// The olm client the asmltr host itself uses to REACH enrolled devices. One per install; resources
+// are granted to it so the host can open the ssh/rd wires. Overridable for multi-host setups.
+const HOST_CLIENT_NAME = process.env.ASMLTR_MESH_HOST_CLIENT || 'host';
 
 // The asmltr CLI binary — we shell out to `asmltr mesh …` for the server-side mesh steps (reuses the
 // already-shipped, idempotent tooling rather than reimplementing Pangolin calls here).
@@ -138,22 +143,65 @@ async function enroll({ os, deviceName, deviceId } = {}) {
   // 3. short-lived revocable enrollment token (one-time code, stored hashed — not a credential).
   const minted = deviceEnroll.mintCode(did, 'ssh', TOKEN_TTL_MS);
 
-  // 4. server-side mesh steps — tolerant of an unprovisioned mesh.
+  // 4. server-side mesh provisioning — a FIRST-CLASS step with a structured, clearly-reported result.
+  //    Each sub-step is independently guarded: a mesh failure never undoes the device row + transports
+  //    created above (steps 1-2), so the device always lands in the Fleet and the token stays valid for
+  //    a later mesh bring-up. `status` is one of: ok | not-configured | degraded.
   const cfg = meshConfig();
-  const mesh = { status: 'ok', org: cfg.org || null, steps: [] };
+  const mesh = {
+    configured: !!cfg.enabled,
+    status: cfg.enabled ? 'ok' : 'not-configured',
+    org: cfg.org || null,
+    site: null,      // { name, siteId, created }      — the device's newt site
+    client: null,    // { name, clientId, created }    — the asmltr host's olm client (reach)
+    resources: [],   // [{ name, alias, port, ok, error? }] — ssh + rd site-resources
+    reasons: [],     // human-readable notes / failures
+    steps: [],       // back-compat log line per attempt
+  };
   if (!cfg.enabled) {
-    mesh.status = 'not-configured';
-    mesh.steps.push('skipped: ASMLTR_MESH_DASHBOARD_URL unset — device + token still valid for later bring-up');
+    mesh.reasons.push('ASMLTR_MESH_DASHBOARD_URL unset — device + token still valid for later mesh bring-up');
+    mesh.steps.push('skipped: mesh not configured');
   } else {
-    const site = await meshCli(['enroll', name, '--os', osKey]);
-    mesh.steps.push(site.ok ? `enroll ${name}: ok` : `enroll ${name}: FAILED (${site.error})`);
-    if (!site.ok) mesh.status = 'degraded';
-    // Expose ssh (:22) and rd (:3389). Resource names give the CLI a non-empty alias to derive.
-    const sshRes = await meshCli(['resource', name, `${slug}-ssh`, '--tcp', String(SSH_PORT)]);
-    mesh.steps.push(sshRes.ok ? `resource ${slug}-ssh: ok` : `resource ${slug}-ssh: FAILED (${sshRes.error})`);
-    const rdRes = await meshCli(['resource', name, `${slug}-rd`, '--tcp', String(RD_PORT)]);
-    mesh.steps.push(rdRes.ok ? `resource ${slug}-rd: ok` : `resource ${slug}-rd: FAILED (${rdRes.error})`);
-    if (!sshRes.ok || !rdRes.ok) mesh.status = 'degraded';
+    // 4a. register the device as a newt SITE (idempotent — reuses an existing site by name).
+    try {
+      const s = await meshIndex.enrollSite(name);
+      mesh.site = { name: s.name, siteId: s.siteId || null, created: !!s.created };
+      mesh.steps.push(`site ${s.name}: ${s.created ? 'created' : 'exists'}`);
+    } catch (e) {
+      mesh.status = 'degraded';
+      mesh.reasons.push(`site: ${e.message}`);
+      mesh.steps.push(`site ${name}: FAILED (${e.message})`);
+    }
+    // 4b. ensure the asmltr host's olm CLIENT exists (what reaches the device once the tunnel is up).
+    try {
+      const c = await meshIndex.ensureHostClient(HOST_CLIENT_NAME);
+      mesh.client = { name: c.name, clientId: c.clientId || null, created: !!c.created };
+      mesh.steps.push(`host-client ${c.name}: ${c.created ? 'created' : 'exists'}`);
+    } catch (e) {
+      mesh.status = 'degraded';
+      mesh.reasons.push(`host-client: ${e.message}`);
+      mesh.steps.push(`host-client ${HOST_CLIENT_NAME}: FAILED (${e.message})`);
+    }
+    // 4c. expose ssh (:22) + rd (:3389) as host-mode resources, granted to the host client. The
+    //     resource name always gives a non-empty alias to derive (gotcha #2). Needs the site.
+    if (mesh.site) {
+      for (const [rname, port] of [[`${slug}-ssh`, SSH_PORT], [`${slug}-rd`, RD_PORT]]) {
+        try {
+          const r = await meshIndex.addResource(name, { name: rname, tcp: String(port), clients: [HOST_CLIENT_NAME] });
+          mesh.resources.push({ name: rname, alias: (r && r.alias) || `${rname}.mesh`, port, ok: true });
+          mesh.steps.push(`resource ${rname}: ok`);
+        } catch (e) {
+          mesh.status = 'degraded';
+          mesh.resources.push({ name: rname, alias: `${rname}.mesh`, port, ok: false, error: e.message });
+          mesh.reasons.push(`resource ${rname}: ${e.message}`);
+          mesh.steps.push(`resource ${rname}: FAILED (${e.message})`);
+        }
+      }
+    } else {
+      mesh.status = 'degraded';
+      mesh.reasons.push('resources skipped — site not enrolled');
+      mesh.steps.push('resources: skipped (no site)');
+    }
   }
 
   return {

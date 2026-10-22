@@ -329,6 +329,18 @@ const enrollments = {
       .run(sha(code), deviceId, transport, now() + ttlMs, now());
     return { code, device_id: deviceId, transport, expires_at: now() + ttlMs };
   },
+  /**
+   * Verify a code WITHOUT consuming it → { device_id, transport, expires_at } or null.
+   * Unlike consume(), this is read-only and repeatable, so a short-lived enrollment token can
+   * authorize fetching the install script more than once within its TTL (the Portal may retry).
+   * Still rejects expired or already-redeemed codes — invalid and expired are indistinguishable.
+   */
+  peek: (code) => {
+    if (!code) return null;
+    const row = db.prepare('SELECT * FROM device_enrollments WHERE code_hash=?').get(sha(code));
+    if (!row || row.redeemed_at || row.expires_at < now()) return null;
+    return { device_id: row.device_id, transport: row.transport, expires_at: row.expires_at };
+  },
   /** Consume a code. Single-use even under concurrency: the UPDATE only wins once. */
   consume: (code) => {
     if (!code) return null;

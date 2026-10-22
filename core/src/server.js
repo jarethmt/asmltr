@@ -45,6 +45,10 @@ const deviceShell = require('./devices/shell'); // shell sessions on registered 
 const portalModules = require('./portal/modules'); // Portal (BLE dongle) module signer + library (docs/PORTAL-PROTOCOL.md)
 const portalDrive = require('./portal/drive'); // Portal generic-driver relay + recipes (docs/PORTAL-DRIVE.md)
 const portalEnroll = require('./portal/enroll'); // Portal persistent track — enroll/teardown/victory (PORTAL-DRIVE.md §6)
+const portalRecipes = require('./portal/recipes'); // per-OS recipes + normalizeOs (for the enroll-script endpoint)
+const meshIndex = require('../../mesh'); // Pangolin mesh plane — status() for the Fleet feed
+const deviceInstall = require('../../mesh/deviceinstall'); // per-OS mesh-client installer generators (installPlan)
+const { meshConfig, vaultKeys, nameSlug } = require('../../mesh/config'); // mesh config + per-device vault key names
 const moderation = require('./moderation');
 const sessions = require('./sessions');
 const promptParts = require('./prompt-parts'); // system-prompt compose + inject-once decision (pure/testable)
@@ -2146,7 +2150,66 @@ function store_resolveView(principalId, deviceId) {
 // Exposure follows the existing /v2 convention — core binds localhost and the dashboard fronts it
 // with session auth. The ONE exception is /v2/devices/redeem, which a machine calls for itself and
 // is authenticated by the single-use enrollment code rather than by a session.
-app.get('/v2/devices', (req, res) => res.json({ devices: deviceStore.devices.list({ transport: req.query.transport, status: req.query.status }) }));
+// --- live mesh topology for the Fleet feed -----------------------------------------------------
+// mesh.status() hits the Pangolin control plane, so we cache it ~10s: the Fleet page polls the
+// device list, and without a cache each poll would hammer Pangolin. Concurrent callers share one
+// in-flight fetch. Errors are cached too (same TTL) so an outage degrades quietly instead of
+// stampeding. A disabled mesh returns {enabled:false} without any network call.
+const MESH_STATUS_TTL_MS = 10_000;
+let _meshStatusCache = { at: 0, val: null, pending: null };
+async function cachedMeshStatus() {
+  if (!meshConfig().enabled) return { enabled: false };
+  const age = Date.now() - _meshStatusCache.at;
+  if (_meshStatusCache.val && age < MESH_STATUS_TTL_MS) return _meshStatusCache.val;
+  if (_meshStatusCache.pending) return _meshStatusCache.pending;
+  _meshStatusCache.pending = (async () => {
+    try {
+      const s = await meshIndex.status();
+      _meshStatusCache = { at: Date.now(), val: s, pending: null };
+      return s;
+    } catch (e) {
+      const v = { enabled: true, __error: e.message }; // configured but the control plane is unreachable
+      _meshStatusCache = { at: Date.now(), val: v, pending: null };
+      return v;
+    }
+  })();
+  return _meshStatusCache.pending;
+}
+
+// Project one device onto the live mesh topology. Contract is fixed — the dashboard depends on the
+// exact shape: { configured, matched, site|null, client|null, resources[], reachable }. A device's
+// site/resources use aliases derived from its slug (`<slug>`, `<slug>-ssh`, `<slug>-rd`).
+function deviceMeshView(device, status) {
+  const base = { configured: false, matched: false, site: null, client: null, resources: [], reachable: false };
+  if (!meshConfig().enabled) return base;                 // mesh disabled → configured:false, not an error
+  base.configured = true;
+  if (!status || status.__error || !status.enabled) return base; // configured but unreachable → unmatched
+  const slug = nameSlug(device.name || device.id);
+  if (!slug) return base;
+  const site = (status.sites || []).find((s) => s.name === slug) || null;
+  const client = (status.clients || []).find((c) => c.name === slug) || null;
+  const resources = (status.resources || [])
+    .filter((r) => r.name === `${slug}-ssh` || r.name === `${slug}-rd`)
+    .map((r) => {
+      const protocol = r.tcp ? 'tcp' : (r.udp ? 'udp' : 'tcp');
+      const port = parseInt(String(r.tcp || r.udp || '').split(/[-:]/)[0], 10) || 0;
+      return { alias: r.alias || `${r.name}.mesh`, protocol, port };
+    });
+  base.site = site ? { name: site.name, online: !!site.online } : null;
+  base.client = client ? { name: client.name, online: !!client.online } : null;
+  base.resources = resources;
+  base.matched = !!(base.site || base.client || resources.length);
+  base.reachable = !!(base.site && base.site.online && resources.length > 0);
+  return base;
+}
+
+app.get('/v2/devices', async (req, res) => {
+  const list = deviceStore.devices.list({ transport: req.query.transport, status: req.query.status });
+  let status = null;
+  try { status = await cachedMeshStatus(); } catch (_) { status = null; }
+  const devices = list.map((d) => ({ ...d, mesh: deviceMeshView(d, status) }));
+  res.json({ devices });
+});
 app.get('/v2/devices/:id', (req, res) => { const d = deviceStore.devices.get(req.params.id); return d ? res.json(d) : res.status(404).json({ error: 'not found' }); });
 app.post('/v2/devices', (req, res) => { try { res.status(201).json(deviceStore.devices.create(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.patch('/v2/devices/:id', (req, res) => { try { const d = deviceStore.devices.update(req.params.id, req.body || {}); return d ? res.json(d) : res.status(404).json({ error: 'not found' }); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -2184,10 +2247,66 @@ app.get('/v2/portal/:id/present', (req, res) => res.json(portalDrive.getPresent(
 app.post('/v2/portal/enroll',   async (req, res) => { try { res.json(await portalEnroll.enroll(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/portal/teardown', async (req, res) => { try { res.json(await portalEnroll.teardown(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/portal/:id/victory', async (req, res) => { try { res.json(await portalEnroll.victoryLap(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); } });
-// The per-device mesh-client install script the bootstrap fetches. Device-credential plumbing (from
-// `asmltr mesh enroll` → mesh/deviceinstall.installPlan) is the persistent track's remaining piece.
-app.get('/v2/portal/enroll/script', (req, res) => {
-  res.status(503).type('text/plain').send('# asmltr Portal enroll script — mesh device-credential plumbing pending (persistent track).\n# See core/src/portal/enroll.js + mesh/deviceinstall.js (installPlan).\n');
+// The per-device mesh-client install script the bootstrap one-liner fetches and runs. It is served
+// per DEVICE + per OS and authorized by the short-lived enrollment token minted in enroll():
+//
+//   GET /v2/portal/enroll/script[?os=windows|linux|macos]   Authorization: Bearer <enroll-token>
+//
+//   • The token is the one-time enrollment code bound to a device (store.enrollments). We PEEK it
+//     (never consume) so a retry within the TTL still works — idempotent + safe to fetch repeatedly.
+//   • The device's OS comes from its registry row (device.platform); ?os= overrides it explicitly.
+//   • We read the device's per-device newt creds from the TRUST vault (written by enrollSite during
+//     enroll) and hand them to mesh/deviceinstall.installPlan, then emit a runnable body:
+//       windows → PowerShell (registers newt as the SYSTEM scheduled task) — served to `iwr | iex`
+//       linux   → sh (downloads newt, writes the systemd unit, enables it) — served to `curl | sudo sh`
+//       macos   → sh (downloads newt, writes the launchd daemon plist, loads it)
+//   • Mesh not configured → a clear 503 (set ASMLTR_MESH_DASHBOARD_URL + provision first).
+const ENROLL_SCRIPT_OSES = ['windows', 'linux', 'macos'];
+app.get('/v2/portal/enroll/script', async (req, res) => {
+  const plain = (code, msg) => res.status(code).type('text/plain').send(`# ${msg}\n`);
+  try {
+    // 1. authenticate the Bearer enrollment token (also accept ?token= as a fallback).
+    const authz = String(req.get('authorization') || '').trim();
+    const m = /^Bearer\s+(.+)$/i.exec(authz);
+    const token = (m && m[1].trim()) || (req.query.token ? String(req.query.token) : '');
+    if (!token) return plain(401, '401 missing Bearer enrollment token');
+    const claim = deviceStore.enrollments.peek(token);
+    if (!claim) return plain(401, '401 invalid, expired, or already-redeemed enrollment token');
+    const device = deviceStore.devices.get(claim.device_id);
+    if (!device) return plain(404, '404 enrollment token references an unknown device');
+
+    // 2. resolve the OS: device row by default, ?os= as an explicit override.
+    const os = (req.query.os ? portalRecipes.normalizeOs(req.query.os) : null)
+      || portalRecipes.normalizeOs(device.platform) || 'linux';
+    if (!ENROLL_SCRIPT_OSES.includes(os)) {
+      return plain(400, `400 unsupported OS '${req.query.os || device.platform || os}' for mesh enroll (windows|linux|macos)`);
+    }
+
+    // 3. the mesh must be configured to build a real install (needs the Pangolin control plane).
+    const cfg = meshConfig();
+    if (!cfg.enabled) {
+      return plain(503, '503 mesh not configured — set ASMLTR_MESH_DASHBOARD_URL and run `asmltr mesh provision` + enroll before fetching an install script');
+    }
+
+    // 4. per-device newt creds from the TRUST vault (stashed by enrollSite during enroll()).
+    const keys = vaultKeys(cfg);
+    const name = device.name;
+    const idSec = await vault.getSecret(keys.newtId(name)).catch(() => null);
+    const secretSec = await vault.getSecret(keys.newtSecret(name)).catch(() => null);
+    const newtId = idSec && idSec.value ? idSec.value : null;
+    const newtSecret = secretSec && secretSec.value ? secretSec.value : null;
+    if (!newtId || !newtSecret) {
+      return plain(503, `503 no newt credentials for device '${name}' yet — re-run enroll with the mesh configured so the site + creds are created`);
+    }
+
+    // 5. build the per-OS plan + serve its runnable body.
+    const plan = deviceInstall.installPlan({ role: 'newt', os, org: cfg.org, id: newtId, secret: newtSecret, endpoint: cfg.dashboardUrl });
+    const body = os === 'windows' ? plan.powershell : plan.script;
+    if (!body) return plain(500, `500 install plan for '${os}' produced no script body`);
+    return res.status(200).type('text/plain').send(body.endsWith('\n') ? body : body + '\n');
+  } catch (e) {
+    return plain(500, `500 ${e.message}`);
+  }
 });
 
 // Mint a one-time enrollment code. The response carries the code; it is not a credential and is

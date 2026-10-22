@@ -45,8 +45,9 @@ function newtWindows({ org, id, secret, endpoint, version = DEFAULT_NEWT_VERSION
 }
 
 /** Linux newt (site connector) as a systemd service. `binPath` = installed newt binary. */
-function newtLinux({ org, id, secret, endpoint, binPath = '/opt/newt/bin/newt' }) {
+function newtLinux({ org, id, secret, endpoint, version = DEFAULT_NEWT_VERSION, binPath = '/opt/newt/bin/newt' }) {
   const unit = `newt-${org}-mesh`;
+  const unitPath = `/etc/systemd/system/${unit}.service`;
   const service = [
     '[Unit]',
     `Description=asmltr mesh newt site connector (${org})`,
@@ -56,10 +57,89 @@ function newtLinux({ org, id, secret, endpoint, binPath = '/opt/newt/bin/newt' }
     'Restart=on-failure', 'RestartSec=5s', 'StandardOutput=journal', 'StandardError=journal',
     '', '[Install]', 'WantedBy=multi-user.target', '',
   ].join('\n');
+  const enable = `systemctl daemon-reload && systemctl enable --now ${unit}.service`;
+  // One self-contained `sh` installer (served by the enroll/script endpoint to `curl … | sudo sh`):
+  // download the newt binary for this arch, write the unit (quoted heredoc ⇒ no $-expansion of the
+  // embedded secret), enable it. Idempotent — re-running just re-downloads + re-enables.
+  const script = [
+    '#!/bin/sh',
+    'set -e',
+    `BIN="${binPath}"`,
+    'mkdir -p "$(dirname "$BIN")"',
+    'ARCH="$(uname -m)"; case "$ARCH" in x86_64|amd64) A=amd64;; aarch64|arm64) A=arm64;; *) A=amd64;; esac',
+    `curl -fsSL "https://github.com/fosrl/newt/releases/download/${version}/newt_linux_\${A}" -o "$BIN"`,
+    'chmod +x "$BIN"',
+    `cat > "${unitPath}" <<'ASMLTR_NEWT_UNIT'`,
+    service,
+    'ASMLTR_NEWT_UNIT',
+    `systemctl daemon-reload && systemctl enable --now ${unit}.service`,
+    `echo "asmltr: newt site connector '${unit}' installed + started"`,
+    '',
+  ].join('\n');
   return {
-    os: 'linux', kind: 'newt', unit, unitPath: `/etc/systemd/system/${unit}.service`, service,
-    enable: `systemctl daemon-reload && systemctl enable --now ${unit}.service`,
-    uninstall: `systemctl disable --now ${unit}.service; rm -f /etc/systemd/system/${unit}.service; systemctl daemon-reload`,
+    os: 'linux', kind: 'newt', unit, unitPath, service, version, enable, script,
+    uninstall: `systemctl disable --now ${unit}.service; rm -f ${unitPath}; systemctl daemon-reload`,
+  };
+}
+
+/**
+ * macOS newt (site connector) as a launchd SYSTEM daemon — the darwin analogue of newtLinux.
+ * A LaunchDaemon (not a LaunchAgent) runs as root at boot with no login session, which is what the
+ * WireGuard adapter needs (same reason Windows must run as SYSTEM). `binPath` = installed newt.
+ *
+ * olm-on-mac is a deliberate follow-up: enrolled workstations join as newt sites, which is all the
+ * persistent track needs for SSH/RDP reach. This generator covers newt only.
+ */
+function newtMacos({ org, id, secret, endpoint, version = DEFAULT_NEWT_VERSION, binPath = '/usr/local/newt/newt' }) {
+  const label = `com.asmltr.${org}.newt`;
+  const plistPath = `/Library/LaunchDaemons/${label}.plist`;
+  const logPath = '/usr/local/newt/newt.log';
+  const plist = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>Label</key>', `  <string>${label}</string>`,
+    '  <key>ProgramArguments</key>',
+    '  <array>',
+    `    <string>${binPath}</string>`,
+    '    <string>--id</string>', `    <string>${id}</string>`,
+    '    <string>--secret</string>', `    <string>${secret}</string>`,
+    '    <string>--endpoint</string>', `    <string>${endpoint}</string>`,
+    '    <string>--log-level</string>', '    <string>INFO</string>',
+    '  </array>',
+    '  <key>RunAtLoad</key>', '  <true/>',
+    '  <key>KeepAlive</key>', '  <true/>',
+    '  <key>StandardOutPath</key>', `  <string>${logPath}</string>`,
+    '  <key>StandardErrorPath</key>', `  <string>${logPath}</string>`,
+    '</dict>',
+    '</plist>',
+  ].join('\n');
+  const load = `launchctl bootout system "${plistPath}" 2>/dev/null || true; launchctl bootstrap system "${plistPath}" 2>/dev/null || launchctl load -w "${plistPath}"`;
+  const uninstall = `launchctl bootout system "${plistPath}" 2>/dev/null; rm -f "${plistPath}"`;
+  // One self-contained `sh` installer (served to `curl … | sudo sh`): download the darwin binary for
+  // this arch, write the plist (quoted heredoc ⇒ no $-expansion of the secret), own it root:wheel,
+  // (re)load the daemon. Idempotent.
+  const script = [
+    '#!/bin/sh',
+    'set -e',
+    `BIN="${binPath}"`,
+    'mkdir -p "$(dirname "$BIN")"',
+    'ARCH="$(uname -m)"; case "$ARCH" in arm64|aarch64) A=arm64;; x86_64|amd64) A=amd64;; *) A=arm64;; esac',
+    `curl -fsSL "https://github.com/fosrl/newt/releases/download/${version}/newt_darwin_\${A}" -o "$BIN"`,
+    'chmod +x "$BIN"',
+    `cat > "${plistPath}" <<'ASMLTR_NEWT_PLIST'`,
+    plist,
+    'ASMLTR_NEWT_PLIST',
+    `chown root:wheel "${plistPath}"`,
+    load,
+    `echo "asmltr: newt launchd daemon '${label}' installed + loaded"`,
+    '',
+  ].join('\n');
+  return {
+    os: 'macos', kind: 'newt', label, plistPath, logPath, plist, version, script,
+    note: 'LaunchDaemon runs as root at boot (no login session) so the WireGuard adapter can transmit.',
+    load, uninstall,
   };
 }
 
@@ -97,12 +177,17 @@ function olmLinux({ org, id, secret, endpoint, iface, binPath = '/opt/olm/bin/ol
 
 /** Pick the right generator. role 'site'→newt, 'client'→olm. */
 function installPlan({ role, os, ...opts }) {
-  if (role === 'site' || role === 'newt') return os === 'windows' ? newtWindows(opts) : newtLinux(opts);
+  if (role === 'site' || role === 'newt') {
+    if (os === 'windows') return newtWindows(opts);
+    if (os === 'macos') return newtMacos(opts);
+    return newtLinux(opts);
+  }
   if (role === 'client' || role === 'olm') {
     if (os === 'windows') throw new Error('olm-on-windows not supported here; Windows devices enroll as newt sites');
+    if (os === 'macos') throw new Error('olm-on-macos not implemented yet; macOS devices enroll as newt sites');
     return olmLinux(opts);
   }
   throw new Error(`installPlan: unknown role '${role}'`);
 }
 
-module.exports = { newtWindows, newtLinux, olmLinux, installPlan, DEFAULT_NEWT_VERSION };
+module.exports = { newtWindows, newtLinux, newtMacos, olmLinux, installPlan, DEFAULT_NEWT_VERSION };

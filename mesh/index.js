@@ -219,7 +219,7 @@ async function status({ log = noop } = {}) {
     enabled: true, dashboardUrl: cfg.dashboardUrl, org: cfg.org, subnet: cfg.subnet,
     sites: sites.map((s) => ({ name: s.name, online: s.online })),
     clients: clients.map((c) => ({ name: c.name, online: c.online })),
-    resources: resources.map((r) => ({ name: r.name, alias: r.alias, dest: r.destination, tcp: r.tcpPortRangeString })),
+    resources: resources.map((r) => ({ name: r.name, alias: r.alias, dest: r.destination, tcp: r.tcpPortRangeString, udp: r.udpPortRangeString })),
   };
 }
 

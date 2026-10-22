@@ -33,6 +33,8 @@ const PROBE_MARKER = 'ASMLTR_OK';
 
 // End-of-transmission sentinel the REPL appends after each command's combined stdout+stderr.
 const EOT = '__ASMLTR_EOT__';
+const READY_MARKER = 'ASMLTR_RDY';   // the hidden launcher writes this once it's listening
+const EXIT_MARKER = 'ASMLTR_EXIT';   // a line equal to this makes the REPL close the port + exit
 
 // ---------------------------------------------------------------------------
 // Persistent-enrollment track (PORTAL-DRIVE §4 + §6). Each desktop recipe carries an `install` and
@@ -89,8 +91,15 @@ function shUninstall(org) {
   );
 }
 function launchdUninstall(org) {
-  const plist = `/Library/LaunchDaemons/com.asmltr.${org}.olm.plist`;
-  return `sudo launchctl bootout system ${plist} 2>/dev/null; sudo rm -f ${plist}`;
+  // macOS devices enroll as a newt LaunchDaemon (mesh/deviceinstall.newtMacos); the olm plist is
+  // covered too for symmetry in case a future olm-on-mac path ever installed one.
+  const newt = `/Library/LaunchDaemons/com.asmltr.${org}.newt.plist`;
+  const olm = `/Library/LaunchDaemons/com.asmltr.${org}.olm.plist`;
+  return (
+    `sudo launchctl bootout system ${newt} 2>/dev/null; ` +
+    `sudo launchctl bootout system ${olm} 2>/dev/null; ` +
+    `sudo rm -f ${newt} ${olm}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -165,8 +174,8 @@ const recipes = {
     terminalOpen: '{GUI+SPACE}{DELAY:400}Terminal{ENTER}{DELAY:900}',
     probe: MACOS_PROBE,
     replBootstrap: MACOS_REPL,
-    // Persistent track: olm under launchd. (deviceinstall.js has no macOS generator yet — the
-    // /enroll/script endpoint supplies the plist; see PORTAL-DRIVE §6 assumptions.)
+    // Persistent track: newt as a launchd SYSTEM daemon (mesh/deviceinstall.newtMacos). The
+    // /enroll/script endpoint serves that generator's full `sh` body; this one-liner just fetches it.
     install: (token, baseUrl) => shInstall('macos', token, baseUrl),
     uninstall: (org) => launchdUninstall(org),
   },
