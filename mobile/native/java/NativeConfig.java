@@ -18,6 +18,7 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.bluetooth.le.ScanFilter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
@@ -69,7 +70,7 @@ public class NativeConfig {
   // --- BLE discovery (native) -------------------------------------------------------------------
   // The dashboard loads as a REMOTE page where Capacitor plugins don't bridge, so BLE goes through
   // this addJavascriptInterface bridge (same mechanism as the rest of AsmltrNative). JS starts a scan,
-  // polls bleResults(), then stops. Unfiltered scan + JS-side name-prefix filter = robust discovery.
+  // polls bleResults(), then stops. FILTERED by the Portal service UUID so it works screen-off (Android blocks unfiltered scans then); downstream still prefix-checks the name.
   private BluetoothLeScanner bleScanner;
   private ScanCallback bleCallback;
   private final Map<String, JSONObject> bleFound = new ConcurrentHashMap<>();
@@ -94,7 +95,11 @@ public class NativeConfig {
         @Override public void onScanResult(int type, ScanResult r) {
           try {
             String name = r.getScanRecord() != null ? r.getScanRecord().getDeviceName() : null;
-            if (name == null || name.isEmpty()) return;  // only named devices (the dongle advertises its name)
+            // The scan is FILTERED to the Portal service UUID, so every hit IS a Portal. Screen-off
+            // offload results carry only the primary packet (the name lives in the scan response, unseen),
+            // so a hit may be nameless — label it so the downstream asmltr-portal- prefix checks still
+            // accept it; the real name is read from INFO on connect.
+            if (name == null || name.isEmpty()) name = "asmltr-portal-?";
             JSONObject o = new JSONObject();
             o.put("id", r.getDevice().getAddress()); o.put("name", name); o.put("rssi", r.getRssi());
             bleFound.put(r.getDevice().getAddress(), o);
@@ -102,7 +107,13 @@ public class NativeConfig {
         }
       };
       ScanSettings s = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
-      bleScanner.startScan(null, s, bleCallback);  // unfiltered; JS filters by the asmltr-portal- name prefix
+      // FILTER by the Portal service UUID (…727401). A filtered scan is the only kind Android will run
+      // with the screen off — so this is what lets the background service discover the dongle when locked.
+      java.util.List<ScanFilter> filters = new java.util.ArrayList<>();
+      filters.add(new ScanFilter.Builder()
+          .setServiceUuid(android.os.ParcelUuid.fromString("00657665-5f61-736d-6c74-72706f727401"))
+          .build());
+      bleScanner.startScan(filters, s, bleCallback);
       return "ok";
     } catch (Exception e) { return "err:" + e.getMessage(); }
   }
