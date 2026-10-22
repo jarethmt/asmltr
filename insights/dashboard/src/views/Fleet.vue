@@ -77,6 +77,32 @@ function isOnline(d) { return !!d.last_seen_at && Date.now() - d.last_seen_at < 
 function when(t) { return t ? new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never' }
 function sessionsFor(id) { return liveSessions.value.filter((s) => s.device_id === id) }
 
+// Pangolin overlay / mesh topology for a device. The transports above say "what wires exist and are
+// they credentialed"; this is the network-layer truth — "is it actually on the overlay right now".
+// `mesh` is absent on older cached rows and `configured:false` when the core isn't mesh-enabled; in
+// both cases stay quiet rather than imply a fault with the device.
+//   state: 'none'      — not mesh-enabled / older data → a muted, non-alarming tag
+//          'unmatched' — mesh is on, but no Pangolin site/resource is bound to this row yet
+//          'reachable' — matched and live on the overlay
+//          'registered'— matched but not currently reachable on the overlay
+function meshInfo(d) {
+  const m = d && d.mesh
+  if (!m || m.configured === false) return { state: 'none' }
+  if (!m.matched) return { state: 'unmatched' }
+  return {
+    state: m.reachable ? 'reachable' : 'registered',
+    site: m.site || null,
+    client: m.client || null,
+    resources: Array.isArray(m.resources) ? m.resources : [],
+  }
+}
+// Evaluate once per device per refresh instead of re-calling meshInfo() for every pill in the template.
+const meshByDevice = computed(() => {
+  const out = {}
+  for (const d of devices.value) out[d.id] = meshInfo(d)
+  return out
+})
+
 async function refresh() {
   loading.value = true
   try {
@@ -232,6 +258,43 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
               {{ t.transport }}<span v-if="!t.enabled"> revoked</span><span v-else-if="!t.enrolled"> pending</span>
             </span>
             <span v-if="!d.transports.length" class="pill border border-white/10 bg-white/5 text-[10px] text-slate-500">no transports</span>
+          </div>
+
+          <!-- Network layer: Pangolin overlay / mesh. Sits beside the transports — those are the wires
+               and their credentials, this is whether the device is actually on the overlay right now. -->
+          <div class="flex flex-wrap items-center gap-1">
+            <span v-if="meshByDevice[d.id].state === 'none'"
+              class="pill border border-white/10 bg-white/5 text-[10px] text-slate-500">
+              mesh: not configured
+            </span>
+            <span v-else-if="meshByDevice[d.id].state === 'unmatched'"
+              class="pill border border-slate-400/20 bg-slate-400/10 text-[10px] text-slate-400"
+              title="A registry row exists, but no Pangolin site is bound to it yet — run the installer on the device.">
+              registered — not yet on the mesh
+            </span>
+            <template v-else>
+              <span class="pill border text-[10px]"
+                :class="meshByDevice[d.id].state === 'reachable'
+                  ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                  : 'border-amber-400/30 bg-amber-400/10 text-amber-300'">
+                {{ meshByDevice[d.id].state === 'reachable' ? 'on mesh' : 'registered, not on mesh' }}
+              </span>
+              <span v-if="meshByDevice[d.id].site"
+                class="pill border border-white/10 bg-white/5 text-[10px] text-slate-300"
+                :title="'site: ' + meshByDevice[d.id].site.name + (meshByDevice[d.id].site.online ? ' · online' : ' · offline')">
+                {{ meshByDevice[d.id].site.online ? '🟢' : '⚪' }} {{ meshByDevice[d.id].site.name }}
+              </span>
+              <span v-if="meshByDevice[d.id].client"
+                class="pill border border-white/10 bg-white/5 text-[10px] text-slate-300"
+                :title="'olm client: ' + meshByDevice[d.id].client.name + (meshByDevice[d.id].client.online ? ' · online' : ' · offline')">
+                {{ meshByDevice[d.id].client.online ? '🟢' : '⚪' }} {{ meshByDevice[d.id].client.name }}
+              </span>
+              <span v-for="r in meshByDevice[d.id].resources" :key="r.alias"
+                class="pill border border-sky-400/30 bg-sky-400/10 text-[10px] text-sky-300"
+                :title="r.alias + ' · ' + r.protocol + '/' + r.port">
+                {{ r.alias }}:{{ r.port }}
+              </span>
+            </template>
           </div>
 
           <div class="ml-auto flex flex-wrap items-center gap-2">
