@@ -36,10 +36,16 @@ public class DeviceControlService extends Service {
   // --- Portal relay (ported from insights/dashboard/src/services/portalRelay.js) ---------------------
   // The SOLE driver of a paired asmltr-portal-* dongle — foreground AND background/locked. Because the
   // service always owns the dongle, locking the phone changes nothing (no owner handoff, no race that
-  // left the dongle clamped). Battery-cheap: one held long-poll to the core (GET …/exec/next?wait=25)
-  // instead of tight polling, and the dongle link is on-demand + idle-dropped. Owns its OWN NativeConfig
-  // (its own single GATT). It yields the dongle ONLY while the in-app Portal/Adopt screen is open (see
-  // portalYielded) — the one time BLE is driven directly from the WebView.
+  // left the dongle clamped). ALWAYS-ON: the moment a paired dongle is advertising (and we're not
+  // yielded) we CONNECT and STAY connected — proactively, without waiting for a command — negotiate
+  // Wi-Fi up front, and self-heal a dead/wedged link by dropping + rescanning (the fix for the state
+  // that used to need a force-stop). The only intentional disconnect is a yield or the service stopping.
+  // Commands still flow over a held long-poll to the core (GET …/exec/next?wait=25). Owns its OWN
+  // NativeConfig (its own single GATT). It yields the dongle ONLY while the in-app Portal/Adopt screen
+  // is open (see portalYielded) — the one time BLE is driven directly from the WebView.
+  // TRADEOFF (Jareth's explicit call, 2026-10): holding BLE + Wi-Fi Direct continuously draws more power
+  // than the old on-demand/idle-drop relay. We accept that cost for a link that is reliably up and heals
+  // itself without a force-stop — reliability/always-on over battery.
   private static final String PORTAL_SVC    = "00657665-5f61-736d-6c74-72706f727401";
   private static final String PORTAL_INFO   = "00657665-5f61-736d-6c74-72706f727402";
   private static final String PORTAL_EXEC   = "00657665-5f61-736d-6c74-72706f727408";
@@ -50,8 +56,11 @@ public class DeviceControlService extends Service {
   private static final int  PORTAL_SCAN_MS = 4000;
   private static final int  PORTAL_IOBACK_POLL_MS = 500;
   private static final int  PORTAL_IOBACK_WINDOW_MS = 6000;   // quiet window after a command before we stop pumping
-  private static final long PORTAL_IDLE_DISCONNECT_MS = 45000;
-  private static final long PORTAL_PRESENCE_INTERVAL_MS = 5 * 60 * 1000;
+  private static final long PORTAL_PRESENCE_INTERVAL_MS = 5 * 60 * 1000;  // throttle for present=false while the dongle is absent
+  private static final long PORTAL_HEALTH_INTERVAL_MS = 15000;     // keepalive cadence while a link is held
+  private static final long PORTAL_HEALTH_READ_TIMEOUT_MS = 6000;  // a keepalive read must complete within this or the link is dead
+  private static final long PORTAL_WIFI_RETRY_MS = 30000;          // opportunistic Wi-Fi upgrade retry while still on BLE
+  private static final long PORTAL_RECONNECT_BACKOFF_MS = 3000;    // backoff between connect attempts when the dongle isn't reachable
   private volatile boolean portalRunning = false;
   private Thread portalWorker;
   private Thread portalPumpThread;         // continuous ioback drain while a dongle link is held
@@ -65,8 +74,10 @@ public class DeviceControlService extends Service {
   private boolean portalHeld = false;      // true while we hold a connection to a paired dongle
   private String portalTransport = "ble";  // 'ble' | 'wifi' — active data path for the current connection
   private JSONObject portalInfo;           // last-read dongle identity { kind,name,fw,trust,host_os? }
-  private long portalLastActivity = 0;
-  private long portalLastPresence = 0;
+  private long portalLastPresence = 0;     // last present=false post (throttle) while the dongle is absent
+  private long portalLastHealth = 0;       // last keepalive check while held
+  private long portalLastWifiTry = 0;      // last Wi-Fi-upgrade attempt (throttles the opportunistic retry)
+  private boolean portalWifiPermHinted = false;  // posted the nearby-devices-permission hint once this session
 
   @Override public IBinder onBind(Intent i) { return null; }
 
@@ -217,16 +228,44 @@ public class DeviceControlService extends Service {
         String base = portalBase();
         if (base.isEmpty()) { sleep(5000); continue; }
         long nowMs = System.currentTimeMillis();
-        // Release an idle-held BLE link (battery; frees the dongle to advertise). Wi-Fi is negotiated
-        // ONCE and HELD for all subsequent commands — never idle-dropped (that would force a ~20s P2P
-        // re-handshake next command). A dropped Wi-Fi socket flips us back to BLE via the pump, and then
-        // this idle-drop applies again.
-        if (portalHeld && !"wifi".equals(portalTransport) && nowMs - portalLastActivity > PORTAL_IDLE_DISCONNECT_MS) portalDrop();
-        // Opportunistic presence probe on a long interval (refreshes the kill-switch presence).
-        if (!portalHeld && nowMs - portalLastPresence > PORTAL_PRESENCE_INTERVAL_MS) {
-          portalLastPresence = nowMs;
+
+        // ---- MAINTAIN: not connected → keep trying to connect on our OWN, no command required. --------
+        if (!portalHeld) {
+          // portalEnsureConnectedPaired → portalScan() first clears any stale native GATT (belt-and-
+          // suspenders before every connect attempt), then filtered-scan → connect → read INFO → trust.
+          // Quiet (emitErrors=false): on an always-on retry we must NOT spam the core with a "no portal"
+          // io line every few seconds.
           boolean ok = portalEnsureConnectedPaired(base, false);
-          portalPostPresent(base, ok && portalInfo != null && "paired".equals(portalInfo.optString("trust")));
+          if (ok) {
+            portalPostPresent(base, true);        // reflect the live link immediately
+            portalLastHealth = nowMs;
+            // Wi-Fi negotiated FIRST — up front on connect, not deferred to the first exec — and HELD
+            // for the session. A grant-pending err:perm just leaves us on BLE; the held branch retries.
+            portalLastWifiTry = nowMs;
+            portalTryWifiUpgrade(base);
+          } else {
+            // Dongle not in range / not paired / BT off. Reflect "not present" on a long interval (don't
+            // hammer the core while it's absent), then short backoff and retry — this is what makes us
+            // auto-connect the instant the dongle appears.
+            if (nowMs - portalLastPresence > PORTAL_PRESENCE_INTERVAL_MS) { portalLastPresence = nowMs; portalPostPresent(base, false); }
+            sleep(PORTAL_RECONNECT_BACKOFF_MS);
+          }
+          continue;
+        }
+
+        // ---- SERVE + SELF-HEAL: connected → run commands AND keep the link healthy. -------------------
+        // Opportunistic Wi-Fi upgrade retry if we're still on BLE (e.g. wifiP2pStart returned err:perm
+        // earlier because the app wasn't foreground). Throttled so we don't spin.
+        if (!"wifi".equals(portalTransport) && nowMs - portalLastWifiTry > PORTAL_WIFI_RETRY_MS) {
+          portalLastWifiTry = nowMs;
+          portalTryWifiUpgrade(base);
+        }
+        // Periodic keepalive — detects a wedged/dead GATT the HTTP long-poll can't see. On failure we
+        // drop (→ bleDisconnect + clear portalHeld) so the next maintain cycle rescans + reconnects.
+        if (nowMs - portalLastHealth > PORTAL_HEALTH_INTERVAL_MS) {
+          portalLastHealth = nowMs;
+          if (!portalHealthCheck()) { portalPostIo(base, "link keepalive failed; dropping to reconnect", true); portalDrop(); continue; }
+          portalPostPresent(base, true);   // heartbeat the live link so server-side `present` stays fresh
         }
         // Battery-cheap wait: one held request up to 25s (the core long-polls, capped at 30s server-side).
         long t0 = System.currentTimeMillis();
@@ -237,16 +276,45 @@ public class DeviceControlService extends Service {
         String mode = cmd != null ? cmd.optString("mode", "") : "";
         if (mode.isEmpty()) {
           // No command. If the response came back fast, the core isn't honoring the long-poll (older
-          // build) — back off so we don't tight-loop and burn battery.
+          // build) — back off so we don't tight-loop. (The link stays up regardless; the keepalive holds it.)
           if (elapsed < 2000) sleep(3000);
           continue;
         }
         portalHandleExec(base, mode, cmd.optString("data", ""));
       } catch (Throwable t) {
-        sleep(3000);
+        sleep(PORTAL_RECONNECT_BACKOFF_MS);
       }
     }
     try { portalDrop(); } catch (Throwable t) {}
+  }
+
+  /** Cheap keepalive while a link is held: issue a BLE read of INFO and confirm it COMPLETES within a
+   *  short timeout. Returns false — meaning the link is dead and should be dropped — when the read can't
+   *  be issued (GATT gone → "not-connected"/err), when the GATT reports disconnected/error, or when it
+   *  never completes (a wedged GATT: the HTTP side still long-polls fine, but nothing can drive the
+   *  dongle — this is exactly the stuck state that used to require a force-stop of the app). Works on the
+   *  Wi-Fi transport too: BLE stays connected underneath Wi-Fi Direct, so this still probes the real link.
+   *  Runs on the portalLoop thread only, so it never races an exec write (also single-threaded here); the
+   *  pump only drains queues and issues no GATT ops. */
+  private boolean portalHealthCheck() {
+    try {
+      String r = portalBle.bleReadChar(PORTAL_SVC, PORTAL_INFO);
+      if (!"ok".equals(r)) return false;   // not-connected / no-service / read-failed / err → link gone
+      long deadline = System.currentTimeMillis() + PORTAL_HEALTH_READ_TIMEOUT_MS;
+      while (System.currentTimeMillis() < deadline && portalRunning) {
+        JSONObject res;
+        try { res = new JSONObject(portalBle.bleGattResult()); } catch (Exception e) { res = new JSONObject(); }
+        String state = res.optString("state", "");
+        if ("done".equals(state)) {
+          // Opportunistically refresh identity (e.g. host_os may populate after enrollment).
+          try { JSONObject info = new JSONObject(res.optString("value", "{}")); if (info.length() > 0) portalInfo = info; } catch (Exception e) {}
+          return true;
+        }
+        if ("error".equals(state) || "disconnected".equals(state)) return false;
+        sleep(200);
+      }
+      return false;   // stuck in "reading" past the timeout → wedged GATT
+    } catch (Throwable t) { return false; }
   }
 
   /** Absolute base for /v2/portal/* — the dashboard page ORIGIN the WebView relay posts to.
@@ -264,8 +332,10 @@ public class DeviceControlService extends Service {
   }
 
   private void portalHandleExec(String base, String mode, String dataB64) {
+    // By now the maintain loop is holding the link and Wi-Fi was already negotiated on connect (no
+    // per-command upgrade). This guard is a cheap no-op while held; it only does real work in the rare
+    // race where the link dropped between the health-check and this call.
     if (!portalEnsureConnectedPaired(base, true)) { portalPostIo(base, "no paired portal in range", true); return; }
-    portalTryWifiUpgrade(base);
     try {
       int m = "cdc".equals(mode) ? 0x02 : 0x01;
       byte[] data = (dataB64 == null || dataB64.isEmpty()) ? new byte[0] : Base64.decode(dataB64, Base64.DEFAULT);
@@ -283,11 +353,14 @@ public class DeviceControlService extends Service {
         sleep(450);   // let the ioback-subscribe (CCCD write) settle before the first BLE exec write
         portalChunkWrite(PORTAL_EXEC, payload, "exec");
       }
-      portalLastActivity = System.currentTimeMillis();
       // The host's return stream is drained by the continuous portalPumpLoop (runs while connected),
       // not a per-command window — so async output that arrives between commands isn't missed.
     } catch (Exception e) {
+      // A drive failure (BLE write stuck/failed, GATT gone) means the link is probably dead or wedged.
+      // Surface it and DROP so the maintain loop rescans, reconnects, and re-negotiates Wi-Fi — rather
+      // than wedging held-but-dead until the app is force-stopped.
       portalPostIo(base, String.valueOf(e.getMessage()), true);
+      portalDrop();
     }
   }
 
@@ -307,7 +380,6 @@ public class DeviceControlService extends Service {
         return false;
       }
       portalInfo = info; portalHeld = true; portalTransport = "ble";
-      portalLastActivity = System.currentTimeMillis();
       return true;
     } catch (Exception e) {
       if (emitErrors) portalPostIo(base, "connect: " + e.getMessage(), true);
@@ -365,9 +437,14 @@ public class DeviceControlService extends Service {
     try {
       String started = portalBle.wifiP2pStart();
       if (!"ok".equals(started)) {
-        // Not yet granted the nearby-devices/Wi-Fi permission — the native side fired the prompt; the
-        // grant persists so the next drive upgrades. Surface a hint; stay on BLE meanwhile.
-        if (started != null && started.contains("err:perm")) portalPostIo(base, "wifi: grant the nearby-devices permission, then drive again to use the fast path", true);
+        // Not yet granted the nearby-devices/Wi-Fi permission (common when the app isn't foreground) —
+        // the native side fired the prompt; the grant persists and the held loop retries opportunistically
+        // (PORTAL_WIFI_RETRY_MS), so the fast path comes up on its own once granted. Stay on BLE meanwhile.
+        // Hint ONCE per held session so the opportunistic retries don't spam the io stream.
+        if (started != null && started.contains("err:perm") && !portalWifiPermHinted) {
+          portalPostIo(base, "wifi: grant the nearby-devices permission; the fast path then comes up automatically", true);
+          portalWifiPermHinted = true;
+        }
         return;
       }
       JSONObject info = null;
@@ -452,7 +529,6 @@ public class DeviceControlService extends Service {
           String raw = "wifi".equals(portalTransport) ? portalBle.wifiP2pReadIo() : portalBle.bleNotificationsIo();
           JSONArray arr = new JSONArray((raw == null || raw.isEmpty()) ? "[]" : raw);
           if (arr.length() > 0) {
-            portalLastActivity = System.currentTimeMillis();   // keep the link alive while output streams back
             for (int i = 0; i < arr.length(); i++) {
               String b64 = arr.optString(i, "");
               if (!b64.isEmpty() && !base.isEmpty()) portalPostIo(base, b64, false);
@@ -473,7 +549,7 @@ public class DeviceControlService extends Service {
   private void portalDrop() {
     try { portalBle.wifiP2pStop(); } catch (Throwable t) {}
     try { portalBle.bleDisconnect(); } catch (Throwable t) {}
-    portalHeld = false; portalInfo = null; portalTransport = "ble";
+    portalHeld = false; portalInfo = null; portalTransport = "ble"; portalWifiPermHinted = false;
   }
 
   /** POST one ioback chunk (already base64) or a relay-side error (base64 of "[relay] <msg>", so it
