@@ -51,6 +51,7 @@ public class DeviceControlService extends Service {
   private static final String PORTAL_EXEC   = "00657665-5f61-736d-6c74-72706f727408";
   private static final String PORTAL_IOBACK = "00657665-5f61-736d-6c74-72706f727409";
   private static final String PORTAL_WIFI   = "00657665-5f61-736d-6c74-72706f72740a";
+  private static final String PORTAL_CFG    = "00657665-5f61-736d-6c74-72706f72740b";  // mesh provisioning
   private static final String PORTAL_NAME_PREFIX = "asmltr-portal-";
   private static final String PORTAL_ID = "default";          // single-dongle channel id (matches RELAY_ID)
   private static final int  PORTAL_SCAN_MS = 4000;
@@ -71,6 +72,10 @@ public class DeviceControlService extends Service {
   // and idles so the screen can scan/connect the single dongle. Volatile — written on the bridge/UI
   // thread, read on the relay + pump threads.
   public static volatile boolean portalYielded = false;
+  // One-shot mesh provisioning payload queued from the WebView (NativeConfig.portalProvision). The
+  // relay worker writes it to the dongle's CFG char on the next held loop, then clears it — keeping
+  // the single-owner model (the worker owns the one BLE connection; the WebView never writes directly).
+  public static volatile String portalPendingCfg = null;
   private boolean portalHeld = false;      // true while we hold a connection to a paired dongle
   private String portalTransport = "ble";  // 'ble' | 'wifi' — active data path for the current connection
   private JSONObject portalInfo;           // last-read dongle identity { kind,name,fw,trust,host_os? }
@@ -255,6 +260,15 @@ public class DeviceControlService extends Service {
         }
 
         // ---- SERVE + SELF-HEAL: connected → run commands AND keep the link healthy. -------------------
+        // One-shot mesh provisioning write queued from the WebView — now that we hold the connection,
+        // push the config to the dongle's CFG char (it saves to NVS + joins the mesh).
+        String pendingCfg = portalPendingCfg;
+        if (pendingCfg != null) {
+          portalPendingCfg = null;
+          try { portalChunkWrite(PORTAL_CFG, pendingCfg.getBytes("UTF-8"), "cfg");
+                portalPostIo(base, "mesh config written to portal", true); }
+          catch (Exception e) { portalPostIo(base, "mesh config write failed: " + e.getMessage(), true); }
+        }
         // Opportunistic Wi-Fi upgrade retry if we're still on BLE (e.g. wifiP2pStart returned err:perm
         // earlier because the app wasn't foreground). Throttled so we don't spin.
         if (!"wifi".equals(portalTransport) && nowMs - portalLastWifiTry > PORTAL_WIFI_RETRY_MS) {

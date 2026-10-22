@@ -25,6 +25,8 @@
 #include "engine.h"
 #include "portal_ui.h"
 #include "wifi_link.h"
+#include "portal_olm.h"
+#include "nvs.h"
 #include "usb_hid.h"   // usb_host_os() — host OS surfaced over the INFO characteristic
 #include "cJSON.h"
 
@@ -42,6 +44,7 @@ static const ble_uuid128_t PAIR_UUID   = PUUID(0x06);
 static const ble_uuid128_t EXEC_UUID   = PUUID(0x08);   // WRITE: [mode][data] driver command (HID/CDC)
 static const ble_uuid128_t IOBACK_UUID = PUUID(0x09);   // NOTIFY: the host's CDC return stream
 static const ble_uuid128_t WIFI_UUID   = PUUID(0x0A);   // WRITE (chunked): Wi-Fi P2P creds handoff JSON
+static const ble_uuid128_t CFG_UUID    = PUUID(0x0B);   // WRITE (chunked): mesh+Wi-Fi provisioning JSON
 
 static uint8_t  s_addr_type;
 static char     s_name[24];
@@ -136,6 +139,54 @@ static void apply_wifi_creds(void) {
     cJSON_Delete(root);
 }
 
+// Reassemble a chunked `cfg` write (same [flags][rsvd][seqBE] framing) — the mesh provisioning JSON.
+static uint8_t  s_cfg_asm[640];
+static size_t   s_cfg_asm_len;
+static uint16_t s_cfg_next_seq;
+static bool     s_cfg_active;
+static bool cfg_chunk(const uint8_t *d, uint16_t len) {
+    if (len < 4) return false;
+    uint8_t flags = d[0]; uint16_t seq = ((uint16_t)d[2] << 8) | d[3];
+    const uint8_t *p = d + 4; size_t pl = len - 4;
+    if (flags & 0x01) { s_cfg_asm_len = 0; s_cfg_next_seq = 0; s_cfg_active = true; }
+    if (!s_cfg_active) return false;
+    if (seq != s_cfg_next_seq) { s_cfg_active = false; return false; }
+    if (s_cfg_asm_len + pl > sizeof(s_cfg_asm) - 1) { s_cfg_active = false; return false; }
+    memcpy(s_cfg_asm + s_cfg_asm_len, p, pl); s_cfg_asm_len += pl; s_cfg_next_seq++;
+    if (flags & 0x02) { s_cfg_active = false; return true; }
+    return false;
+}
+
+// Apply a reassembled provisioning blob: writes the "portal" NVS namespace and (re)starts the mesh
+// client. {"off":true} clears the mesh config. The app sends:
+//   { olm_server, olm_id, olm_secret, olm_org, wifi_ssid, wifi_pass }
+// olm_* come from the core (provisionDongle); wifi_* are what the user typed in the app.
+static const char *CFG_KEYS[] = { "olm_server", "olm_id", "olm_secret", "olm_org", "wifi_ssid", "wifi_pass" };
+static void apply_portal_cfg(void) {
+    s_cfg_asm[s_cfg_asm_len] = 0;
+    cJSON *root = cJSON_Parse((const char *)s_cfg_asm);
+    if (!root) { ble_status_notify("cfg: bad json"); return; }
+    nvs_handle_t h;
+    if (nvs_open("portal", NVS_READWRITE, &h) != ESP_OK) { ble_status_notify("cfg: nvs open failed"); cJSON_Delete(root); return; }
+
+    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "off"))) {
+        for (size_t i = 0; i < sizeof(CFG_KEYS)/sizeof(CFG_KEYS[0]); i++) nvs_erase_key(h, CFG_KEYS[i]);
+        nvs_commit(h); nvs_close(h); cJSON_Delete(root);
+        ble_status_notify("cfg: cleared"); return;
+    }
+
+    int required = 5;  // all but wifi_pass (open networks allowed)
+    int have = 0;
+    for (size_t i = 0; i < sizeof(CFG_KEYS)/sizeof(CFG_KEYS[0]); i++) {
+        cJSON *v = cJSON_GetObjectItem(root, CFG_KEYS[i]);
+        if (cJSON_IsString(v) && v->valuestring) { nvs_set_str(h, CFG_KEYS[i], v->valuestring); if (i < 5) have++; }
+    }
+    nvs_commit(h); nvs_close(h); cJSON_Delete(root);
+    if (have < required) { ble_status_notify("cfg: incomplete"); return; }
+    ble_status_notify("cfg: saved; joining mesh");
+    portal_olm_start();   // apply immediately (joins Wi-Fi + starts olm); no reboot needed
+}
+
 // --- GATT access -------------------------------------------------------------
 static int gatt_info(struct ble_gatt_access_ctxt *ctxt) {
     char fp[9]; trust_fingerprint_hex(fp, sizeof fp);
@@ -181,6 +232,10 @@ static int gatt_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
         if (wifi_chunk(buf, olen)) apply_wifi_creds();
         return 0;
     }
+    if (ble_uuid_cmp(u, &CFG_UUID.u) == 0) {        // mesh provisioning: JSON, chunked
+        if (cfg_chunk(buf, olen)) apply_portal_cfg();
+        return 0;
+    }
     return BLE_ATT_ERR_UNLIKELY;
 }
 
@@ -199,6 +254,7 @@ static const struct ble_gatt_svc_def gatt_svcs[] = {
             { .uuid = &IOBACK_UUID.u, .access_cb = gatt_access, .flags = BLE_GATT_CHR_F_NOTIFY,
               .val_handle = &s_ioback_handle },
             { .uuid = &WIFI_UUID.u,   .access_cb = gatt_access, .flags = BLE_GATT_CHR_F_WRITE },
+            { .uuid = &CFG_UUID.u,    .access_cb = gatt_access, .flags = BLE_GATT_CHR_F_WRITE },
             { 0 }
         },
     },

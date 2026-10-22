@@ -2247,6 +2247,18 @@ app.get('/v2/portal/:id/present', (req, res) => res.json(portalDrive.getPresent(
 app.post('/v2/portal/enroll',   async (req, res) => { try { res.json(await portalEnroll.enroll(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/portal/teardown', async (req, res) => { try { res.json(await portalEnroll.teardown(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/portal/:id/victory', async (req, res) => { try { res.json(await portalEnroll.victoryLap(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); } });
+
+// Provision a free-standing Portal dongle onto the mesh and return the NVS config bundle the app
+// writes to it over BLE (CFG char). The app supplies the dongle's name (from its BLE INFO); olm
+// creds come from here (minted/held server-side), Wi-Fi creds are entered by the user in the app.
+app.post('/v2/portal/provision-mesh', async (req, res) => {
+  try {
+    const name = (req.body || {}).name;
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const bundle = await meshIndex.provisionDongle(name);
+    res.json(bundle); // { name, clientId, olm_server, olm_id, olm_secret, olm_org }
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // The per-device mesh-client install script the bootstrap one-liner fetches and runs. It is served
 // per DEVICE + per OS and authorized by the short-lived enrollment token minted in enroll():
 //

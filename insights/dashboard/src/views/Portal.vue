@@ -37,6 +37,7 @@ const PAIR_UUID = '00657665-5f61-736d-6c74-72706f727406' // WRITE — 32-byte tr
 const EXEC_UUID = '00657665-5f61-736d-6c74-72706f727408'   // WRITE  — chunked [flags][rsvd][seqBE] → payload [u8 mode][data]
 const IOBACK_UUID = '00657665-5f61-736d-6c74-72706f727409' // NOTIFY — raw bytes the host wrote back over CDC
 const EXEC_MODE = { hid: 0x01, cdc: 0x02 }                 // mode byte: 0x01 = HID keystroke-script, 0x02 = CDC serial
+const CFG_UUID = '00657665-5f61-736d-6c74-72706f72740b'    // WRITE — chunked mesh provisioning JSON
 
 const SCAN_MS = 8000
 
@@ -53,6 +54,10 @@ const modulesList = ref([])  // built-in module library from the core
 const selectedModuleId = ref('')
 const adopting = ref(false)  // register + pair in one action
 const running = ref(false)
+// Mesh provisioning: the user types a Wi-Fi network; olm creds come from the core.
+const meshSsid = ref('')
+const meshPass = ref('')
+const meshBusy = ref(false)
 // Portal console: the live ioback stream + manual exec sender (docs/PORTAL-DRIVE.md §1–2).
 const consoleLines = ref([]) // [{ dir: 'in'|'out'|'sys', text }]
 const consoleBusy = ref(false)
@@ -459,6 +464,28 @@ async function chunkWrite(charUuid, bytes) {
 // Load a signed module in chunks, then trigger run; STATUS lines stream into the log.
 async function loadChunks(bytes) { await chunkWrite(LOAD_UUID, bytes) }
 
+// Provision this dongle onto the mesh. The core mints its olm identity (idempotent); the user
+// supplies the Wi-Fi network; we write the combined config to the dongle's CFG char, which it saves
+// to NVS and uses to join the mesh as a first-class olm node. The Wi-Fi password is only ever typed
+// here and handed straight to the dongle over BLE.
+async function provisionMesh() {
+  const name = dongleName.value
+  if (!name) { error.value = 'no dongle name'; return }
+  if (!meshSsid.value) { error.value = 'enter a Wi-Fi network name'; return }
+  meshBusy.value = true; error.value = ''
+  try {
+    const bundle = await portal.provisionMesh({ name })
+    const cfg = {
+      olm_server: bundle.olm_server, olm_id: bundle.olm_id, olm_secret: bundle.olm_secret,
+      olm_org: bundle.olm_org, wifi_ssid: meshSsid.value, wifi_pass: meshPass.value,
+    }
+    await chunkWrite(CFG_UUID, new TextEncoder().encode(JSON.stringify(cfg)))
+    meshPass.value = ''
+    flash('Mesh config written — the Portal will join “' + meshSsid.value + '” and come up as a mesh node')
+  } catch (e) { error.value = 'provision failed: ' + (e.message || e) }
+  finally { meshBusy.value = false }
+}
+
 // Send a manual driver command from the console: build the payload `[mode byte][utf8 data]` and
 // chunk it to `exec`. mode 'hid' = keystroke-script (0x01), 'cdc' = raw serial (0x02).
 async function sendExec({ mode, text }) {
@@ -653,6 +680,26 @@ onBeforeUnmount(async () => {
             The core returned no module library — is asmltr core reachable? (<code class="text-slate-400">/v2/portal/modules</code>)
           </p>
           <p v-if="selectedDesc" class="mt-2 text-[11px] leading-relaxed text-slate-500">{{ selectedDesc }}</p>
+
+          <!-- Mesh: provision this Portal onto the asmltr mesh as an olm node (phone-free) -->
+          <div class="mt-3 border-t border-white/5 pt-3">
+            <h4 class="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Mesh</h4>
+            <p class="mb-2 text-[12px] leading-relaxed text-slate-400">
+              Give the Portal a Wi-Fi network and it joins your <span class="text-slate-100">asmltr mesh</span>
+              directly — reachable anywhere, phone or no phone. Its mesh identity is minted for you; you only
+              enter the Wi-Fi.
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <input v-model="meshSsid" placeholder="Wi-Fi name (SSID)"
+                     class="glass bg-transparent px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600" />
+              <input v-model="meshPass" type="password" placeholder="Wi-Fi password"
+                     class="glass bg-transparent px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600" />
+              <button class="glass glass-hover px-3 py-1.5 text-xs text-cyan-200 disabled:opacity-40"
+                      :disabled="meshBusy || !meshSsid" @click="provisionMesh">
+                <Spinner v-if="meshBusy" size="xs" class="mr-1" />Provision onto mesh
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

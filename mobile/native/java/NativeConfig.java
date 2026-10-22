@@ -344,6 +344,13 @@ public class NativeConfig {
   @JavascriptInterface
   public void portalServiceYield(boolean yield) { DeviceControlService.portalYielded = yield; }
 
+  /** Queue a one-shot mesh-provisioning write for the connected Portal. `json` is the config bundle
+   *  { olm_server, olm_id, olm_secret, olm_org, wifi_ssid, wifi_pass } — olm_* from the core's
+   *  provision-mesh endpoint, wifi_* entered by the user. The relay worker writes it over BLE and the
+   *  dongle saves it to NVS + joins the mesh. Returns "queued". */
+  @JavascriptInterface
+  public String portalProvision(String json) { DeviceControlService.portalPendingCfg = json; return "queued"; }
+
   /** Re-apply wake-word config immediately (after changing it in-app). Pokes the control service, whose
    *  onStartCommand re-runs WakeWord.refresh with the new phrase/enabled state. */
   @JavascriptInterface
