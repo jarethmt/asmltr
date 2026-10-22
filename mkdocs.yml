@@ -121,6 +121,7 @@ nav:
       - Build & flash: portal/build.md
       - Control protocol: portal/control-protocol.md
       - Remote drive: portal/drive.md
+      - Android over ADB: portal/android-adb.md
     - Remote desktop: REMOTE-DESKTOP.md
   - Identity, auth & trust:
     - The cast — identity & trust: CAST.md
