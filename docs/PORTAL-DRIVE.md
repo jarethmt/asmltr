@@ -268,3 +268,51 @@ held** (no per-command re-handshake), and the background ioback pump is **contin
 Dongle **self-heals** a dead link via a ~6s BLE supervision timeout (re-advertises on its own — no replug).
 **Confirmed live:** HID drive, Wi-Fi upgrade, CDC round-trip, locked-phone driving, held-Wi-Fi speedup.
 **To confirm:** lock-survival with zero replug, and the Portal-screen yield handoff. (APK 0.10.11.)
+
+---
+
+## Connection & drive — FINAL confirmed state (2026-10-21)
+
+Supersedes the "built / not-yet-tested" caveats in the R5 and single-owner sections above — the whole
+loop is now **hardware-confirmed** (Yoga / Windows, `asmltr-portal-66DA`; app ≥ **0.10.14**).
+
+### Connection model (what actually happens)
+- **Single owner:** the phone's native `DeviceControlService` is the SOLE dongle driver — foreground AND
+  locked. No webview relay, no fg/bg handoff. It yields the dongle ONLY while the in-app Portal/Adopt
+  screen is open (`NativeConfig.portalServiceYield` ← Portal.vue mount/unmount).
+- **Always-on auto-connect:** whenever a paired dongle advertises (and not yielded), the service scans +
+  connects + **holds** — proactively, no command needed. The old idle-disconnect is gone (always-held;
+  reliability over battery, by explicit choice).
+- **Wi-Fi on connect + held:** `portalTryWifiUpgrade` runs immediately on connect and holds the P2P
+  socket; opportunistic 30s retry if still on BLE (err:perm handled, hint posted once).
+- **Self-heal:** `portalHealthCheck` every ~15s does an INFO-read keepalive; a dead/wedged GATT (read
+  can't issue / gattResult error|disconnected / stuck in `reading` >6s) → drop → rescan → reconnect. A
+  failed drive also drops+reconnects. Dongle side: ~6s BLE supervision timeout → it re-advertises itself.
+  Net: **no force-stop, no replug** to recover.
+- **Screen-off discovery:** the dongle advertises its **service UUID in the PRIMARY adv packet**, and the
+  app scans **filtered** by that UUID — the only kind of scan Android runs with the screen off. This is
+  what makes cold, locked discovery work.
+- **Reliable bulk return:** the relay **batches** all ioback chunks drained per ~300ms tick into one POST
+  (was one POST per ~512 B chunk → ~70 round-trips → slow + truncated) and **retries** a failed POST 4×.
+  A full-res screenshot now returns **whole** over Wi-Fi.
+
+### Dongle UX (firmware)
+- **Corner status light:** 🔴 no phone · 🔵 BLE · 🟢 Wi-Fi. **Back LED:** magenta = sending to host,
+  cyan = receiving from host (HID / CDC / install — any mode).
+- **Screen:** full-screen holding page only when disconnected; install/remove/status menu when connected;
+  CDC/remote panels redraw in place with a 2.5s activity-debounce (no strobing / flicker).
+
+### Operating the drive loop
+- **Couple the screenshot to the action** — put navigate + render-wait + capture + write-back in ONE CDC
+  command, so you act and observe in a single round-trip (the autonomous do→see→decide loop).
+- **BLE for text, Wi-Fi for bulk.** A big return (screenshot/file) over BLE still drops its tail.
+- **REPL bootstrap is fragile across reboots** (dongle reflash / app update kills it). Re-bootstrap:
+  kill any stale shell holding the dongle's COM first (it blocks a fresh launcher), then launcher→RDY→body.
+
+### ⚠️ Gotchas that aren't bugs
+- **Wi-Fi Direct ✗ while hotspot/tethering is ON** — the Wi-Fi chip is out of interfaces (STA+AP), so
+  group creation fails and it stays on BLE (🔵 not 🟢). Turn the hotspot off → auto-upgrades to 🟢.
+  (logcat tell: `Failed to create P2p iface … Interface resource is not available`.) *TODO: surface this
+  to the user instead of a silent blue-not-green.*
+- **BT headset call** starves BLE *discovery* (shared radio) — a cold connect may fail until the call ends.
+- **Android wireless-debug port rotates** — if using adb to introspect the phone, re-read the port.
