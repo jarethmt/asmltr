@@ -1,0 +1,9 @@
+# ESP-IDF build artifacts & local config (regenerated)
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+firmware/main/managed_components/
+firmware/dependencies.lock
+# local flash/output staging
+out/

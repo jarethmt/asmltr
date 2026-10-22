@@ -55,7 +55,7 @@ one-time enrolment codes → vault-stored credentials, owner principals, and per
 ## Remote devices
 
 - **Portal (BLE dongle):** discover / connect / register / (soon) provision a device from the app over
-  Bluetooth LE. See [Portal](PORTAL.md).
+  Bluetooth LE. See [Portal](portal/index.md).
 - **Remote desktop:** screen + input to an enrolled host. See [Remote desktop](REMOTE-DESKTOP.md).
 
 ## Identity & trust

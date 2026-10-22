@@ -1,0 +1,7 @@
+# asmltr Portal partition table (16 MB flash). The app grew past 1 MB once the Wi-Fi stack came in
+# (BLE + Wi-Fi + TinyUSB + libsodium + display), so the factory app slot is 3 MB with room to spare.
+# NVS layout matches the IDF single-app default so the trust pairing survives this change.
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,      0x9000,   0x6000
+phy_init,   data, phy,      0xf000,   0x1000
+factory,    app,  factory,  0x10000,  0x300000

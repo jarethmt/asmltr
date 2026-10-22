@@ -114,9 +114,13 @@ nav:
   - Networking & devices:
     - Overview: NETWORKING.md
     - Pangolin backbone (design): PANGOLIN-BACKBONE-DESIGN.md
-    - Portal (BLE dongle): PORTAL.md
-    - Portal control protocol: PORTAL-PROTOCOL.md
-    - Portal drive (remote driver + status): PORTAL-DRIVE.md
+    - Portal:
+      - Overview: portal/index.md
+      - Hardware: portal/hardware.md
+      - Architecture: portal/design.md
+      - Build & flash: portal/build.md
+      - Control protocol: portal/control-protocol.md
+      - Remote drive: portal/drive.md
     - Remote desktop: REMOTE-DESKTOP.md
   - Identity, auth & trust:
     - The cast — identity & trust: CAST.md

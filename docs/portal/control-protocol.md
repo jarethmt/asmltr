@@ -3,7 +3,7 @@
 The wire contract shared by all four layers: the ESP32 **firmware**, the asmltr **core** signer, the
 app's **native bridge**, and the **Portal.vue** UI. Change it in one place and update the others.
 
-This is the *control* layer that sits on top of [discovery](PORTAL.md): once a Portal is connected,
+This is the *control* layer that sits on top of [discovery](index.md): once a Portal is connected,
 this is how a trusted controller **pairs** with it and **loads + runs signed modules**.
 
 ## Trust model (the BadUSB line)

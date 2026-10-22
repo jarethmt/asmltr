@@ -1,0 +1,35 @@
+CONFIG_IDF_TARGET="esp32s3"
+# Console over the native USB-Serial-JTAG (no UART bridge on this board)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_FREERTOS_HZ=1000
+
+# Custom partition table — the app outgrew the default 1 MB slot once Wi-Fi was added (see partitions.csv)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- BLE (NimBLE) for the R3 control link ---
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+
+# Give the NimBLE host task headroom. Even with crypto moved off it (verify runs on the engine task),
+# the GATT write path + flatten should never sit near the 4 KB default. Defense-in-depth.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+
+# --- R4a: TinyUSB composite HID (keyboard+mouse) + CDC console (USB actuator) ---
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_HID_COUNT=1
+
+# --- R5: Wi-Fi P2P data transport (dongle STA joins the phone's Wi-Fi Direct group) ---
+# BLE stays up as bootstrap + fallback, so Wi-Fi and Bluetooth share the 2.4 GHz radio: software
+# coexistence MUST be on or bringing Wi-Fi up alongside NimBLE fails. Wi-Fi is brought up lazily
+# (only when creds arrive) and any failure falls back to BLE, so this is purely additive.
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y

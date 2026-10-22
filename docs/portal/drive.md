@@ -4,10 +4,10 @@ The wire contract for driving any computer through a Portal (DESIGN §6a in the 
 Everything below is the **interface** each layer implements against — change it here first.
 
 ```
-Eve ── asmltr core ── (device-gw relay) ── phone app ── BLE ── Portal dongle ── HID/CDC ── host
+The assistant ── asmltr core ── (device-gw relay) ── phone app ── BLE ── Portal dongle ── HID/CDC ── host
 ```
 
-The dongle is a composite USB **HID keyboard+mouse + CDC serial**. Eve drives the host by (a) typing
+The dongle is a composite USB **HID keyboard+mouse + CDC serial**. the assistant drives the host by (a) typing
 via HID and (b) reading the host's output back through the dongle's own CDC — no agent installed.
 
 ## 1. BLE GATT (firmware implements; app uses)
@@ -81,7 +81,7 @@ on the target's own screen (GUI or console ASCII). The installer is just one scr
 
 Driving is remote keyboard control of an arbitrary machine → the trust gate is non-negotiable: the
 Portal runs modules/commands only from its **paired** instance, one up-front consent per drive session,
-and the **vault-kill-switch** (unplug the Portal → Eve can't use dongle-only credentials) is the physical
+and the **vault-kill-switch** (unplug the Portal → the assistant can't use dongle-only credentials) is the physical
 counterweight. Never bypass OS elevation (UAC/sudo) — assisted, consented provisioning only.
 
 ## 6. Install / uninstall (persistent track)
@@ -163,24 +163,24 @@ vs. designed. Keep it honest as we expand.
 The full bidirectional drive loop works:
 
 ```
-Eve (server)  →  POST /v2/portal/default/exec   (core relay queue)
+The assistant (server)  →  POST /v2/portal/default/exec   (core relay queue)
               →  phone app background relay polls GET …/exec/next
               →  BLE write to the dongle's `exec` characteristic
               →  dongle: keystroke-script → USB-HID into the focused host window
 host output   →  typed cmd writes to the dongle's own CDC serial port
               →  dongle `ioback` NOTIFY  →  phone relay drains it
-              →  POST …/io  →  Eve reads GET …/io
+              →  POST …/io  →  the assistant reads GET …/io
 ```
 
 Verified actions:
 - **OS detection** — the dongle fingerprints the host at USB enumeration (Windows via MS-OS-2.0) and
   shows `host: windows` on its own screen at plug-in.
-- **HID drive (Eve → host)** — typed text into Notepad; opened an app blind (`Win+R → notepad → Enter`);
+- **HID drive (the assistant → host)** — typed text into Notepad; opened an app blind (`Win+R → notepad → Enter`);
   drove PowerShell. Keystrokes are reliable after the fix (each press/release held ~30 ms, past the
   ~10 ms HID poll interval — an earlier 14 ms hold dropped occasional characters).
-- **CDC return (host → Eve)** — wrote to the dongle's serial port from the host and **read it back here**
-  (`ASMLTR-CDC-TEST from JARETHSYOGA`), and ran a real command whose output returned
-  (`whoami=jarethsyoga\jaret`). This is the feedback loop closing.
+- **CDC return (host → the assistant)** — wrote to the dongle's serial port from the host and **read it back here**
+  (`ASMLTR-CDC-TEST from <HOST>`), and ran a real command whose output returned
+  (`whoami=<host>\<user>`). This is the feedback loop closing.
 - **On-dongle feedback** — the dongle shows each incoming remote command on-screen ("Remote: keys" +
   snippet, cyan→green LED).
 - **The relay** — a poll-relay both ends hit. Three bugs were fixed live to make it work: retry GATT
@@ -218,11 +218,11 @@ mid-transfer; see the firmware reliability notes). Rather than keep fighting BLE
 reflects that Portal management is now native-app-only (the browser-BLE, device-agnostic rationale was
 dropped) — so the Portal nav item is hidden unless `window.AsmltrNative` is present.
 
-### Model (mirrors Riley's Power Wheels)
+### Model (mirrors a phone-as-Group-Owner project)
 - **Phone = Wi-Fi Direct Group Owner (GO); dongle = legacy STA client.** The phone keeps its normal
   Wi-Fi station for internet; the P2P group is a separate interface. **No SoftAP** (that would steal the
   phone's internet station). Group is pinned to **2.4 GHz** — the ESP32-S3 is 2.4 GHz-only.
-- Creds are **not hardcoded** (Power Wheels hardcodes them): the app generates a per-session passphrase,
+- Creds are **not hardcoded** (a naive phone-as-GO app hardcodes them): the app generates a per-session passphrase,
   creates the group, and hands `{ssid, pass, ip, port}` to the dongle over the **BLE WIFI char (0x0A)**.
   The dongle joins as STA and opens a **TCP client socket to the GO** (default `192.168.49.1:9790`).
 
