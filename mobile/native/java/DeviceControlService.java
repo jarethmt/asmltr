@@ -528,10 +528,19 @@ public class DeviceControlService extends Service {
           String base = portalBase();
           String raw = "wifi".equals(portalTransport) ? portalBle.wifiP2pReadIo() : portalBle.bleNotificationsIo();
           JSONArray arr = new JSONArray((raw == null || raw.isEmpty()) ? "[]" : raw);
-          if (arr.length() > 0) {
+          if (arr.length() > 0 && !base.isEmpty()) {
+            // BATCH: concatenate every ioback chunk drained this tick into ONE POST, rather than one
+            // HTTP round-trip per 512 B chunk (that made a ~50 KB screenshot ~70 phone->core POSTs =
+            // slow + lossy). The core's appendIo stores each POST's bytes in order; order is preserved
+            // within the batch and across ticks, so the reassembled stream is identical.
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
             for (int i = 0; i < arr.length(); i++) {
               String b64 = arr.optString(i, "");
-              if (!b64.isEmpty() && !base.isEmpty()) portalPostIo(base, b64, false);
+              if (!b64.isEmpty()) { byte[] d = Base64.decode(b64, Base64.DEFAULT); bos.write(d, 0, d.length); }
+            }
+            byte[] all = bos.toByteArray();
+            if (all.length > 0) {
+              portalPostIo(base, Base64.encodeToString(all, Base64.NO_WRAP), false);
             }
           }
           // If the Wi-Fi socket dropped mid-session, fall back to BLE for subsequent commands (and this
@@ -555,12 +564,20 @@ public class DeviceControlService extends Service {
   /** POST one ioback chunk (already base64) or a relay-side error (base64 of "[relay] <msg>", so it
    *  surfaces as readable io server-side) to the core. Mirrors portalRelay.js setServerSink portal.io. */
   private void portalPostIo(String base, String text, boolean isError) {
+    final String body;
     try {
       String data = isError ? Base64.encodeToString(("[relay] " + text).getBytes("UTF-8"), Base64.NO_WRAP) : text;
-      JSONObject b = new JSONObject();
-      b.put("data", data);
-      portalHttpPostJson(base + "/v2/portal/" + PORTAL_ID + "/io", b.toString());
-    } catch (Exception e) {}
+      JSONObject b = new JSONObject(); b.put("data", data);
+      body = b.toString();
+    } catch (Exception e) { return; }
+    // Retry on a failed POST so a transient phone->core hiccup doesn't silently drop a chunk of the
+    // return stream (the truncation we saw). Short backoff; ordered because the single pump thread calls
+    // this synchronously, so a retried chunk still lands before the next tick's batch.
+    String url = base + "/v2/portal/" + PORTAL_ID + "/io";
+    for (int attempt = 0; attempt < 4; attempt++) {
+      if (portalHttpPostJson(url, body)) return;
+      sleep(150 * (attempt + 1));
+    }
   }
 
   private void portalPostPresent(String base, boolean paired) {
@@ -589,7 +606,7 @@ public class DeviceControlService extends Service {
     } finally { if (c != null) try { c.disconnect(); } catch (Exception e) {} }
   }
 
-  private void portalHttpPostJson(String urlStr, String body) {
+  private boolean portalHttpPostJson(String urlStr, String body) {
     HttpURLConnection c = null;
     try {
       c = (HttpURLConnection) new URL(urlStr).openConnection();
@@ -597,8 +614,9 @@ public class DeviceControlService extends Service {
       c.setRequestProperty("Content-Type", "application/json");
       c.setConnectTimeout(10000); c.setReadTimeout(10000);
       OutputStream os = c.getOutputStream(); os.write(body.getBytes("UTF-8")); os.close();
-      c.getResponseCode(); // fire
-    } catch (Exception e) { /* core offline / idle */ }
+      int code = c.getResponseCode();
+      return code >= 200 && code < 300;   // delivered?
+    } catch (Exception e) { return false; /* core offline / idle */ }
     finally { if (c != null) try { c.disconnect(); } catch (Exception e) {} }
   }
 }
