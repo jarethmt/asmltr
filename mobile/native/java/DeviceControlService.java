@@ -76,6 +76,7 @@ public class DeviceControlService extends Service {
   private JSONObject portalInfo;           // last-read dongle identity { kind,name,fw,trust,host_os? }
   private long portalLastPresence = 0;     // last present=false post (throttle) while the dongle is absent
   private long portalLastHealth = 0;       // last keepalive check while held
+  private int  portalHealthFails = 0;      // consecutive keepalive misses (Doze tolerance — drop only after N)
   private long portalLastWifiTry = 0;      // last Wi-Fi-upgrade attempt (throttles the opportunistic retry)
   private boolean portalWifiPermHinted = false;  // posted the nearby-devices-permission hint once this session
 
@@ -264,8 +265,15 @@ public class DeviceControlService extends Service {
         // drop (→ bleDisconnect + clear portalHeld) so the next maintain cycle rescans + reconnects.
         if (nowMs - portalLastHealth > PORTAL_HEALTH_INTERVAL_MS) {
           portalLastHealth = nowMs;
-          if (!portalHealthCheck()) { portalPostIo(base, "link keepalive failed; dropping to reconnect", true); portalDrop(); continue; }
-          portalPostPresent(base, true);   // heartbeat the live link so server-side `present` stays fresh
+          if (!portalHealthCheck()) {
+            // A locked/dozing phone can miss ONE keepalive (BLE event gap) without the link being dead.
+            // Only drop after 2 consecutive misses (~30s of real silence) so Doze blips don't flap the
+            // link (blue/green→red→reconnect). A real dead GATT fails every time and still drops in ~30s.
+            if (++portalHealthFails >= 2) { portalPostIo(base, "link keepalive failed x2; dropping to reconnect", true); portalHealthFails = 0; portalDrop(); continue; }
+          } else {
+            portalHealthFails = 0;
+            portalPostPresent(base, true);   // heartbeat the live link so server-side `present` stays fresh
+          }
         }
         // Battery-cheap wait: one held request up to 25s (the core long-polls, capped at 30s server-side).
         long t0 = System.currentTimeMillis();
