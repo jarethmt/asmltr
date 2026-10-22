@@ -303,6 +303,11 @@ loop is now **hardware-confirmed** (Yoga / Windows, `asmltr-portal-66DA`; app �
   CDC/remote panels redraw in place with a 2.5s activity-debounce (no strobing / flicker).
 
 ### Operating the drive loop
+- **Default to HEADLESS.** Once the session bridge is up, do work as CDC commands in the invisible
+  PowerShell (file queries, installs, config, screenshots) — nothing pops up or steals the user's focus.
+  Use visible HID typing / opening a GUI app ONLY when the task needs the screen or the user asks for an
+  on-screen action (say so first if you must open a window). HID is the bootstrap + fallback, not the
+  default way to do work.
 - **Couple the screenshot to the action** — put navigate + render-wait + capture + write-back in ONE CDC
   command, so you act and observe in a single round-trip (the autonomous do→see→decide loop).
 - **BLE for text, Wi-Fi for bulk.** A big return (screenshot/file) over BLE still drops its tail.
