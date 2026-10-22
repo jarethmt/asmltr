@@ -207,6 +207,64 @@ async function addResource(device, { name, tcp, udp, destination = '127.0.0.1', 
   return r.data;
 }
 
+/**
+ * Provision a free-standing Portal dongle onto the mesh as its own olm client (idempotent).
+ *
+ * A dongle is a first-class mesh node, independent of whatever host it later drives: this mints
+ * it an olm identity (olmId/secret) that its firmware's esp_olm client authenticates with. The
+ * WireGuard keypair is generated ON the dongle (olm registers the public key), so it is NOT part
+ * of the returned bundle — only the auth creds + where to reach the server are.
+ *
+ * Returns the exact config the firmware expects in its NVS "portal" namespace:
+ *   { olm_server, olm_id, olm_secret, olm_org }  (+ clientId for bookkeeping)
+ * which the dashboard/app writes over BLE at pair time (the "buy a board → flash → enroll" flow).
+ */
+async function provisionDongle(name, { log = noop } = {}) {
+  const cfg = meshConfig();
+  if (!cfg.enabled) throw new Error('mesh not configured (set ASMLTR_MESH_DASHBOARD_URL)');
+  const keys = vaultKeys(cfg);
+  const slug = nameSlug(name);
+  if (!slug) throw new Error('provisionDongle: name required');
+  const pg = await adminClient(cfg, keys);
+
+  const list = await pg.listClients(cfg.org);
+  const clients = (list.data && (list.data.clients || list.data)) || [];
+  const found = Array.isArray(clients) ? clients.find((c) => c.name === slug) : null;
+
+  let olmId, olmSecret, clientId;
+  if (found) {
+    clientId = found.clientId;
+    olmId = await vaultGet(keys.olmId(slug));
+    olmSecret = await vaultGet(keys.olmSecret(slug));
+    if (!olmId || !olmSecret) {
+      throw new Error(`dongle '${slug}' exists in Pangolin but its creds are not in the vault — `
+        + `delete the client in Pangolin and re-provision, or restore the vault entry`);
+    }
+    log(`· dongle '${slug}' already provisioned (clientId ${clientId})`);
+  } else {
+    const defaults = await pg.pickClientDefaults(cfg.org);
+    const d = defaults.data || {};
+    olmId = d.olmId || randId();
+    olmSecret = d.olmSecret || randSecret();
+    // never reuse the exit node's .1 — let Pangolin assign the client subnet
+    const r = await pg.createClient(cfg.org, { name: slug, olmId, secret: olmSecret, subnet: d.subnet, type: 'olm' });
+    if (!r.ok) throw new Error('createClient failed: ' + (r.message || r.status));
+    clientId = r.data.clientId;
+    await vaultPut(keys.olmId(slug), olmId);
+    await vaultPut(keys.olmSecret(slug), olmSecret);
+    log(`✓ dongle '${slug}' olm client created (clientId ${clientId}); creds → vault`);
+  }
+
+  return {
+    name: slug,
+    clientId,
+    olm_server: cfg.dashboardUrl,
+    olm_id: olmId,
+    olm_secret: olmSecret,
+    olm_org: cfg.org,
+  };
+}
+
 async function status({ log = noop } = {}) {
   const cfg = meshConfig();
   if (!cfg.enabled) return { enabled: false };
@@ -223,4 +281,4 @@ async function status({ log = noop } = {}) {
   };
 }
 
-module.exports = { provision, ensureHostClient, enrollSite, addResource, status, meshConfig };
+module.exports = { provision, ensureHostClient, enrollSite, addResource, provisionDongle, status, meshConfig };
