@@ -119,6 +119,7 @@ nav:
       - Hardware: portal/hardware.md
       - Architecture: portal/design.md
       - Build & flash: portal/build.md
+      - Mesh client (esp_olm): portal/mesh-client.md
       - Control protocol: portal/control-protocol.md
       - Remote drive: portal/drive.md
       - Android over ADB: portal/android-adb.md
