@@ -3,7 +3,7 @@
   "version": "0.16.1",
   "private": true,
   "description": "asmltr connector platform — manager, runtime, and type plugins (github, telegram, ...)",
-  "engines": { "node": ">=24.0.0" },
+  "engines": { "node": ">=24.22.1" },
   "scripts": {
     "manager": "node manager/server.js",
     "check": "node --check sdk/index.js && node --check runtime/run-instance.js && node --check manager/server.js && node --check types/github/index.js && node --check types/telegram/index.js && node --check types/mcp/index.js"

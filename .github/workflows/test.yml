@@ -15,7 +15,7 @@ jobs:
           # addons; an N-API build never calls RemoveEnvironmentCleanupHook, so the assert cannot fire.
           # Keeping the pin would have left the host's own 24.19 exposure untested, which is the case
           # #120 was actually about — the core loads better-sqlite3 under pm2, not just CI.
-          node-version: '24'
+          node-version: '24.22.1'
 
       - name: Install dependencies
         run: |

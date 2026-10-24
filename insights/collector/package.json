@@ -4,7 +4,7 @@
   "private": true,
   "description": "asmltr-insights telemetry collector — ingest, reconcile, sample, serve",
   "main": "server.js",
-  "engines": { "node": ">=24.0.0" },
+  "engines": { "node": ">=24.22.1" },
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check db.js && node --check reconcile.js && node --check sampler.js && node --check tailer.js"

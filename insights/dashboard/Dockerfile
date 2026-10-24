@@ -9,7 +9,7 @@
 # shared/ tree via the @shared alias (../../shared), so the build needs shared/ present. All
 # COPY paths below are therefore repo-root-relative, and the build/serve happen in the
 # insights/dashboard subtree. (.dockerignore keeps node_modules/dist/APKs out of the context.)
-FROM node:24-alpine AS build
+FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
 WORKDIR /app
 # package manifests first so `npm install` layer-caches across source edits
 COPY insights/dashboard/package*.json insights/dashboard/

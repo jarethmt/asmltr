@@ -5,7 +5,7 @@
   "description": "asmltr unified channel-agnostic agent backend (local Agent SDK, Max subscription)",
   "main": "src/server.js",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "start": "node src/server.js",

@@ -5,7 +5,7 @@
   "description": "asmltr terminal client + TUI — view sessions/insights, attach to channel-born sessions",
   "bin": { "asmltr": "asmltr.js" },
   "main": "asmltr.js",
-  "engines": { "node": ">=24.0.0" },
+  "engines": { "node": ">=24.22.1" },
   "scripts": { "check": "node --check asmltr.js" },
   "dependencies": {
     "blessed": "^0.1.81",
