@@ -60,6 +60,8 @@ const tts = require('../../shared/speech/tts'); // TTS config (voice/model), per
 const stt = require('../../shared/speech/stt'); // STT (transcription) — audio clip → text via a real model
 const recordings = require('../../shared/recordings'); // recording records store (roadmap §B1, issue #94)
 const streams = require('./streams'); // topic/project event streams — shared recall + freshness (roadmap §A, #93)
+const places = require('./places');   // directory of WHERE: guilds/channels/chats by (surface, scope_id)
+const { buildPlacesBlock } = require('./places-prompt'); // the STABLE prompt block built from it
 const { transcribeLong, transcribeLongDiarized } = require('../../shared/speech/transcribe-long'); // long-audio chunked transcription (+ diarized)
 const voiceEngines = require('../../shared/speech/voice-engines'); // pluggable voice engines: roles + capability manifest (#113)
 const secrets = require('../../shared/secrets'); // secret presence checks (voice-engine availability)
@@ -370,6 +372,7 @@ async function handle(envelope, opts = {}) {
   const pRel = trust.buildRelationshipPrompt(resolved, e) || '';
   const pExtra = e.system_prompt_extra || ''; // connector-supplied per-turn context (e.g. Discord)
   let pToolbelt = '';                          // STABLE: asmltr toolbelt / silo / vault / attachments awareness
+  let pPlaces = '';                            // STABLE: the directory of guilds/channels/chats by id
   let pUploadsInstr = '', pUploadsList = '', pAnnounce = ''; // uploads-instr = STABLE; uploads-list + announce = VOLATILE
   if (process.env.ASMLTR_SELF_AWARE !== 'off') { // make the session aware of the asmltr toolbelt
     pToolbelt = 'ASMLTR TOOLBELT — you run inside asmltr, a multi-session assistant backend on this machine. ' +
@@ -381,6 +384,9 @@ async function handle(envelope, opts = {}) {
       'To send a FILE/attachment (image, PDF, any file) on a channel that supports it: `asmltr send <channel> <target> --file <abs-path> [--caption "…"]`.\n' +
       '• `asmltr announce "<text>" [--to <target>] [--urgent] [--ttl <sec>]` — post an awareness note delivered into other sessions on their next turn; `asmltr announcements` lists live ones.\n' +
       'Use these when asked to route/coordinate, or to stay aware of the other sessions running alongside you.';
+    // The directory of targets, built next to the toolbelt that tells the turn to use them.
+    pPlaces = buildPlacesBlock(places, { surface: e.channel });
+
     // Mesh steer is a COERCIVE verb — only advertise it when the operator has enabled it, and always
     // teach the announce-vs-steer distinction so it's used deliberately, not reflexively.
     if (/^(1|on|true|yes)$/i.test(process.env.ASMLTR_MESH_STEER || '')) {
@@ -447,7 +453,7 @@ async function handle(envelope, opts = {}) {
   // lock/unlock, silo path, channel capabilities all move the hash → the stable block is re-sent).
   const { full: systemPrompt, volatile: volatilePrompt, stableHash } = promptParts.composeSystemPrompts({
     identity: pIdentity, speaker: currentSpeaker, channel: pChannel, authz: pAuthz, rel: pRel,
-    extra: pExtra, toolbelt: pToolbelt, uploadsInstr: pUploadsInstr, uploadsList: pUploadsList, announce: pAnnounce,
+    extra: pExtra, toolbelt: pToolbelt, places: pPlaces, uploadsInstr: pUploadsInstr, uploadsList: pUploadsList, announce: pAnnounce,
   });
 
   const mod = await moderation.moderate(e.content.text, resolved, { platform: e.channel });
@@ -1278,6 +1284,8 @@ app.post('/v2/upload', rawBody(), (req, res) => {
 // interrupted transfer resume. The sweeper drops staging dirs from uploads that were never finished.
 const { mountUploadRoutes, startPartialSweeper } = require('./upload-routes');
 mountUploadRoutes(app, { record });
+const { mountPlaceRoutes } = require('./places-routes');
+mountPlaceRoutes(app, { record });
 startPartialSweeper();
 
 // Streaming turn: same pipeline as /v2/handle, but assistant text is streamed as it's produced.

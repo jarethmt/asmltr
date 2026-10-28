@@ -246,6 +246,160 @@ async function cmdRelease(key) {
   console.log(A.grn('released — channel resumes'));
 }
 
+async function cmdPlaces(rest, f) {
+  // asmltr places [list] [-q X] [--surface S] [--kind K] [--role R]
+  //             | get <surface> <id> | resolve <ref> [--surface S]
+  //             | set <surface> <id> <label> [--role] [--note "…"] | unset <surface> <label>
+  //             | refresh [--instance ID] [--surface S] | import [--surface S]
+  // The directory of WHERE (core/src/places.js): what asmltr can talk to, by id, with the roles and
+  // aliases a human gave it. Talks to the core over HTTP like every other asmltr subcommand.
+  const subs = ['list', 'get', 'resolve', 'set', 'unset', 'refresh', 'import'];
+  const sub = subs.includes(rest[0]) ? rest[0] : 'list';
+  const args = subs.includes(rest[0]) ? rest.slice(1) : rest;
+  const words = [];
+  const o = {};
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (t === '-q' || t === '--query') o.q = args[++i];
+    else if (t === '--surface') o.surface = args[++i];
+    else if (t === '--kind') o.kind = args[++i];
+    else if (t === '--role' && (sub === 'list')) o.role = args[++i];
+    else if (t === '--role') o.asRole = true;
+    else if (t === '--note') o.note = args[++i];
+    else if (t === '--instance') o.instance_id = args[++i];
+    else words.push(t);
+  }
+  // The CLI has no shared query helper; URLSearchParams is the idiom it already uses elsewhere.
+  // Empty values are dropped so `?surface=` never reaches the route as a filter for "".
+  const qs = (o2) => {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(o2 || {})) if (v != null && v !== '') sp.set(k, String(v));
+    const t = sp.toString();
+    return t ? '?' + t : '';
+  };
+  const url = (p) => CORE_BASE + p;
+  // A label's `note` comes back only to a request carrying the manager token (see
+  // core/src/places-routes.js). The CLI is the operator's own tool and runs on the host, so it
+  // presents it; .env is read lazily here, the way the vault subcommands do it, rather than moving
+  // loadenv to startup and changing env resolution for every other subcommand. Without a configured
+  // token the listing simply has no notes in it.
+  const placesToken = () => {
+    if (MANAGER_TOKEN) return MANAGER_TOKEN;
+    try { require('../shared/loadenv'); } catch (_) {}
+    return process.env.ASMLTR_MANAGER_TOKEN || '';
+  };
+  const hit = async (method, p, body) => {
+    const init = { method, headers: { Accept: 'application/json' } };
+    const tok = placesToken();
+    if (tok) init.headers.Authorization = 'Bearer ' + tok;
+    if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
+    try {
+      const r = await fetch(url(p), init);
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    } catch (e) { return { status: 0, body: { error: e.message } }; }
+  };
+  const fail = (r) => console.log(A.red(r.body.error || `core said ${r.status}`));
+  // Everything printed here came from a platform or from another session, and an ANSI escape in a
+  // channel name or a label would reach the terminal: \u001b[2K erases the line it is printed on, so
+  // a listing could be made to hide a row. The store strips these on write; this is the sink guard
+  // for rows written before it did, or by anything that writes the DB directly.
+  const flat = (v, max = 120) => {
+    const out = String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return out.length > max ? out.slice(0, max) : out;
+  };
+  const row = (p) => {
+    const tags = [p.kind, ...(p.roles || []).map((x) => 'role:' + flat(x, 48)), ...(p.aliases || []).map((x) => flat(x, 48))].filter(Boolean);
+    return `${pad(flat(p.surface, 32), 10)}${pad(flat(p.scope_id, 64), 22)}${A.bold(flat(p.display || p.name || p.scope_id))}${tags.length ? A.dim('  [' + tags.join(' ') + ']') : ''}`;
+  };
+
+  if (sub === 'resolve') {
+    const ref = words.join(' ');
+    if (!ref) throw new Error('usage: asmltr places resolve "<id|alias|role|name>" [--surface S]');
+    const r = await hit('GET', `/v2/places/resolve${qs({ ref, surface: o.surface })}`);
+    if (r.status === 409) {
+      // Ambiguity is the answer, not an error to swallow: print the candidates so the next command
+      // can name one.
+      console.log(A.red(r.body.error));
+      for (const c of r.body.candidates || []) console.log(`  ${pad(c.surface, 10)}${pad(c.scope_id, 22)}${c.display}`);
+      return;
+    }
+    if (r.status !== 200) return fail(r);
+    const p = r.body.place;
+    console.log(row(p) + A.dim(`  (matched on ${r.body.matched_on})`));
+    if (p.topic) console.log(A.dim('  ' + flat(p.topic, 400)));
+    return;
+  }
+
+  if (sub === 'get') {
+    const [surface, id] = [o.surface || words[0], words[o.surface ? 0 : 1]];
+    if (!surface || !id) throw new Error('usage: asmltr places get <surface> <id>');
+    const r = await hit('GET', `/v2/places/${encodeURIComponent(surface)}/${encodeURIComponent(id)}`);
+    if (r.status !== 200) return fail(r);
+    console.log(row(r.body));
+    if (r.body.topic) console.log(A.dim('  ' + flat(r.body.topic, 400)));
+    if (r.body.notes && r.body.notes.length) for (const n of r.body.notes) console.log(A.dim('  note: ' + flat(n, 300)));
+    console.log(A.dim(`  source ${r.body.source || '?'}  ·  last seen ${r.body.last_seen ? ageOf(r.body.last_seen) + ' ago' : '?'}`));
+    return;
+  }
+
+  if (sub === 'set') {
+    const [surface, id, label] = words;
+    if (!surface || !id || !label) throw new Error('usage: asmltr places set <surface> <id> <label> [--role] [--note "…"]');
+    const r = await hit('POST', '/v2/places/label', { surface, scope_id: id, label, kind: o.asRole ? 'role' : 'alias', note: o.note, by: 'cli' });
+    if (r.status !== 200) return fail(r);
+    console.log(`${o.asRole ? 'role' : 'alias'} ${A.bold(label)} → ${row(r.body.place).trim()}`);
+    return;
+  }
+
+  if (sub === 'unset') {
+    const [surface, label] = words;
+    if (!surface || !label) throw new Error('usage: asmltr places unset <surface> <label>');
+    const r = await hit('DELETE', `/v2/places/${encodeURIComponent(surface)}/label/${encodeURIComponent(label)}`);
+    return r.status === 200 ? console.log(`removed ${label}`) : fail(r);
+  }
+
+  if (sub === 'refresh') {
+    const r = await hit('POST', '/v2/places/refresh', { instance_id: o.instance_id, surface: o.surface, by: 'cli' });
+    if (r.status !== 200) return fail(r);
+    for (const i of r.body.instances || []) {
+      const what = `${i.guilds} server(s), ${i.channels} channel(s)`;
+      console.log(`${pad(i.instance_id, 14)}${pad(i.surface, 10)}${i.error ? A.dim(what + '  ' + i.error) : what}`);
+    }
+    console.log(A.dim(`\n  ${r.body.guilds || 0} server(s) and ${r.body.channels || 0} channel(s) recorded`));
+    if (!r.body.ok) console.log(A.dim('  nothing was reachable; is the connector manager running?'));
+    return;
+  }
+
+  if (sub === 'import') {
+    // No --file: the path is server-side config (ASMLTR_DISCORD_ALIASES_FILE), because the route
+    // cannot accept a caller-supplied path without becoming an arbitrary file read.
+    const r = await hit('POST', '/v2/places/import', { surface: o.surface, by: 'cli' });
+    if (r.status !== 200) return fail(r);
+    if (!r.body.ok) return console.log(A.red(r.body.error));
+    console.log(`imported ${r.body.channels} described channel(s) and ${r.body.aliases} alias(es)` + A.dim(`\n  from ${r.body.file}`));
+    return;
+  }
+
+  const r = await hit('GET', `/v2/places${qs({ surface: o.surface, kind: o.kind, role: o.role, q: o.q || words[0] })}`);
+  if (r.status !== 200) return fail(r);
+  const roles = r.body.roles || [];
+  if (roles.length) {
+    // Roles first: "what is the shift log" is the question this command exists to answer.
+    console.log(A.bold('roles'));
+    for (const x of roles) {
+      const where = x.parent_name ? `${flat(x.parent_name)}#${flat(x.name || x.scope_id)}` : flat(x.name || x.scope_id);
+      console.log(`  ${pad(flat(x.label, 48), 18)}${pad(flat(x.surface, 32), 10)}${pad(flat(x.scope_id, 64), 22)}${where}${x.note ? A.dim('  ' + flat(x.note)) : ''}`);
+    }
+    console.log('');
+  }
+  if (!(r.body.places || []).length) {
+    return console.log(A.dim('no places recorded — run `asmltr places refresh` (live connectors) or `asmltr places import` (channel-aliases.json)'));
+  }
+  console.log(A.bold(pad('SURFACE', 10) + pad('ID', 22) + 'NAME'));
+  for (const p of r.body.places) console.log(row(p));
+  console.log(A.dim(`\n  ${r.body.places.length} of ${r.body.count} place(s)`));
+}
+
 async function cmdSend(rest) {
   // asmltr send <channel> <target> "<text>"  OR  ... --file <path> [--caption "..."] [--subject "..."]
   let file = null, caption = null, subject = null;
@@ -568,6 +722,10 @@ function cmdHelp() {
   asmltr send <ch> <target> "<text>"   deliver a message OUT through any connector
        ... --file <path> [--caption T]  attach a FILE (image/PDF/any) on channels that support it
        ... --subject "<subj>"           set the subject (email)
+  asmltr places [list]                 the servers/channels/chats asmltr knows (-q X, --surface S)
+       places resolve "<name|role>"    one place, by id, alias, role or loose name
+       places set <surface> <id> <label> [--role] [--note "…"]
+       places refresh · places import   fill it from live connectors / channel-aliases.json
   asmltr announce "<text>" [--to T]    post a cross-session announcement (--urgent, --ttl <sec>);
                                        delivered into other sessions' context on their next turn
   asmltr steer <key> "<guidance>"      push guidance into another session's LIVE turn (COERCIVE;
@@ -1062,6 +1220,7 @@ async function cmdVault(rest, f) {
       case 'watch': return liveStream(rest[0]);
       case 'context': case 'transcript': return await cmdContext(rest);
       case 'send': return await cmdSend(rest);
+      case 'places': return await cmdPlaces(rest, f);   // where `send` can send: ids, aliases, roles
       case 'announce': return await cmdAnnounce(rest);
       case 'notify': return await cmdNotify(rest);
       case 'announcements': return await cmdAnnouncements();
