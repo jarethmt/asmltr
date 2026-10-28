@@ -1,0 +1,261 @@
+'use strict';
+/**
+ * asmltr shared renderer: CommonMark-ish model output -> Telegram HTML (parse_mode: 'HTML').
+ *
+ * The core is formatting-agnostic (see core/src/envelope.js): the model emits generic markdown and
+ * each connector renders it for its surface. Discord's native syntax overlaps with markdown so its
+ * client renders raw text acceptably; Telegram does not, and sending raw markdown shows literal
+ * `**` / `#` / backticks / pipes to the user. Setting parse_mode:'Markdown' on raw model output is
+ * worse: Telegram 400s ("can't parse entities") on the double-asterisk bold, headings, and tables
+ * the model emits, and drops the message. So we convert to Telegram's HTML flavor, whose supported
+ * tag set is small and whose escaping is limited to & < >, and we keep a plain-text fallback for the
+ * rare case the rendered HTML still won't parse.
+ *
+ * Telegram HTML supports only: <b> <i> <u> <s> <code> <pre> <a href> <blockquote> <tg-spoiler>
+ * (and <pre><code class="language-x">). No headings, lists, tables, <hr>, or <br>; newlines are
+ * literal. Unsupported block constructs are degraded: headings -> bold line, lists -> bullet lines,
+ * tables -> a monospace <pre> block, horizontal rules -> a dashed line.
+ */
+
+const MAX_DEFAULT = 3900; // Telegram hard cap is 4096 chars/message; leave headroom like sendChunked did.
+
+// Null-byte sentinels for spans we extract before escaping/inline-formatting and restore afterward.
+// Null bytes are untouched by the escape and inline regexes, which is why they were chosen.
+//
+// Written as the `\x00` ESCAPE, never as a raw NUL byte in this file. Git calls a file binary when it
+// finds a NUL in the first 8000 bytes, and this file had eight: the diff read `Binary files differ`,
+// so a reviewer saw no change at all, and git could not merge it textually either, which turns any
+// concurrent edit to a file in shared/ into a conflict nothing can resolve. The runtime values are
+// identical; only the bytes on disk differ.
+//
+// `renderToHtml` also drops NULs from its input, so a null in model output cannot forge one of these
+// and come back out as someone else's code span. "Does not occur in normal chat text" is a statement
+// about the common case, not an invariant the renderer can rely on.
+const FENCE = (i) => `\x00F${i}\x00`;
+const ICODE = (i) => `\x00C${i}\x00`;
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Strip markdown emphasis/code/link markers to readable plain text. Used for table cells, which we
+// render inside <pre> as monospace and therefore can't carry inline tags.
+function stripInlineMarks(s) {
+  return s
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(^|[^\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1$2')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim();
+}
+
+// Inline formatting for a single already-block-classified line. Order matters: extract inline code
+// first (its contents must not be re-formatted), escape, then apply emphasis/links on the escaped
+// string, then restore code spans. The input line is RAW markdown; we escape inside here.
+function renderInline(line) {
+  const codes = [];
+  // Pull inline code spans out first so their contents are escaped but never emphasis-formatted.
+  let work = line.replace(/`([^`]+)`/g, (_m, c) => {
+    codes.push(c);
+    return ICODE(codes.length - 1);
+  });
+
+  work = escapeHtml(work);
+
+  // Links: [text](url). Applied on escaped text; brackets/parens are not escaped so they survive.
+  work = work.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text, url) =>
+    `<a href="${url.replace(/"/g, '%22')}">${text}</a>`);
+
+  // Bold before italic so `**x**` isn't half-consumed by the single-asterisk rule.
+  work = work.replace(/(\*\*|__)(.+?)\1/g, '<b>$2</b>');
+  // Italic: single * anywhere (not touching another *), and single _ only at word boundaries so
+  // snake_case identifiers survive.
+  work = work.replace(/(^|[^*])\*(?!\s)([^*]+?)(?<!\s)\*(?!\*)/g, '$1<i>$2</i>');
+  work = work.replace(/(^|[^\w_])_(?!\s)([^_]+?)(?<!\s)_(?![\w_])/g, '$1<i>$2</i>');
+  // Strikethrough.
+  work = work.replace(/~~(.+?)~~/g, '<s>$1</s>');
+
+  // Restore inline code spans, escaping their contents.
+  work = work.replace(/\x00C(\d+)\x00/g, (_m, i) => `<code>${escapeHtml(codes[+i])}</code>`);
+  return work;
+}
+
+// Render a GFM pipe table (header, separator, rows) as a space-padded monospace <pre> block.
+function renderTable(rows) {
+  const cells = rows.map((r) =>
+    r.replace(/^\s*\|?/, '').replace(/\|?\s*$/, '').split('|').map((c) => stripInlineMarks(c.trim())));
+  const cols = Math.max(...cells.map((r) => r.length));
+  const widths = [];
+  for (let c = 0; c < cols; c++) widths[c] = Math.max(...cells.map((r) => (r[c] || '').length));
+  const line = (r) => r.map((c, i) => (c || '').padEnd(widths[i])).join('  ').replace(/\s+$/, '');
+  const out = [line(cells[0]), widths.map((w) => '-'.repeat(w)).join('  ')];
+  for (const r of cells.slice(1)) out.push(line(r));
+  return `<pre>${escapeHtml(out.join('\n'))}</pre>`;
+}
+
+/**
+ * Convert markdown-ish text to Telegram HTML. Pure: no I/O, deterministic.
+ */
+function renderToHtml(md) {
+  // NULs out, before any sentinel goes in: see FENCE/ICODE above. Telegram would not render one
+  // anyway, so nothing is lost by dropping it.
+  let text = String(md == null ? '' : md).replace(/\r\n/g, '\n').replace(/\x00/g, '');
+
+  // 1. Extract fenced code blocks first (contents are escaped, never inline-formatted). Handle an
+  //    unterminated fence by consuming to end of input.
+  const fences = [];
+  text = text.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+    fences.push({ lang: lang.trim(), code });
+    return FENCE(fences.length - 1);
+  });
+  text = text.replace(/```([^\n]*)\n([\s\S]*)$/g, (_m, lang, code) => {
+    fences.push({ lang: lang.trim(), code });
+    return FENCE(fences.length - 1);
+  });
+
+  // 2. Walk lines, classifying block constructs; collect tables and blockquotes as runs.
+  const lines = text.split('\n');
+  const out = [];
+  const isTableSep = (s) => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(s) && s.includes('-');
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+
+    // Fence placeholder on its own line: emit the <pre> block.
+    const fm = ln.match(/^\x00F(\d+)\x00$/);
+    if (fm) {
+      const f = fences[+fm[1]];
+      const body = escapeHtml(f.code.replace(/\n$/, ''));
+      out.push(f.lang ? `<pre><code class="language-${f.lang}">${body}</code></pre>` : `<pre>${body}</pre>`);
+      continue;
+    }
+
+    // Table: a pipe row immediately followed by a separator row.
+    if (ln.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      const rows = [ln];
+      i += 2; // skip header + separator; header already pushed
+      while (i < lines.length && lines[i].includes('|')) { rows.push(lines[i]); i++; }
+      i--; // the for-loop will ++ past the last consumed line
+      out.push(renderTable(rows));
+      continue;
+    }
+
+    // Blockquote run.
+    if (/^\s*>\s?/.test(ln)) {
+      const q = [ln.replace(/^\s*>\s?/, '')];
+      while (i + 1 < lines.length && /^\s*>\s?/.test(lines[i + 1])) { q.push(lines[++i].replace(/^\s*>\s?/, '')); }
+      out.push(`<blockquote>${q.map(renderInline).join('\n')}</blockquote>`);
+      continue;
+    }
+
+    // Horizontal rule.
+    if (/^\s*([-*_])\1{2,}\s*$/.test(ln)) { out.push('─'.repeat(12)); continue; }
+
+    // Heading -> bold line.
+    const h = ln.match(/^\s*#{1,6}\s+(.*)$/);
+    if (h) { out.push(`<b>${renderInline(h[1].trim())}</b>`); continue; }
+
+    // List item -> bullet / kept number.
+    const li = ln.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      const indent = li[1].replace(/\t/g, '  ');
+      const marker = /\d/.test(li[2]) ? li[2] + ' ' : '• ';
+      // Task list checkbox.
+      const body = li[3].replace(/^\[([ xX])\]\s+/, (_m, c) => (c === ' ' ? '☐ ' : '☑ '));
+      out.push(`${indent}${marker}${renderInline(body)}`);
+      continue;
+    }
+
+    // Plain line.
+    out.push(renderInline(ln));
+  }
+
+  return out.join('\n');
+}
+
+// Does cutting after this many chars of `s` land inside an open <pre>/<blockquote>? We only need to
+// track the two block tags that span newlines; inline tags are always balanced within one line.
+function openBlockAt(htmlSoFar) {
+  const lastPre = Math.max(htmlSoFar.lastIndexOf('<pre>'), htmlSoFar.lastIndexOf('<pre><code'));
+  const closePre = htmlSoFar.lastIndexOf('</pre>');
+  if (lastPre > closePre) return 'pre';
+  const lastQ = htmlSoFar.lastIndexOf('<blockquote>');
+  const closeQ = htmlSoFar.lastIndexOf('</blockquote>');
+  if (lastQ > closeQ) return 'blockquote';
+  return null;
+}
+
+/**
+ * Split rendered Telegram HTML into <=max-char chunks on line boundaries, re-opening a <pre> or
+ * <blockquote> that a boundary falls inside so no chunk contains an unbalanced block tag. Inline
+ * tags never span a newline in our output, so a newline cut is always safe for them.
+ */
+function splitHtml(html, max = MAX_DEFAULT) {
+  const text = String(html || '');
+  if (text.length <= max) return text.trim() ? [text] : [];
+
+  const CLOSE = { pre: '</pre>', blockquote: '</blockquote>' };
+  const OPEN = { pre: '<pre>', blockquote: '<blockquote>' };
+  const chunks = [];
+  let cur = '';
+
+  // Append `piece` to the current chunk. `atStart` means cur ends on an open block tag, so the piece
+  // attaches with no separator (matches how renderToHtml lays out a block's first line).
+  const add = (piece, atStart) => { cur += (cur && !atStart) ? '\n' : ''; cur += piece; };
+  // Close the current chunk, re-opening any block it leaves hanging at the head of the next chunk.
+  const flush = () => {
+    if (!cur) return;
+    const open = openBlockAt(cur);
+    chunks.push(open ? cur + CLOSE[open] : cur);
+    cur = open ? OPEN[open] : '';
+  };
+
+  for (let line of lines(text)) {
+    // Reserve room for the closing tag of whatever block this chunk would leave open.
+    const reserve = () => (CLOSE[openBlockAt(cur)] || '').length;
+    const sep = () => (cur && !cur.endsWith('>') ? 1 : 0);
+
+    // A line that can't fit even after a flush: hard-split it across chunks.
+    while (cur.length + sep() + line.length + reserve() > max) {
+      if (cur.length + sep() + reserve() >= max) { flush(); continue; }
+      const open = openBlockAt(cur);
+      const room = max - cur.length - sep() - (CLOSE[open] || '').length;
+      add(line.slice(0, room), cur.endsWith('>'));
+      chunks.push(open ? cur + CLOSE[open] : cur);
+      cur = open ? OPEN[open] : '';
+      line = line.slice(room);
+    }
+    if (cur.length + sep() + line.length + reserve() > max) flush();
+    add(line, cur.endsWith('>'));
+  }
+  if (cur) chunks.push(cur);
+  return chunks.filter((c) => c.trim());
+}
+
+function lines(text) { return text.split('\n'); }
+
+/** Convenience: markdown -> array of Telegram-HTML chunks ready for sendMessage(parse_mode:'HTML'). */
+function toTelegramChunks(md, max = MAX_DEFAULT) {
+  return splitHtml(renderToHtml(md), max);
+}
+
+/** Strip a rendered HTML chunk back to plain text. Per-chunk fallback when a chunk still 400s on
+ *  Telegram's parser: resend THIS chunk tag-free so the reply arrives rather than being dropped. */
+function htmlToPlain(html) {
+  return String(html == null ? '' : html)
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+/** Plain-text chunks of the ORIGINAL text, for the no-parse_mode fallback (today's behavior). */
+function toPlainChunks(md, max = MAX_DEFAULT) {
+  const text = String(md == null ? '' : md);
+  if (text.length <= max) return text.trim() ? [text] : [];
+  const chunks = [];
+  for (let i = 0; i < text.length; i += max) chunks.push(text.slice(i, i + max));
+  return chunks;
+}
+
+module.exports = {
+  renderToHtml, splitHtml, toTelegramChunks, toPlainChunks, htmlToPlain, escapeHtml, MAX_DEFAULT,
+};
