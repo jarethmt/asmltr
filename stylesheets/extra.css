@@ -1,0 +1,282 @@
+/* ============================================================================
+   asmltr docs — modern theme layer over Material for MkDocs.
+   Brand: violet #8B5CF6 → pink #EC4899 gradient on a deep, faintly-violet dark.
+   ========================================================================== */
+
+:root {
+  --asmltr-violet: #8B5CF6;
+  --asmltr-pink: #EC4899;
+  --asmltr-cyan: #22D3EE;
+  --asmltr-grad: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+  --asmltr-grad-soft: linear-gradient(135deg, rgba(139,92,246,0.16) 0%, rgba(236,72,153,0.16) 100%);
+
+  --md-primary-fg-color: #8B5CF6;
+  --md-accent-fg-color: #EC4899;
+  --md-primary-fg-color--dark: #7C3AED;
+}
+
+/* Roomier reading measure + smoother rendering. */
+.md-typeset {
+  font-feature-settings: "kern", "liga", "calt";
+  -webkit-font-smoothing: antialiased;
+}
+.md-grid { max-width: 66rem; }
+
+/* ---------------------------------------------------------------------------
+   DARK SCHEME — the primary experience: deep, faintly-violet, with soft glow.
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] {
+  --md-hue: 260;
+  --md-default-bg-color:        hsl(258, 24%, 8%);
+  --md-default-bg-color--light: hsl(258, 22%, 11%);
+  --md-default-fg-color:        hsla(258, 20%, 96%, 1);
+  --md-default-fg-color--light: hsla(258, 15%, 82%, 1);
+  --md-default-fg-color--lighter: hsla(258, 12%, 62%, 1);
+  --md-code-bg-color:           hsl(258, 26%, 13%);
+  --md-code-fg-color:           hsl(258, 20%, 90%);
+  --md-typeset-a-color:         #C4B5FD;
+  --md-accent-fg-color:         #F472B6;
+}
+
+/* A subtle aurora behind everything (dark only). */
+[data-md-color-scheme="slate"] body {
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, rgba(139,92,246,0.14), transparent 60%),
+    radial-gradient(52rem 36rem at 100% 0%, rgba(236,72,153,0.10), transparent 55%),
+    var(--md-default-bg-color);
+  background-attachment: fixed;
+}
+
+/* ---------------------------------------------------------------------------
+   HEADER — translucent, blurred, gradient hairline underneath.
+   --------------------------------------------------------------------------- */
+.md-header {
+  background-color: transparent;
+  backdrop-filter: saturate(140%) blur(14px);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  box-shadow: none;
+  border-bottom: 1px solid transparent;
+  transition: background-color .25s ease, border-color .25s ease;
+}
+[data-md-color-scheme="slate"] .md-header { background-color: hsla(258, 26%, 9%, 0.72); }
+[data-md-color-scheme="default"] .md-header { background-color: hsla(0,0%,100%,0.72); }
+.md-header--shadow {
+  box-shadow: 0 4px 24px -12px rgba(0,0,0,.5);
+  border-image: var(--asmltr-grad) 1;
+  border-bottom: 1px solid;
+}
+.md-header__title { font-weight: 700; letter-spacing: -0.01em; }
+
+/* Sticky tab bar sits flush with the blurred header. */
+.md-tabs {
+  background: transparent;
+  color: var(--md-default-fg-color--light);
+}
+[data-md-color-scheme="slate"] .md-tabs { background: hsla(258, 26%, 9%, 0.55); }
+.md-tabs__link { opacity: .78; font-weight: 500; transition: opacity .2s ease, color .2s ease; }
+.md-tabs__link:hover { opacity: 1; }
+.md-tabs__link--active { opacity: 1; color: var(--md-default-fg-color); }
+.md-tabs__item--active > .md-tabs__link {
+  position: relative;
+}
+.md-tabs__item--active > .md-tabs__link::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px;
+  border-radius: 2px; background: var(--asmltr-grad);
+}
+
+/* ---------------------------------------------------------------------------
+   TYPOGRAPHY — gradient H1, accented section rules.
+   --------------------------------------------------------------------------- */
+.md-typeset h1 {
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  background: var(--asmltr-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.md-typeset h2 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-top: 2.4em;
+  padding-top: .6em;
+  border-top: 1px solid var(--md-default-fg-color--lightest, rgba(128,128,128,.14));
+}
+.md-typeset h2::before {
+  content: ""; display: inline-block; width: 1.5rem; height: .18rem;
+  vertical-align: middle; margin-right: .55rem; border-radius: 2px;
+  background: var(--asmltr-grad);
+}
+.md-typeset h3 { font-weight: 650; letter-spacing: -0.01em; }
+
+/* Gradient helper for inline hero text. */
+.md-typeset .asmltr-gradient {
+  background: var(--asmltr-grad);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  font-weight: 800;
+}
+
+/* Links: gradient underline that grows on hover. */
+.md-typeset a:not(.md-button):not(.md-tabs__link):not(.md-nav__link) {
+  text-decoration: none;
+  background-image: var(--asmltr-grad);
+  background-position: 0 100%; background-repeat: no-repeat;
+  background-size: 0% 2px;
+  transition: background-size .22s ease;
+}
+.md-typeset a:not(.md-button):not(.md-tabs__link):not(.md-nav__link):hover {
+  background-size: 100% 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   CARDS — glassmorphic, gradient hover-border, lift.
+   --------------------------------------------------------------------------- */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border: 1px solid var(--md-default-fg-color--lightest, rgba(128,128,128,.16));
+  border-radius: 0.9rem;
+  padding: 1.1rem 1.15rem;
+  background: var(--md-default-bg-color--light);
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s ease, box-shadow .25s ease, border-color .25s ease;
+}
+[data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li {
+  background: linear-gradient(180deg, hsla(258,22%,14%,.7), hsla(258,24%,11%,.7));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+}
+.md-typeset .grid.cards > ul > li::before {
+  content: ""; position: absolute; inset: 0; padding: 1px; border-radius: inherit;
+  background: var(--asmltr-grad); opacity: 0;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  transition: opacity .25s ease;
+  pointer-events: none;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px -22px rgba(139,92,246,.55);
+  border-color: transparent;
+}
+.md-typeset .grid.cards > ul > li:hover::before { opacity: 1; }
+.md-typeset .grid.cards > ul > li > hr { display: none; }
+.md-typeset .grid.cards .twemoji, .md-typeset .grid.cards svg { color: var(--asmltr-violet); }
+
+/* ---------------------------------------------------------------------------
+   BUTTONS
+   --------------------------------------------------------------------------- */
+.md-typeset .md-button {
+  border-radius: .7rem;
+  font-weight: 600;
+  border-width: 1px;
+  transition: transform .15s ease, box-shadow .2s ease;
+}
+.md-typeset .md-button--primary {
+  background: var(--asmltr-grad);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 10px 30px -12px rgba(236,72,153,.6);
+}
+.md-typeset .md-button:hover { transform: translateY(-1px); }
+
+/* ---------------------------------------------------------------------------
+   NAV (sidebar) — active item gets a gradient pill.
+   --------------------------------------------------------------------------- */
+.md-nav__link { border-radius: .45rem; transition: color .18s ease, background-color .18s ease; }
+.md-nav__item .md-nav__link--active,
+.md-nav__link--active {
+  color: var(--md-default-fg-color);
+  font-weight: 650;
+}
+.md-nav__link:hover { color: var(--asmltr-pink); }
+.md-nav__item--section > .md-nav__link {
+  color: var(--md-default-fg-color--lighter);
+  text-transform: uppercase; letter-spacing: .06em; font-size: .66rem; font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   CODE — softer panels, gradient-tinted inline code.
+   --------------------------------------------------------------------------- */
+.md-typeset code {
+  border-radius: .35rem;
+  font-feature-settings: "liga" 0;
+}
+[data-md-color-scheme="slate"] .md-typeset :not(pre) > code {
+  background: rgba(139,92,246,.14);
+  color: #E9D5FF;
+  border: 1px solid rgba(139,92,246,.18);
+}
+.md-typeset pre > code {
+  border-radius: .7rem;
+  box-shadow: inset 0 0 0 1px rgba(128,128,128,.12);
+}
+[data-md-color-scheme="slate"] .highlight { border-radius: .7rem; }
+
+/* ---------------------------------------------------------------------------
+   ADMONITIONS — flat, tinted, rounded; brand the note/tip variants.
+   --------------------------------------------------------------------------- */
+.md-typeset .admonition, .md-typeset details {
+  border-radius: .7rem;
+  border-width: 1px;
+  border-left-width: 3px;
+  box-shadow: 0 8px 26px -22px rgba(0,0,0,.6);
+  font-size: .76rem;
+}
+.md-typeset .admonition.note, .md-typeset details.note { border-color: rgba(139,92,246,.5); }
+.md-typeset .note > .admonition-title, .md-typeset .note > summary {
+  background: rgba(139,92,246,.12);
+}
+.md-typeset .note > .admonition-title::before, .md-typeset .note > summary::before {
+  background-color: var(--asmltr-violet);
+}
+.md-typeset .tip > .admonition-title, .md-typeset .tip > summary { background: rgba(34,211,238,.10); }
+
+/* ---------------------------------------------------------------------------
+   TABLES — cleaner header, hover rows, rounded frame.
+   --------------------------------------------------------------------------- */
+.md-typeset table:not([class]) {
+  border-radius: .7rem;
+  overflow: hidden;
+  border: 1px solid var(--md-default-fg-color--lightest, rgba(128,128,128,.14));
+  box-shadow: 0 10px 30px -26px rgba(0,0,0,.6);
+}
+.md-typeset table:not([class]) th {
+  background: var(--asmltr-grad-soft);
+  font-weight: 650;
+  border-bottom: 1px solid rgba(139,92,246,.22);
+}
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tr:hover td {
+  background: rgba(139,92,246,.06);
+}
+
+/* ---------------------------------------------------------------------------
+   MISC — scrollbar, footer, search, hero.
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] ::-webkit-scrollbar { width: 11px; height: 11px; }
+[data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--asmltr-violet), var(--asmltr-pink));
+  border-radius: 8px; border: 3px solid var(--md-default-bg-color);
+}
+
+.md-footer { background: transparent; }
+.md-footer-meta { background-color: hsla(258, 30%, 6%, 0.9); }
+
+.md-search__form { border-radius: .6rem; }
+[data-md-color-scheme="slate"] .md-search__input { background: rgba(139,92,246,.1); }
+
+/* Landing hero wrapper (optional, use <div class="asmltr-hero"> in index). */
+.asmltr-hero {
+  padding: 1.2rem 0 .2rem;
+}
+.asmltr-hero h1 { font-size: 2.9rem; line-height: 1.05; }
+
+/* Mermaid diagrams: give them breathing room + a framed panel in dark. */
+.md-typeset .mermaid {
+  border-radius: .7rem; padding: 1rem;
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid {
+  background: hsla(258,24%,11%,.6);
+  border: 1px solid rgba(139,92,246,.14);
+}

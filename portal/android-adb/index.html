@@ -1,0 +1,3956 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="One channel-agnostic AI-assistant backend behind every chat surface — with a live insights dashboard.">
+      
+      
+      
+        <link rel="canonical" href="https://jarethmt.github.io/asmltr/portal/android-adb/">
+      
+      
+        <link rel="prev" href="../drive/">
+      
+      
+        <link rel="next" href="../../REMOTE-DESKTOP/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Android over ADB - asmltr</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="pink">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#portal-android-over-adb-design-feasibility" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="asmltr" class="md-header__button md-logo" aria-label="asmltr" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            asmltr
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Android over ADB
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="pink"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="pink"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jarethmt/asmltr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jarethmt/asmltr
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="asmltr" class="md-nav__button md-logo" aria-label="asmltr" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    asmltr
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jarethmt/asmltr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jarethmt/asmltr
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What is asmltr?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning engines
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reasoning engines
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview & setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engines-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP tools registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../REASONING-ENGINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The design (deep-dive)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../connectors/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/discord/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discord
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/openai/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAI-compatible
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/android/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android (device gateway)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/device/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device (generic gateway)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../integrations/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../silos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data silos & the Self silo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../backups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The asmltr CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage & cost accounting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SCHEDULES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules (cron with a GUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../NOTIFY-READ-ALOUD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notify & read-aloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BLUETOOTH-AUDIO/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bluetooth audio on Android
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../UPDATER-DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning & updates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../testing-the-updater/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing the updater
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coordination
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Coordination
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/injection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Steering & injection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/cross-channel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-channel send
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/announcements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Announcements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../coordination/awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking & devices
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Networking & devices
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PANGOLIN-BACKBONE-DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pangolin backbone (design)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portal
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10_3" id="__nav_10_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_10_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Portal
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hardware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hardware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build & flash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mesh-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mesh client (esp_olm)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../drive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote drive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android over ADB
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android over ADB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-why-android-breaks-the-desktop-drive-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Why Android breaks the desktop drive loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-usb-role-can-this-dongle-be-a-usb-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. USB role: can this dongle be a USB host?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. USB role: can this dongle be a USB host?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-the-silicon-can-the-board-cant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 The silicon can; the board can't
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-the-blocker-vbus-a-usb-host-must-supply-5-v" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 The blocker: VBUS. A USB host must supply 5 V.
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-role-detection-which-mode-to-boot-into" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Role detection (which mode to boot into)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-the-adb-wire-protocol-over-usb-what-the-host-must-speak" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The ADB wire protocol over USB (what the host must speak)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. The ADB wire protocol over USB (what the host must speak)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-message-framing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Message framing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-handshake-step-by-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Handshake, step by step
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-streams-shell-screencap-input-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Streams: shell, screencap, input injection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-rsa-auth-on-the-esp32-crypto-key-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. RSA auth on the ESP32 (crypto + key storage)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-prior-art-what-already-exists-and-whats-reusable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Prior art (what already exists, and what's reusable)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Prior art (what already exists, and what&#39;s reusable)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-wolfxalpha4esp32-adb-client-the-direct-precedent-mit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 wolfxalpha4/esp32-adb-client — the direct precedent (MIT)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-general-esp32-s3-usb-host-building-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 General ESP32-S3 USB-host building blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-external-controller-route-max3421e" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 External-controller route (MAX3421E)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-tinyusb-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 TinyUSB host
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-mapping-adb-onto-the-asmltr-drive-model-ble-execioback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Mapping ADB onto the asmltr drive model (BLE exec/ioback)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-the-wi-fi-adb-escape-hatch-sidesteps-the-vbus-blocker-but-reopens-a-settled-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. The Wi-Fi-ADB escape hatch (sidesteps the VBUS blocker — but reopens a settled decision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-feasibility-effort-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Feasibility, effort, risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-staged-build-plan-rungs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Staged build plan (rungs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-recommendation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Recommendation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Recommendation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../REMOTE-DESKTOP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote desktop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Identity, auth & trust
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Identity, auth & trust
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CAST/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The cast — identity & trust
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../AUTH/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth & identity provider
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ACCESS-EVOLUTION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Access evolution (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vision & roadmap
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Vision & roadmap
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../LAUNCHER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The launcher (brainstorm)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP-RECORDER-CONTEXTBANKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Recorder & context banks (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEVICE-REGISTRY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device registry & canvas (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FEDERATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Federation (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP-VAULT-SILOS-BACKUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault · silos · backups (roadmap)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/trust-vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TRUST vault (credentials & KMS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/trust/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trust & permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/moderation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Moderation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets & config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_14" id="__nav_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP endpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-why-android-breaks-the-desktop-drive-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Why Android breaks the desktop drive loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-usb-role-can-this-dongle-be-a-usb-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. USB role: can this dongle be a USB host?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. USB role: can this dongle be a USB host?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-the-silicon-can-the-board-cant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 The silicon can; the board can't
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-the-blocker-vbus-a-usb-host-must-supply-5-v" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 The blocker: VBUS. A USB host must supply 5 V.
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-role-detection-which-mode-to-boot-into" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Role detection (which mode to boot into)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-the-adb-wire-protocol-over-usb-what-the-host-must-speak" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The ADB wire protocol over USB (what the host must speak)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. The ADB wire protocol over USB (what the host must speak)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-message-framing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Message framing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-handshake-step-by-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Handshake, step by step
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-streams-shell-screencap-input-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Streams: shell, screencap, input injection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-rsa-auth-on-the-esp32-crypto-key-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. RSA auth on the ESP32 (crypto + key storage)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-prior-art-what-already-exists-and-whats-reusable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Prior art (what already exists, and what's reusable)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Prior art (what already exists, and what&#39;s reusable)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-wolfxalpha4esp32-adb-client-the-direct-precedent-mit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 wolfxalpha4/esp32-adb-client — the direct precedent (MIT)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-general-esp32-s3-usb-host-building-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 General ESP32-S3 USB-host building blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-external-controller-route-max3421e" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 External-controller route (MAX3421E)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-tinyusb-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 TinyUSB host
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-mapping-adb-onto-the-asmltr-drive-model-ble-execioback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Mapping ADB onto the asmltr drive model (BLE exec/ioback)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-the-wi-fi-adb-escape-hatch-sidesteps-the-vbus-blocker-but-reopens-a-settled-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. The Wi-Fi-ADB escape hatch (sidesteps the VBUS blocker — but reopens a settled decision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-feasibility-effort-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Feasibility, effort, risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-staged-build-plan-rungs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Staged build plan (rungs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-recommendation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Recommendation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Recommendation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="portal-android-over-adb-design-feasibility">Portal → Android over ADB — design &amp; feasibility<a class="headerlink" href="#portal-android-over-adb-design-feasibility" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> research + design only (2026-10-20). No firmware. The companion contracts are
+<a href="../design/">design.md</a> (§3 BLE connectivity, §6a the CDC drive loop, the Android notes) and
+<a href="../drive/">drive.md</a> (the proven Windows/desktop drive loop:
+dongle = USB <strong>device</strong> = HID keyboard+mouse + CDC serial, driven over BLE from the asmltr phone app).</p>
+<p>This doc answers one question: <strong>can the Portal dongle control an Android device it's plugged into, over
+ADB, and should we build it?</strong> Short answer up front so nothing below is a surprise:</p>
+<blockquote>
+<p><strong>ADB control is real and has working ESP32-S3 prior art — but it requires the dongle to be the USB
+<em>host</em> and to <em>source 5 V VBUS</em> to the phone, which the current Waveshare board (USB-A plug,
+bus-powered, no boost) physically cannot do. Native USB-host ADB is therefore a <em>hardware-revision</em>
+feature, not something the shipping dongle can do. The interim that works <em>today</em> on the exact board
+we have is blind HID navigation of Android (the HID actuator already exists). ADB is roadmap R8,
+gated on either a host-capable Portal hardware variant or the Wi-Fi-ADB escape hatch (§7).</strong></p>
+</blockquote>
+<hr />
+<h2 id="1-why-android-breaks-the-desktop-drive-loop">1. Why Android breaks the desktop drive loop<a class="headerlink" href="#1-why-android-breaks-the-desktop-drive-loop" title="Permanent link">&para;</a></h2>
+<p>On Windows/macOS/Linux the Portal is a <strong>USB device</strong>: it presents HID (keyboard+mouse) + CDC serial,
+the host enumerates it, and the feedback loop closes through the dongle's <em>own</em> CDC port — a typed
+one-liner redirects shell output to the COM/tty that <strong>is</strong> the dongle, and the dongle relays those
+bytes up over BLE (PORTAL-DRIVE §1, DESIGN §6a). Text is instant; screenshots are few-second JPEG
+snapshots. Nothing is installed.</p>
+<p>Android kills that loop in two ways:</p>
+<ol>
+<li><strong>No stock shell→serial path.</strong> Stock Android has no user-reachable way to open a terminal and
+   redirect its stdout to a USB CDC port. The elegant CDC return channel is a <em>desktop</em> capability.
+   HID still works — Android accepts the dongle as a USB keyboard/mouse, so blind typing/navigation is
+   universal — but there is no byte-level feedback the way there is on a desktop.</li>
+<li><strong>The USB roles are inverted.</strong> This is the hard part the whole doc hangs on. When you plug a USB
+   dongle into a phone via USB-OTG, <strong>the phone is the USB host and the dongle is the USB device.</strong> ADB
+   is the opposite relationship: ADB needs a <strong>host</strong> (the "computer") talking to an <strong>Android in
+   device/debug mode</strong> running <code>adbd</code>. So for the dongle to be an "ADB controller," the <strong>ESP32-S3 must
+   run its USB-OTG port as a HOST</strong> and speak the ADB wire protocol <em>to</em> the Android, with the Android
+   in USB-debugging mode acting as the USB device. One port can't be both host and device at once, so
+   the dongle must switch roles depending on what it's plugged into.</li>
+</ol>
+<p>That role inversion, and the power that comes with it, is §2–§3.</p>
+<hr />
+<h2 id="2-usb-role-can-this-dongle-be-a-usb-host">2. USB role: can this dongle be a USB host?<a class="headerlink" href="#2-usb-role-can-this-dongle-be-a-usb-host" title="Permanent link">&para;</a></h2>
+<h3 id="21-the-silicon-can-the-board-cant">2.1 The silicon can; the board can't<a class="headerlink" href="#21-the-silicon-can-the-board-cant" title="Permanent link">&para;</a></h3>
+<p>The ESP32-S3 has a single native USB-OTG controller (a Synopsys DWC-OTG core) on fixed pins
+<strong>GPIO19 (D−) / GPIO20 (D+)</strong>. It is genuinely <strong>dual-role</strong>: it can be a USB <strong>device</strong> (what we use
+today, via TinyUSB / <code>esp_tinyusb</code>) <em>or</em> a USB <strong>host</strong> (via ESP-IDF's native <code>usb_host_lib</code> / the
+<code>usb_host</code> component). Espressif's own <code>usb_host_lib</code> supports <strong>Full-Speed (12 Mbps) and Low-Speed</strong>
+devices and all four transfer types (control/bulk/interrupt/isochronous); measured bulk throughput on
+an ESP32-S3 reaches <strong>~1.15 MB/s</strong>, ~95 % of the 12 Mbps FS bulk ceiling. (No High-Speed — the S3 PHY is
+FS-only. ADB is fine at FS.) [espressif usb_host docs; circuitlabs]</p>
+<p><strong>But there is exactly one USB-OTG controller.</strong> You cannot be a HID+CDC <em>device</em> for a desktop and an
+ADB <em>host</em> for a phone <strong>at the same time</strong> — it is one port, one role at a time. Role is chosen at
+init: bring up <code>esp_tinyusb</code> (device) <em>or</em> <code>usb_host_lib</code> (host), tear down and re-init to switch. That
+part is just software sequencing and is tractable.</p>
+<h3 id="22-the-blocker-vbus-a-usb-host-must-supply-5-v">2.2 The blocker: VBUS. A USB host must <em>supply</em> 5 V.<a class="headerlink" href="#22-the-blocker-vbus-a-usb-host-must-supply-5-v" title="Permanent link">&para;</a></h3>
+<p>A USB host is the side that <strong>sources VBUS</strong> (5 V) onto the bus; the device <em>detects</em> that VBUS to know a
+host is present and to enumerate. This is not optional:</p>
+<blockquote>
+<p>"USB Host won't work unless the device you plug in gets 5 V on VBUS. A USB-OTG host cable is not
+sufficient because the USB port does not provide VBUS 5 V output." [ikkaro; esp32.com forum]</p>
+</blockquote>
+<p>The known-good ESP32-S3 ADB prior art spells out the same requirement: USB-OTG mode needs
+<strong>"external 5 V VBUS power to supply the connected Android phone … min 1 A."</strong> The reference
+<strong>ESP32-S3-USB-OTG</strong> devkit solves it with an onboard <strong>boost converter</strong> (battery 3.6–4.2 V → 5 V,
+enabled by <code>BOOST_EN</code>/GPIO13).</p>
+<p>Now look at <strong>our</strong> hardware (<a href="../hardware/">HARDWARE.md</a>): the Waveshare ESP32-S3-LCD-1.47 is a
+<strong>USB-A <em>plug</em>, bus-powered</strong> board. That plug's VBUS pin is an <strong>input</strong> — it's how the whole board gets
+its 3.3 V. There is <strong>no 5 V boost, no separate power input, and no way to drive VBUS as an output.</strong> So
+the dongle cannot simultaneously (a) draw its own power from the port and (b) assert 5 V onto that same
+port to power/enumerate a phone. <strong>On this exact board, native USB-host ADB is physically impossible
+without added hardware.</strong> This is the headline blocker, and it is a <em>board</em> problem, not a <em>chip</em>
+problem.</p>
+<p>What a host-capable Portal would need (hardware revision), any one of:</p>
+<ul>
+<li>A board with a <strong>host-capable USB receptacle + an onboard 5 V boost</strong> and a <strong>separate power source</strong>
+  for the ESP32 (the ESP32-S3-USB-OTG devkit pattern). The slim USB-A-plug stick form factor goes away.</li>
+<li>A <strong>powered-OTG Y-cable / powered hub</strong> that injects 5 V VBUS from a wall/battery while the dongle
+  drives only D+/D−. Works on the bench; ugly in the field and defeats "just a stick."</li>
+<li>An <strong>external USB-host-controller IC</strong> (MAX3421E) on SPI that owns its own host port and VBUS — adds a
+  chip + a port, and you still have to supply that port's 5 V. (See §4; this is how Arduino does USB
+  host, and there's an ESP32 port of the library.)</li>
+</ul>
+<h3 id="23-role-detection-which-mode-to-boot-into">2.3 Role <em>detection</em> (which mode to boot into)<a class="headerlink" href="#23-role-detection-which-mode-to-boot-into" title="Permanent link">&para;</a></h3>
+<p>Even with host-capable hardware, the dongle must decide <strong>desktop-device vs Android-host</strong> per plug-in.
+Options, best-first:</p>
+<ul>
+<li><strong>Can't rely on OTG-ID pin.</strong> Classic USB-OTG uses the ID pin in the micro-AB connector to pick role.
+  A USB-A plug has <strong>no ID pin</strong>, so there is no electrical role signal to read. (Another reason the
+  current connector is wrong for host mode.)</li>
+<li><strong>VBUS presence.</strong> If the dongle is bus-powered and sees VBUS, <em>something is hosting it</em> → it should be
+  a <strong>device</strong> (desktop case). If a host-capable Portal is self/battery-powered and sees <strong>no</strong> external
+  VBUS on plug-in, the thing attached is passive/needs-power → candidate to <strong>become host</strong> (Android
+  case). This is the cleanest signal on a redesigned board.</li>
+<li><strong>Try-device-then-host timeout.</strong> Boot as device; if no host enumerates us within N seconds, tear down
+  and come up as host and try to enumerate <em>them</em>. Slow but robust, and matches how the Portal already
+  wants to "detect the device and run the matching profile" (DESIGN §2).</li>
+<li><strong>User/controller selection.</strong> The Portal has a screen + BOOT button and a BLE controller. The honest
+  MVP is: the operator picks "Android (ADB)" from the menu (or the asmltr app sets the profile), and the
+  dongle boots host mode deliberately. Detection automation is a polish item, not a blocker.</li>
+</ul>
+<hr />
+<h2 id="3-the-adb-wire-protocol-over-usb-what-the-host-must-speak">3. The ADB wire protocol over USB (what the host must speak)<a class="headerlink" href="#3-the-adb-wire-protocol-over-usb-what-the-host-must-speak" title="Permanent link">&para;</a></h2>
+<p>Once the dongle is a USB host and has enumerated the Android, it finds the ADB interface by <strong>USB
+interface class triplet <code>0xFF / 0x42 / 0x01</code></strong> (vendor-specific / ADB / 1), which exposes a <strong>bulk IN</strong>
+and a <strong>bulk OUT</strong> endpoint. Everything below rides those two bulk endpoints.</p>
+<h3 id="31-message-framing">3.1 Message framing<a class="headerlink" href="#31-message-framing" title="Permanent link">&para;</a></h3>
+<p>Every ADB message is a <strong>24-byte header</strong> + optional payload. Header is six little-endian <code>uint32</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>struct amessage {
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    uint32 command;      // one of the A_* command constants below
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    uint32 arg0;
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    uint32 arg1;
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    uint32 data_length;  // payload byte count that follows
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    uint32 data_crc32;   // CRC32 of the payload (sum of bytes in older impls; CRC32 per spec)
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    uint32 magic;        // == command XOR 0xFFFFFFFF  (integrity / framing check)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>};
+</code></pre></div>
+<p>Command constants (ASCII little-endian — the four letters are legible in a hexdump):</p>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>value</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>A_CNXN</code></td>
+<td><code>0x4E584E43</code> ("CNXN")</td>
+<td>connect / banner exchange</td>
+</tr>
+<tr>
+<td><code>A_AUTH</code></td>
+<td><code>0x48545541</code> ("AUTH")</td>
+<td>authentication (RSA)</td>
+</tr>
+<tr>
+<td><code>A_OPEN</code></td>
+<td><code>0x4E45504F</code> ("OPEN")</td>
+<td>open a stream to a service</td>
+</tr>
+<tr>
+<td><code>A_OKAY</code></td>
+<td><code>0x59414B4F</code> ("OKAY")</td>
+<td>ready / flow-control ack</td>
+</tr>
+<tr>
+<td><code>A_WRTE</code></td>
+<td><code>0x45545257</code> ("WRTE")</td>
+<td>write data on a stream</td>
+</tr>
+<tr>
+<td><code>A_CLSE</code></td>
+<td><code>0x45534C43</code> ("CLSE")</td>
+<td>close a stream</td>
+</tr>
+<tr>
+<td><code>A_SYNC</code></td>
+<td><code>0x434E5953</code> ("SYNC")</td>
+<td>(internal/sync service)</td>
+</tr>
+<tr>
+<td><code>A_STLS</code></td>
+<td><code>0x534C5453</code> ("STLS")</td>
+<td>upgrade to TLS (Android 9+ option)</td>
+</tr>
+</tbody>
+</table>
+<p><code>A_VERSION = 0x01000001</code>; modern <code>MAX_PAYLOAD = 256*1024</code> (older peers negotiate down to <code>4096</code>). Take
+the <strong>min</strong> of the two sides' maxdata from the CNXN exchange.</p>
+<h3 id="32-handshake-step-by-step">3.2 Handshake, step by step<a class="headerlink" href="#32-handshake-step-by-step" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>CNXN (host → device):</strong> <code>command=A_CNXN, arg0=A_VERSION, arg1=MAX_PAYLOAD,</code>
+   <code>payload="host::features=cmd,shell_v2,stat_v2,..."</code> (a NUL-terminated <strong>banner</strong>). The banner's
+   leading token is <code>host::</code>; the <code>features=</code> list is what makes modern <code>shell_v2</code>/<code>exec</code> work.</li>
+<li><strong>AUTH dance (device → host, then host → device):</strong> a secured device replies with
+   <strong><code>A_AUTH, arg0=ADB_AUTH_TOKEN(1)</code></strong> and a <strong>20-byte random token</strong> (SHA-1-sized) in the payload.
+   The host must prove it holds a trusted key:</li>
+<li><strong><code>A_AUTH, arg0=ADB_AUTH_SIGNATURE(2)</code>, payload = RSA signature of the token.</strong> The signature is
+     <strong>RSASSA-PKCS1-v1.5</strong> over the token with the <strong>SHA-1 DigestInfo prefix</strong> prepended, using an
+     <strong>RSA-2048</strong> private key. If the device already trusts this public key (seen before), it answers
+     CNXN and we're connected — <strong>no prompt</strong>.</li>
+<li>If the device <em>doesn't</em> recognise the key, it NAKs; the host then sends
+     <strong><code>A_AUTH, arg0=ADB_AUTH_RSAPUBLICKEY(3)</code>, payload = the public key</strong> in Android's <code>ANDROID_PUBKEY</code>
+     format (little-endian modulus + <code>n0inv</code> + <code>rr</code>, base64, with a trailing <code>user@host</code> label). <strong>This
+     is when the Android pops the "Allow USB debugging? [RSA key fingerprint] [ ] Always allow"
+     dialog.</strong> A human must tap <strong>Allow</strong> on the device screen.</li>
+<li><strong>This consent gate is a feature, not a bug</strong> — it aligns exactly with the Portal trust model
+     (DESIGN §8): the dongle can only drive an Android that a present human explicitly authorised, and
+     "Always allow" persists the dongle's key so repeat plug-ins are silent. (<code>adbd</code> must be enabled:
+     Developer Options → USB debugging. That's itself a consent step.)</li>
+<li><strong>CNXN (device → host):</strong> on accepted auth the device returns its own CNXN with banner
+   <code>device::...</code> (model/features). Connected.</li>
+</ol>
+<h3 id="33-streams-shell-screencap-input-injection">3.3 Streams: shell, screencap, input injection<a class="headerlink" href="#33-streams-shell-screencap-input-injection" title="Permanent link">&para;</a></h3>
+<p>Streams are multiplexed over the one bulk pair by <code>(local-id, remote-id)</code> in <code>arg0/arg1</code>:</p>
+<ul>
+<li><strong>OPEN a service:</strong> <code>A_OPEN, arg0=local_id, payload="&lt;service&gt;\0"</code>. Device replies <code>A_OKAY</code> (accepted,
+  gives its <code>remote_id</code>) or <code>A_CLSE</code> (refused).</li>
+<li><strong>Data flows as <code>A_WRTE</code></strong>, each answered by an <code>A_OKAY</code> (ADB's per-message flow control — you must
+  OKAY before the peer sends the next WRTE). <strong>CLSE</strong> tears the stream down.</li>
+<li>Services we care about (all just service strings on OPEN):</li>
+<li><strong><code>shell:&lt;cmd&gt;</code></strong> (or <code>shell,v2:&lt;cmd&gt;</code>) — run a command, stdout/stderr come back as <code>A_WRTE</code>
+    payloads. <code>shell:</code> with no command = interactive shell. This is the workhorse.</li>
+<li><strong>Input injection is just shell:</strong> <code>shell:input tap &lt;x&gt; &lt;y&gt;</code>, <code>shell:input swipe ...</code>,
+    <code>shell:input text '...'</code>, <code>shell:input keyevent &lt;KEYCODE&gt;</code>. No special service — if we have
+    <code>shell:</code> we have full touch/key control of the UI.</li>
+<li><strong>Screenshots:</strong> <code>shell:screencap -p</code> streams a PNG to stdout (beware: some shells mangle <code>\n</code>;
+    <code>screencap -p | base64</code> or writing to <code>/sdcard</code> then pulling avoids that). Alternatively the
+    <code>framebuffer:</code> service streams raw RGBA. Either way bytes come back over the WRTE stream.</li>
+<li><strong>File pull/push:</strong> the <code>sync:</code> service (STAT/SEND/RECV sub-protocol) — needed only if we want
+    <code>adb pull/push</code>; not required for shell+screenshot control.</li>
+<li><strong><code>exec:&lt;cmd&gt;</code></strong> — like shell but a clean binary stdout (no PTY line-ending translation) — the
+    better channel for <code>exec:screencap -p</code> to get an unmangled PNG.</li>
+</ul>
+<p>For our purposes the minimal viable surface is <strong>CNXN + AUTH + <code>shell:</code></strong> — that alone gives commands,
+<code>input</code> UI control, and <code>screencap</code>.</p>
+<hr />
+<h2 id="4-rsa-auth-on-the-esp32-crypto-key-storage">4. RSA auth on the ESP32 (crypto + key storage)<a class="headerlink" href="#4-rsa-auth-on-the-esp32-crypto-key-storage" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The maths is already on-board.</strong> ESP-IDF ships <strong>mbedTLS</strong> with RSA-2048 and the hardware RSA
+  accelerator; signing one 20-byte token per connection is trivial (sub-100 ms, once). We do <strong>not</strong> need
+  wolfSSL for the classic USB-ADB path (the prior-art project pulls wolfSSL only for the <em>wireless</em>
+  Android-11+ SPAKE2/TLS path — see §5.1; classic USB AUTH is plain RSA-PKCS1v1.5 + SHA-1 and mbedTLS
+  covers it).</li>
+<li><strong>Signature detail that trips people up:</strong> ADB does <strong>not</strong> sign a SHA-1 <em>hash of</em> the token — it signs
+  the 20-byte token <em>as if it were already the digest</em>, i.e. prepend the 15-byte SHA-1 ASN.1 DigestInfo
+  prefix to the raw token and RSA-sign that. Get this exact or the device silently rejects the signature.</li>
+<li><strong>Public-key format:</strong> Android's <code>ANDROID_PUBKEY</code> (not PEM/DER) — 2048-bit modulus as little-endian
+  32-bit words, plus Montgomery <code>n0inv</code> and <code>rr</code> precompute, base64-encoded, <code>label</code> appended. We must
+  emit this byte-for-byte for the RSAPUBLICKEY message.</li>
+<li><strong>Key storage:</strong> generate the RSA-2048 keypair <strong>once on-device</strong>, store in <strong>NVS on the encrypted
+  flash</strong> (the board already plans flash-encryption + secure boot + eFuse, DESIGN §8). The private key
+  never leaves the dongle. The dongle's ADB identity is then a stable, per-dongle credential — and
+  because the <em>first</em> use requires the human "Allow USB debugging" tap, enrolling the dongle's key onto a
+  target Android is itself an auditable consent event (ties to DESIGN §8 trust + Cast attribution).</li>
+<li><strong>Optional:</strong> reuse the same key tiering as the vault-kill-switch (§8b) so the ADB identity can live in
+  the dongle-only encrypted tier — pull the dongle, the Android trust is moot because the key is gone.</li>
+</ul>
+<hr />
+<h2 id="5-prior-art-what-already-exists-and-whats-reusable">5. Prior art (what already exists, and what's reusable)<a class="headerlink" href="#5-prior-art-what-already-exists-and-whats-reusable" title="Permanent link">&para;</a></h2>
+<h3 id="51-wolfxalpha4esp32-adb-client-the-direct-precedent-mit">5.1 <code>wolfxalpha4/esp32-adb-client</code> — the direct precedent (MIT)<a class="headerlink" href="#51-wolfxalpha4esp32-adb-client-the-direct-precedent-mit" title="Permanent link">&para;</a></h3>
+<p>A <strong>standalone dual-mode (USB-OTG <strong>and</strong> Wi-Fi) ADB host for the ESP32-S3.</strong> This is the single most
+relevant project found.
+- <strong>USB host via the ESP32-S3 native USB peripheral (GPIO19/20)</strong> — i.e. ESP-IDF <code>usb_host_lib</code>, not an
+  external controller. Confirms native-host ADB is achievable on S3 silicon.
+- <strong>Classic RSA AUTH</strong> with keys in <code>adb_keys.h</code>; <strong>Android-11+ wireless pairing</strong> via <strong>SPAKE2 over
+  Curve25519 + TLS 1.3</strong> using <strong>wolfSSL</strong>; <strong>port-5555 TCP/IP</strong> auto-discovery (subnet scan) for
+  Android 4.4–15.
+- Interactive serial CLI runs <code>getprop</code>, <code>pm list packages</code>, <code>input keyevent</code>, etc. — proving the
+  shell/input surface we need.
+- <strong>Explicitly requires external 5 V VBUS ≥1 A to power the phone in USB-OTG mode</strong> — independent
+  confirmation of our §2.2 blocker.
+- <strong>Maturity: early</strong> (≈5 commits, few stars). Its own README notes classic <strong>TCP/IP works reliably but
+  USB-OTG mode has "occasional hiccups."</strong> Treat as a <strong>reference implementation to study/port</strong>, not a
+  turnkey dependency — but MIT-licensed, so we can lift the AUTH/stream logic.</p>
+<h3 id="52-general-esp32-s3-usb-host-building-blocks">5.2 General ESP32-S3 USB-host building blocks<a class="headerlink" href="#52-general-esp32-s3-usb-host-building-blocks" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>tanakamasayuki/EspUsbHost</code></strong> — Arduino-layer USB host for ESP32-S3 (keyboard/mouse class); good
+  reference for driving <code>usb_host_lib</code> bulk/interrupt transfers, not ADB-specific.</li>
+<li><strong>Espressif <code>usb_host_lib</code></strong> (the <code>usb_host</code> component) and the <code>esp-usb</code> managed components — the
+  supported native host stack; mature enough for class drivers (CDC-ACM, MSC, HID host all exist as
+  Espressif components). ADB would be "just another" vendor-specific class driver over bulk endpoints.</li>
+<li><strong><code>espressif/esp-usb-bridge</code></strong> — S2/S3 as a USB↔UART/JTAG bridge; <em>not</em> ADB, but a worked example of
+  the S3 owning a USB link.</li>
+</ul>
+<h3 id="53-external-controller-route-max3421e">5.3 External-controller route (MAX3421E)<a class="headerlink" href="#53-external-controller-route-max3421e" title="Permanent link">&para;</a></h3>
+<p>The classic <strong>Arduino <code>USB_Host_Shield_2.0</code></strong> (felis) + a <strong>MAX3421E</strong> USB-host IC over SPI, with an
+ESP32 port (<code>touchgadget/USB_Host_Shield_2.0_feather_esp32</code>). This gives a <strong>second, independent USB
+host port with its own VBUS</strong> — sidestepping the "one OTG controller, wrong connector" problem — at the
+cost of an extra IC, SPI wiring (SS/INT/SCK/MISO/MOSI), and you still supply that port's 5 V. No ready
+ADB layer exists on it (the felis library is HID/FTDI/etc.), so you'd port the ADB protocol onto it
+yourself. Viable for a bench/hardware-revision Portal, not the slim stick.</p>
+<h3 id="54-tinyusb-host">5.4 TinyUSB host<a class="headerlink" href="#54-tinyusb-host" title="Permanent link">&para;</a></h3>
+<p>TinyUSB <em>does</em> have a host stack (<code>tuh_*</code>), but on ESP32 the <strong>supported/mature host path is Espressif's
+<code>usb_host_lib</code></strong>, and Espressif's TinyUSB integration is primarily the <strong>device</strong> side. For ADB-host we'd
+build on <code>usb_host_lib</code> (as the prior art does), not <code>tuh_*</code>.</p>
+<hr />
+<h2 id="6-mapping-adb-onto-the-asmltr-drive-model-ble-execioback">6. Mapping ADB onto the asmltr drive model (BLE exec/ioback)<a class="headerlink" href="#6-mapping-adb-onto-the-asmltr-drive-model-ble-execioback" title="Permanent link">&para;</a></h2>
+<p>The good news: <strong>ADB control drops into the existing drive contract with almost no new surface.</strong> From
+asmltr's side, Android control should feel like the Windows REPL. The BLE GATT already has the two
+characteristics we need (PORTAL-DRIVE §1):</p>
+<table>
+<thead>
+<tr>
+<th>asmltr concept</th>
+<th>desktop (CDC loop)</th>
+<th>Android (ADB)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>send a command</td>
+<td><code>exec</code> char, <code>mode 0x02</code> → CDC-TX → shell</td>
+<td><code>exec</code> char, <strong>new <code>mode 0x03</code> (adb-shell)</strong> → dongle opens <code>shell:&lt;cmd&gt;</code> stream</td>
+</tr>
+<tr>
+<td>get output back</td>
+<td><code>ioback</code> notify = CDC-RX bytes</td>
+<td><code>ioback</code> notify = ADB <code>A_WRTE</code> stream payloads</td>
+</tr>
+<tr>
+<td>screenshot</td>
+<td>typed one-liner → JPEG bytes over CDC</td>
+<td><code>exec:screencap -p</code> → PNG → <strong>base64</strong> → chunked over <code>ioback</code></td>
+</tr>
+<tr>
+<td>HID typing</td>
+<td><code>exec</code> <code>mode 0x01</code> keystroke script</td>
+<td><strong>still available</strong> (blind nav, pre-consent)</td>
+</tr>
+</tbody>
+</table>
+<p>Concretely:
+- The <code>portal-drive</code> skill's per-OS recipe object already reserves <strong><code>transport: "adb"</code></strong> for Android
+  (PORTAL-DRIVE §3). That recipe carries: enable-USB-debugging guidance for the human, the "tap Allow"
+  consent note, and the service strings (<code>shell:</code>, <code>exec:screencap -p</code>).
+- <strong>Relay shape is unchanged</strong> (PORTAL-DRIVE §2): <code>{type:"portal.exec", mode:"adb", data:"&lt;base64 cmd&gt;"}</code>
+  down; <code>{type:"portal.io", data:"&lt;base64&gt;"}</code> up. The phone app relays bytes blind — it doesn't need to
+  know ADB; the <strong>dongle</strong> owns the ADB state machine (CNXN/AUTH/stream framing) and only ever exposes
+  "command in / output out" to BLE. That keeps the BLE surface identical to the desktop loop.
+- <strong>Throughput:</strong> BLE-via-phone is ~10–30 KB/s (DESIGN §6a), the real bottleneck — <strong>not</strong> the FS-USB
+  link (~1 MB/s). So: shell text is instant; a <code>screencap</code> PNG is a <strong>few-second</strong> downscaled/JPEG
+  snapshot, same UX as the desktop CDC screenshot. Live screen stays the job of post-enroll mesh RDP.
+- <strong>Enrollment</strong> (DESIGN §6, PORTAL-DRIVE §4) over ADB is cleaner than desktop: no blind terminal-open
+  needed — <code>shell:</code> <em>is</em> the shell. The Android profile's <code>enroll()</code> runs <code>pm</code>/<code>settings</code>/<code>am</code> + drops
+  an agent (or Termux/mesh client) via <code>shell:</code> + <code>sync:</code> push; teardown uninstalls symmetrically.</p>
+<hr />
+<h2 id="7-the-wi-fi-adb-escape-hatch-sidesteps-the-vbus-blocker-but-reopens-a-settled-decision">7. The Wi-Fi-ADB escape hatch (sidesteps the VBUS blocker — but reopens a settled decision)<a class="headerlink" href="#7-the-wi-fi-adb-escape-hatch-sidesteps-the-vbus-blocker-but-reopens-a-settled-decision" title="Permanent link">&para;</a></h2>
+<p>The prior art is <strong>dual-mode</strong> for a reason: <strong>ADB also runs over TCP</strong> (<code>adb tcpip 5555</code>, or Android
+11+ <strong>wireless debugging</strong> with SPAKE2 pairing). If the dongle talks ADB over Wi-Fi, <strong>there is no USB
+host, no VBUS, no role switch, no connector problem</strong> — the blocker in §2 simply vanishes, and the same
+CNXN/AUTH/stream logic from §3 runs over a socket instead of bulk endpoints.</p>
+<p>The catch: <strong>DESIGN §3 deliberately dropped Wi-Fi from the dongle</strong> (BLE-only, "the dongle never needs
+Wi-Fi credentials or an AP"). Wi-Fi-ADB reopens that. Honest trade:
+- <strong>Pro:</strong> works on the <em>current</em> board (it has Wi-Fi b/g/n), no hardware revision, reuses all the ADB
+  protocol work, and Android-11+ wireless pairing has its own strong consent (QR/6-digit code).
+- <strong>Con:</strong> the dongle needs to join a network (credentials, or the target Android's hotspot), and the
+  target must have wireless debugging on. It's no longer "plug a stick into a phone with nothing else" —
+  it's "pair the dongle to the phone's ADB over the LAN." That's a different product gesture and
+  contradicts the §3 BLE-only stance.</p>
+<p><strong>Recommendation on this:</strong> keep it documented as the <strong>fastest path to a <em>working ADB demo</em></strong> (prove the
+AUTH + shell + screencap logic over TCP on the hardware we have, today), but treat USB-host ADB as the
+"true Portal" gesture to be unlocked by a hardware revision. Decide with the operator before adding Wi-Fi back
+to the dongle — it's a product-identity call, not just an engineering one.</p>
+<hr />
+<h2 id="8-feasibility-effort-risks">8. Feasibility, effort, risks<a class="headerlink" href="#8-feasibility-effort-risks" title="Permanent link">&para;</a></h2>
+<p><strong>Feasibility verdict:</strong>
+- <strong>ADB protocol + RSA AUTH + shell/screencap/input on ESP32-S3:</strong> <em>proven</em> (mbedTLS + <code>usb_host_lib</code>;
+  prior art exists, MIT). <strong>Realistic.</strong>
+- <strong>On the <em>current</em> Waveshare USB-A-plug bus-powered board, via native USB host:</strong> <strong>not possible</strong> —
+  cannot source VBUS. Hard blocker.
+- <strong>On a host-capable Portal hardware revision (boost + separate power + host receptacle):</strong> realistic,
+  medium effort.
+- <strong>Over Wi-Fi-ADB on the current board:</strong> realistic <em>now</em>, but reopens the BLE-only decision.</p>
+<p><strong>Biggest risks, ranked:</strong>
+1. <strong>VBUS / connector / power (hardware)</strong> — the gating issue; needs a board redesign for native host.
+2. <strong><code>usb_host_lib</code> host-mode robustness</strong> — the prior art itself reports USB-OTG "hiccups" vs. reliable
+   TCP. Full-Speed-only, single-device, async-only, no transfer timeouts — all workable, but the host
+   stack is less battle-tested than the device stack we already ship.
+3. <strong>Role switching</strong> — one OTG controller means device↔host is a teardown/re-init, and with a USB-A
+   plug there's no ID pin to detect role. Needs a deliberate detection strategy (§2.3) or manual select.
+4. <strong>Throughput</strong> — <em>not</em> a real risk: BLE is the bottleneck, not USB; screenshots are snapshots by
+   design.
+5. <strong>ADB protocol exactness</strong> — the SHA-1-DigestInfo-prefix signing quirk and <code>ANDROID_PUBKEY</code> format are
+   easy to get subtly wrong (silent auth failure). Mitigated by porting the MIT prior art.
+6. <strong>Android fragmentation</strong> — <code>screencap</code> stdout mangling, <code>shell_v2</code> vs v1, OEM Developer-Options
+   differences. Manageable, matches the prior art's Android 4.4–15 coverage.</p>
+<hr />
+<h2 id="9-staged-build-plan-rungs">9. Staged build plan (rungs)<a class="headerlink" href="#9-staged-build-plan-rungs" title="Permanent link">&para;</a></h2>
+<p>Rungs are independent enough to stop at any point with value banked.</p>
+<ul>
+<li><strong>R8.0 — HID-only Android (ships on current board, no new hardware).</strong> Recognise Android at
+  enumeration; the Android recipe uses <strong>blind HID navigation</strong> (already-built actuator) for
+  tap/type/swipe-by-coordinate. No feedback loop. <em>Delivers "drive an Android from the phone app today,"
+  honestly limited.</em> This is the <strong>interim</strong> and it needs nothing new.</li>
+<li><strong>R8.1 — ADB protocol library, validated over Wi-Fi/TCP (current board).</strong> Build the CNXN/AUTH(RSA via
+  mbedTLS)/OPEN/WRTE/OKAY/CLSE state machine + <code>shell:</code>/<code>exec:screencap</code> as a pure, transport-agnostic
+  module. Validate it against a real Android over <strong>TCP</strong> (<code>adb tcpip 5555</code>) on the hardware we have —
+  this de-risks <em>all</em> the protocol/crypto work without touching USB host. Prove the "Allow USB debugging"
+  consent + silent-reconnect-after-Always-allow flow.</li>
+<li><strong>R8.2 — hardware spike: native USB host on an S3 with VBUS.</strong> On an <strong>ESP32-S3-USB-OTG devkit</strong> (or
+  current board + powered-OTG cable injecting 5 V), bring up <code>usb_host_lib</code>, enumerate an Android,
+  bind the ADB interface (<code>0xFF/0x42/0x01</code>), and run R8.1's state machine over <strong>bulk endpoints</strong>.
+  Measure reliability. This answers "does native host ADB actually hold up" before committing to board
+  design.</li>
+<li><strong>R8.3 — role selection + Portal integration.</strong> Implement device↔host mode switching (boot-as-device,
+  fall back to host; or controller-selected profile) and wire ADB into the BLE drive contract: new
+  <code>exec</code> <code>mode 0x03</code>, <code>ioback</code> carrying ADB stream bytes, <code>transport:"adb"</code> recipe in the <code>portal-drive</code>
+  skill, screenshot = base64 PNG over <code>ioback</code>.</li>
+<li><strong>R8.4 — Android enroll/teardown profile.</strong> <code>shell:</code>-driven mesh-client install + agent drop + register
+  device (ssh/rd), symmetric uninstall, victory-lap on the Android's own screen (a toast / activity).</li>
+<li><strong>R8.5 (if pursued) — host-capable Portal hardware revision.</strong> Spec a Portal variant with a
+  host-capable USB receptacle, 5 V boost, and its own power so the "stick into a phone, ADB, done"
+  gesture works without a cable. Product decision with the operator.</li>
+</ul>
+<hr />
+<h2 id="10-recommendation">10. Recommendation<a class="headerlink" href="#10-recommendation" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Ship R8.0 (blind HID Android) now</strong> — it's the only Android control the current board can do, it
+   reuses the existing HID actuator, and it's honest about having no feedback. Do this first.</li>
+<li><strong>Do R8.1 next: build the ADB stack and prove it over TCP/Wi-Fi.</strong> All the genuinely hard parts
+   (RSA AUTH signing quirk, <code>ANDROID_PUBKEY</code>, the stream state machine, consent flow, screencap) are
+   <em>transport-independent</em> and can be fully validated on the hardware we already have, with zero VBUS
+   drama. Port the MIT <code>esp32-adb-client</code> AUTH/stream code rather than reinventing it. This is the
+   highest-leverage work and it de-risks everything downstream.</li>
+<li><strong>Treat native USB-host ADB as a hardware-revision feature (R8.2 → R8.5), not a current-board
+   feature.</strong> Be explicit with the operator: the slim USB-A-plug, bus-powered dongle we have <strong>cannot source
+   VBUS</strong> and therefore cannot be a USB host for a phone. A host-capable Portal needs a different
+   board (boost + separate power + host receptacle). The chip can do it; this board can't.</li>
+<li><strong>Flag the Wi-Fi-ADB path as a product decision, not just an engineering one.</strong> It's the fastest route
+   to a working ADB demo and it dodges the VBUS blocker entirely — but it reopens DESIGN §3's deliberate
+   BLE-only stance. Don't quietly add Wi-Fi back to the dongle; raise it.</li>
+<li><strong>Keep the consent gate central.</strong> The "enable USB debugging" + on-device "Allow this RSA key" taps
+   are exactly the human-in-the-loop authorization the Portal trust model wants (DESIGN §8). Store the
+   dongle's RSA identity in encrypted flash (optionally the vault-kill-switch tier) so it's a stable,
+   revocable, attributable credential.</li>
+</ol>
+<p><strong>One-line bottom line:</strong> <em>ADB control of Android from the Portal is a sound design and has working
+ESP32-S3 precedent — but it's a USB-<strong>host</strong> feature that needs VBUS the current board can't supply, so
+build the (transport-independent) ADB stack now over TCP, keep blind-HID as the shipping interim, and
+gate native USB-host ADB on a host-capable Portal hardware revision.</em></p>
+<hr />
+<h3 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://github.com/wolfxalpha4/esp32-adb-client">wolfxalpha4/esp32-adb-client</a> — dual-mode USB-OTG + Wi-Fi ADB host for ESP32-S3 (MIT); confirms native-host ADB and the external-5 V-VBUS requirement.</li>
+<li><a href="https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/usb_host.html">ESP-IDF USB Host API (usb_host_lib)</a> — FS/LS only, all transfer types, async-only, single device, config-1-only.</li>
+<li><a href="https://circuitlabs.net/usb-implementation-in-esp32-series/">USB implementation in the ESP32 series — circuitlabs.net</a> — ~1.15 MB/s FS bulk throughput measured on S3.</li>
+<li><a href="https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-usb-otg/user_guide.html">ESP32-S3-USB-OTG devkit user guide</a> — onboard 5 V boost (BOOST_EN/GPIO13) to power a downstream device.</li>
+<li><a href="https://www.ikkaro.net/esp32-as-usb-host/">ESP32 as USB Host — ikkaro.net</a> &amp; <a href="https://www.esp32.com/viewtopic.php?t=27826">ESP32 forum: USB host on DevKitC-1</a> — "won't work unless the device gets 5 V on VBUS."</li>
+<li><a href="https://github.com/tanakamasayuki/EspUsbHost">tanakamasayuki/EspUsbHost</a> — ESP32-S3 native USB host reference (HID).</li>
+<li><a href="https://github.com/felis/USB_Host_Shield_2.0">felis/USB_Host_Shield_2.0</a> &amp; <a href="https://github.com/touchgadget/USB_Host_Shield_2.0_feather_esp32">touchgadget ESP32 port</a> — MAX3421E external-USB-host route.</li>
+<li><a href="https://github.com/espressif/esp-usb-bridge">espressif/esp-usb-bridge</a> — S2/S3 USB bridge (not ADB; S3-owns-USB example).</li>
+<li>ADB wire protocol constants (<code>A_CNXN/A_AUTH/A_OPEN/A_WRTE/A_OKAY/A_CLSE</code>, AUTH TOKEN/SIGNATURE/RSAPUBLICKEY, 24-byte header, <code>ANDROID_PUBKEY</code>, RSA-2048 PKCS1v1.5 + SHA-1 DigestInfo signing) — AOSP <code>platform/packages/modules/adb</code> (<code>protocol.txt</code>, <code>types.h</code>, <code>auth.cpp</code>, <code>crypto/</code>).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../drive/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Remote drive">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Remote drive
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../REMOTE-DESKTOP/" class="md-footer__link md-footer__link--next" aria-label="Next: Remote desktop">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Remote desktop
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.tracking", "navigation.footer", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
