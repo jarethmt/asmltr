@@ -176,3 +176,27 @@ test('a malformed rules file keeps the last good rules instead of failing open',
     if (prev === undefined) delete process.env.ASMLTR_AUTH_RULES; else process.env.ASMLTR_AUTH_RULES = prev;
   }
 });
+
+test('loginRedirect sends browsers to the login screen but leaves API callers a 401', () => {
+  const ctx = { host: 'app.example.com', path: '/deep/page', ip: '203.0.113.1' };
+  const rd = 'https://auth.example.com/';
+
+  // a browser navigation gets a redirect carrying the original URL
+  const htmlReq = { headers: { accept: 'text/html,application/xhtml+xml', 'x-forwarded-proto': 'https' } };
+  const to = R.loginRedirect(htmlReq, ctx, rd);
+  assert.ok(to, 'a browser must get a redirect target');
+  const u = new URL(to);
+  assert.strictEqual(u.origin + u.pathname, 'https://auth.example.com/');
+  assert.strictEqual(u.searchParams.get('rd'), 'https://app.example.com/deep/page');
+
+  // Sec-Fetch-Mode: navigate also counts as a browser navigation
+  assert.ok(R.loginRedirect({ headers: { 'sec-fetch-mode': 'navigate' } }, ctx, rd));
+
+  // XHR / API / CLI callers must NOT be redirected — they need the actionable status
+  assert.strictEqual(R.loginRedirect({ headers: { accept: 'application/json' } }, ctx, rd), null);
+  assert.strictEqual(R.loginRedirect({ headers: {} }, ctx, rd), null);
+  // and with nothing configured there is no redirect at all
+  assert.strictEqual(R.loginRedirect(htmlReq, ctx, ''), null);
+  // a malformed target is ignored rather than throwing on the request path
+  assert.strictEqual(R.loginRedirect(htmlReq, ctx, 'not a url'), null);
+});

@@ -973,14 +973,21 @@ app.get('/v2/auth/verify', (req, res) => {
 
   const s = auth.verifySession(auth.tokenFromReq(req));
   // 401 (not 403) while unauthenticated, so the proxy sends the user to log in rather than
-  // showing a dead end. Only an identified-but-unauthorised user gets 403.
-  if (!s) return res.status(401).json({ error: 'authentication required' });
+  // showing a dead end. Only an identified-but-unauthorised user gets 403. A browser gets a
+  // 302 to the login screen (the `?rd=` convention), while API callers keep the actionable 401.
+  if (!s) {
+    const to = authRules.loginRedirect(req, ctx, req.query && req.query.rd);
+    if (to) return res.redirect(302, to);
+    return res.status(401).json({ error: 'authentication required' });
+  }
 
   const groups = auth.groupsFor(s.sub);
   const decision = authRules.evaluate({ ...ctx, user: s.sub, groups });
   if (decision.policy === 'deny') return res.status(403).json({ error: 'not authorized for this resource' });
   if (decision.policy === 'two_factor' && !authRules.sessionIsTwoFactor(s)) {
     // Signed in, but this resource needs a second factor — send them back to step up.
+    const to = authRules.loginRedirect(req, ctx, req.query && req.query.rd);
+    if (to) return res.redirect(302, to);
     return res.status(401).json({ error: 'second factor required for this resource', totp_required: true });
   }
   res.setHeader('Remote-User', s.sub); // identity header for the proxied service (forward-auth)

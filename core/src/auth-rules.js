@@ -225,8 +225,30 @@ function sessionIsTwoFactor(session) {
   return amr.some((m) => m === 'totp' || m === 'recovery' || m === 'passkey' || m === 'mfa');
 }
 
+/**
+ * Where to send an unauthenticated BROWSER so it can log in — the equivalent of the `?rd=` redirect
+ * the previous gate performed, so landing on a protected service still presents a login screen
+ * instead of a bare 401. `rd` comes from the proxy's forward-auth URL (?rd=...) or
+ * ASMLTR_AUTH_LOGIN_URL. Returns null for non-browser callers (XHR/API/CLI), which must keep
+ * getting a 401 they can act on rather than an HTML redirect they cannot follow.
+ */
+function loginRedirect(req, ctx, rd) {
+  const target = rd || process.env.ASMLTR_AUTH_LOGIN_URL || '';
+  if (!target) return null;
+  const accept = String((req.headers || {}).accept || '');
+  const mode = String((req.headers || {})['sec-fetch-mode'] || '');
+  const wantsHtml = accept.includes('text/html') || mode === 'navigate';
+  if (!wantsHtml) return null;
+  const proto = (req.headers || {})['x-forwarded-proto'] || 'https';
+  const original = `${proto}://${ctx.host}${ctx.path || '/'}`;
+  let u;
+  try { u = new URL(target); } catch (_) { return null; }
+  u.searchParams.set('rd', original); // let the login screen return the user where they were going
+  return u.toString();
+}
+
 module.exports = {
-  evaluate, contextFromRequest, sessionIsTwoFactor, load,
+  evaluate, contextFromRequest, sessionIsTwoFactor, load, loginRedirect,
   // exported for tests
   ipInCidr, ipToBig, domainMatches, resourcesMatch, subjectMatches, normalise,
 };

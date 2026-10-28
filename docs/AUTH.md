@@ -191,6 +191,21 @@ decide host, path and address, and they are trusted — core binds to localhost,
 can reach it. On a pass, the resolved identity goes back as `Remote-User` (plus `Remote-Groups`
 when the account has groups).
 
+**Sending people to the login screen.** A bare 401 is a dead end for someone who just clicked a
+link, so point the gate at a login URL and browsers get a `302` there instead, carrying where they
+were headed in `rd`:
+
+```yaml
+    asmltr-auth:
+      forwardAuth:
+        address: "http://<core-host>:<port>/v2/auth/verify?rd=https://asmltr.example.com/"
+```
+
+`ASMLTR_AUTH_LOGIN_URL` sets the same thing globally. The redirect is only issued to clients that
+asked for HTML (`Accept: text/html`, or `Sec-Fetch-Mode: navigate`) — XHR, API and CLI callers keep
+the actionable `401`/`403` they can handle, which is why this can be enabled without breaking
+programmatic access.
+
 ## OIDC provider (phase F)
 
 `ASMLTR_OIDC=on` mounts a standards **OAuth2/OIDC provider** (panva `oidc-provider`) at `<origin>/oidc` —
