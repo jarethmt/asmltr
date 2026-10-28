@@ -302,6 +302,44 @@ TUI, and the dashboard, and can be steered/taken over. See the
 
 ---
 
+## Peers: other Claude Code sessions on this box
+
+```
+asmltr peers                 # live Claude Code sessions, from `claude agents --json`
+asmltr peers --all           # include finished background sessions
+asmltr peers --cwd ~/repo    # only sessions started under a directory
+```
+
+Claude Code 2.1.x gives sessions a name, a status and mailboxes, so a session can list its peers and
+message one by name. `asmltr peers` reads that roster and prints it next to what asmltr knows:
+
+```
+ID        KIND        AGE   STATE    ASMLTR  NAME  (@where)
+3b3a097d  background  108d  blocked  no      automated filament shop access  @op
+fb44cbe4  background  4h    working  no      slicer work  @worktree-a
+9e49cb66  background  35m   working  no      pr review  @repo
+```
+
+`blocked` means the session is waiting on a human rather than working, which is worth being able to
+see: a long-blocked session may be parked deliberately, or it may be one you forgot you started, and
+the list does not know which. The `ASMLTR` column says whether asmltr already tracks that session
+through the `claude-code` connector's hooks, matched on session id, so `no` means nothing in the
+dashboard mentions it.
+
+These are **peers, not asmltr sessions**. asmltr did not start them, they are listed separately from
+`asmltr ls`, and asmltr cannot deliver a message into one: `SendMessage` runs inside a session over a
+per-session socket with no supported entry point from outside, so nothing here speaks it
+([#166](https://github.com/jarethmt/asmltr/issues/166)).
+
+The other direction needs no new machinery. A Claude session has Bash, so `asmltr send`,
+`asmltr announce` and `asmltr notify` already reach asmltr's channels and mailbox from inside one.
+
+An empty list says why it is empty: no `claude` on `PATH` reads differently from nothing running.
+`ASMLTR_CLAUDE_BIN` picks the binary and `ASMLTR_CLAUDE_AGENTS_TIMEOUT_MS` bounds the call, which
+defaults to 5s so a wedged CLI cannot hang the command.
+
+---
+
 ## Update
 
 Report the installed version and pull the latest, from the terminal.
