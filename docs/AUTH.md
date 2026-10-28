@@ -75,7 +75,7 @@ linkage, OIDC provider) come *after* the session gate is solid.
 | **B — Enforcement + login UI** | nginx `auth_request` → `/v2/auth/verify` gates browser traffic; GUI login + first-run screen; then **replace Authelia** on this box | ✅ shipped (Authelia cutover pending first-run) |
 | **C — 2FA** | TOTP enrollment/verify + one-time recovery codes (✅); WebAuthn passkey (pending) | ✅ TOTP shipped |
 | **D — OIDC client** | external-IdP login (GitHub + Google), link-based, off unless configured | ✅ shipped |
-| **E — Forward-auth provider** | `/v2/auth/verify` + cookie-domain sessions + optional allowlist + identity header (Authelia parity for other services) | ✅ shipped |
+| **E — Forward-auth provider** | `/v2/auth/verify` + cookie-domain sessions + identity header, with first-match-wins **access rules** over domain/path/subject/network → policy (see *Access rules*) | ✅ shipped |
 | **F — OIDC provider** | OAuth2/OIDC token issuance (panva `oidc-provider`) + client registry + session-reuse login/consent | ✅ shipped |
 | **G — Vault: separate unlock + loud warnings** | web login does **not** unlock the vault; unlock stays separate, and a locked vault warns on the dashboard + in every session | ✅ shipped |
 
@@ -125,6 +125,71 @@ Attach `asmltr-auth@file` to any router. `verify` returns **200 + `Remote-User`*
 **401** otherwise (the proxy can redirect to asmltr's login), or **403** if an allowlist excludes the user.
 When `ASMLTR_AUTH` is off it returns 200 (break-glass). The full OAuth2/OIDC **provider** (phase F) is for
 apps that speak OIDC natively rather than trusting proxy headers.
+
+### Access rules
+
+A single allowlist answers only *"may this user in at all?"*. Once several services share one gate
+that is too blunt — a user may be allowed one path and denied its siblings, a machine sub-path may
+need to stay anonymous, and one dashboard may need a second factor while the rest of the host does
+not. Point `ASMLTR_AUTH_RULES` at a JSON file to get **first-match-wins** rules over
+(domain, path, subject, source network) → policy:
+
+```json
+{
+  "default_policy": "two_factor",
+  "rules": [
+    { "domain": "auth.example.com", "policy": "bypass" },
+    { "domain": "app.example.com", "networks": ["10.0.0.0/8", "127.0.0.1/32"], "policy": "bypass" },
+    { "domain": "app.example.com", "resources": ["^/machine-api.*"], "policy": "bypass" },
+    { "domain": "app.example.com", "resources": ["^/contractor/.*"], "subject": "user:bob", "policy": "one_factor" },
+    { "domain": "*.example.com", "subject": "user:bob", "policy": "deny" },
+    { "domain": "dash.example.com", "subject": "user:alice", "policy": "two_factor" },
+    { "domain": "dash.example.com", "policy": "deny" },
+    { "domain": "*.example.com", "policy": "two_factor" }
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `domain` | Exact host, or `*.example.com` for sub-domains (**not** the apex). Omit = every host. |
+| `resources` | Array of regexes tested against the request path. Omit = every path. |
+| `subject` | `user:<name>` / `group:<name>`. Flat array = OR, nested array = AND. |
+| `networks` | CIDRs (v4/v6) matched against the client address. |
+| `policy` | `bypass` · `one_factor` · `two_factor` · `deny` |
+
+**Policies.** `bypass` needs no session at all. `one_factor` accepts any signed-in session.
+`two_factor` requires a session that actually presented a second factor — TOTP, a recovery code, or
+a passkey; a password-only session gets `401 {totp_required:true}` so the proxy can send it back to
+step up. `deny` never passes. Anything unmatched falls through to `default_policy`.
+
+**Ordering matters** — the first matching rule wins, so put specific carve-outs above the broad
+catch-alls. A rule that needs a `subject` is skipped while the request is still anonymous, so an
+unauthenticated hit lands on a later rule and is **challenged (401) rather than refused (403)**;
+403 is reserved for a user who *is* identified and still isn't allowed.
+
+**Safety properties.** `bypass` may not depend on a `subject` (nobody is identified yet) and such a
+rule is dropped with a warning. An unknown policy or a bad `default_policy` falls back to
+`one_factor` instead of failing open. If the file becomes unparseable the **last good rules stay
+in force**, so a broken edit can't silently widen access. The file is re-read when it changes —
+no core restart, which matters because restarting core drops live sessions.
+
+**Checking a migration.** `GET /v2/auth/rules` (session-gated) returns the live rule set, and
+`?host=&path=&ip=&user=` dry-runs one request so you can confirm each ported rule resolves the way
+the old gate did without replaying real traffic:
+
+```bash
+curl -s --cookie "asmltr_session=$TOK" \
+  'http://127.0.0.1:3023/v2/auth/rules?host=app.example.com&path=/elsewhere&user=bob'
+# -> { "probe": { "policy": "deny", "matched_index": 4, ... } }
+```
+
+With no rules file, `ASMLTR_AUTH_ALLOW` behaves exactly as before.
+
+The proxy's forwarded headers (`X-Forwarded-Host` / `-Uri` / `-For`, or nginx's `X-Original-URL`)
+decide host, path and address, and they are trusted — core binds to localhost, so only the proxy
+can reach it. On a pass, the resolved identity goes back as `Remote-User` (plus `Remote-Groups`
+when the account has groups).
 
 ## OIDC provider (phase F)
 

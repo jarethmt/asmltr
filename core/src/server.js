@@ -861,6 +861,7 @@ app.post('/v2/vault/unseal', async (req, res) => {
 // Auth — the session-gate foundation (roadmap P1 phase A; docs/AUTH.md). ADDITIVE + enforcement OFF:
 // requireAuth is a no-op unless ASMLTR_AUTH=on, so these endpoints exist without gating anything yet.
 const auth = require('../../shared/auth');
+const authRules = require('./auth-rules'); // forward-auth access rules (domain/path/subject/network -> policy)
 const authSecureCookie = () => process.env.ASMLTR_AUTH_INSECURE_COOKIE !== '1'; // Secure cookie by default (https)
 app.get('/v2/auth/status', (req, res) => {
   const s = auth.verifySession(auth.tokenFromReq(req));
@@ -883,7 +884,9 @@ app.post('/v2/auth/login', (req, res) => {
     if (!auth.verifySecondFactor(b.username, b.totp)) { auth.recordFail(key); return res.status(401).json({ error: 'invalid code', totp_required: true }); }
   }
   auth.recordSuccess(key);
-  res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(b.username), { secure: authSecureCookie() }));
+  // amr drives two_factor forward-auth rules: only claim a second factor when one was verified above.
+  const amr = auth.totpEnabledFor(b.username) ? ['pwd', 'totp'] : ['pwd'];
+  res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(b.username, undefined, amr), { secure: authSecureCookie() }));
   res.json({ ok: true, user: b.username });
 });
 app.post('/v2/auth/logout', (req, res) => { res.setHeader('Set-Cookie', auth.clearCookie()); res.json({ ok: true }); });
@@ -922,7 +925,7 @@ app.get('/v2/auth/external/:provider/callback', async (req, res) => {
     if (sess) { auth.linkExternal(sess.sub, provider, ident.subject, ident.email); return res.redirect('/settings?linked=' + provider); } // linking (already logged in)
     const username = auth.findByExternal(provider, ident.subject); // login
     if (!username) return res.status(403).send('No asmltr account is linked to this ' + provider + ' identity. Sign in with your password first, then connect ' + provider + ' under Settings → Security.');
-    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(username), { secure: authSecureCookie() }));
+    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(username, undefined, ['ext']), { secure: authSecureCookie() }));
     res.redirect('/');
   } catch (e) { res.status(400).send('sign-in failed: ' + e.message); }
 });
@@ -948,7 +951,7 @@ app.post('/v2/auth/passkey/login/verify', async (req, res) => {
   try {
     const r = await passkey.loginVerify(b.response, req.headers.origin);
     auth.recordSuccess(key);
-    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(r.username), { secure: authSecureCookie() }));
+    res.setHeader('Set-Cookie', auth.sessionCookie(auth.issueSession(r.username, undefined, ['passkey']), { secure: authSecureCookie() }));
     res.json({ ok: true, user: r.username });
   } catch (e) { auth.recordFail(key); res.status(401).json({ error: e.message }); }
 });
@@ -962,14 +965,43 @@ app.delete('/v2/oidc/clients/:id', requireSession, (req, res) => res.json({ ok: 
 // When auth is DISABLED this returns 200 (break-glass: flip ASMLTR_AUTH=off + restart to unlock instantly).
 app.get('/v2/auth/verify', (req, res) => {
   if (!auth.enabled()) return res.status(200).end();
+  const ctx = authRules.contextFromRequest(req);
+  // Anonymous pass first: a bypass rule must let the request through with no session at all
+  // (health checks, machine-to-machine sub-paths, the login page itself).
+  const anon = authRules.evaluate({ ...ctx, user: null });
+  if (anon.policy === 'bypass') return res.status(200).end();
+
   const s = auth.verifySession(auth.tokenFromReq(req));
+  // 401 (not 403) while unauthenticated, so the proxy sends the user to log in rather than
+  // showing a dead end. Only an identified-but-unauthorised user gets 403.
   if (!s) return res.status(401).json({ error: 'authentication required' });
-  // Optional per-resource allowlist for forward-auth (phase E): ASMLTR_AUTH_ALLOW = comma-sep usernames.
-  // Empty = any authenticated session passes. Set per protected service via its own middleware if needed.
-  const allow = (process.env.ASMLTR_AUTH_ALLOW || '').split(',').map((x) => x.trim()).filter(Boolean);
-  if (allow.length && !allow.includes(s.sub)) return res.status(403).json({ error: 'not authorized for this resource' });
+
+  const groups = auth.groupsFor(s.sub);
+  const decision = authRules.evaluate({ ...ctx, user: s.sub, groups });
+  if (decision.policy === 'deny') return res.status(403).json({ error: 'not authorized for this resource' });
+  if (decision.policy === 'two_factor' && !authRules.sessionIsTwoFactor(s)) {
+    // Signed in, but this resource needs a second factor — send them back to step up.
+    return res.status(401).json({ error: 'second factor required for this resource', totp_required: true });
+  }
   res.setHeader('Remote-User', s.sub); // identity header for the proxied service (forward-auth)
+  if (groups.length) res.setHeader('Remote-Groups', groups.join(','));
   res.status(200).end();
+});
+
+// What rules are live right now, and how a given request would be judged. Session-gated: the rule
+// set names users and paths, so it is not public. `?host=&path=&ip=&user=` dry-runs one request,
+// which is how a migration gets checked without replaying real traffic through the proxy.
+app.get('/v2/auth/rules', requireSession, (req, res) => {
+  const doc = authRules.load();
+  const q = req.query || {};
+  const probe = (q.host || q.path || q.ip || q.user)
+    ? authRules.evaluate({ host: q.host || '', path: q.path || '/', ip: q.ip || '', user: q.user || null,
+        groups: q.user ? auth.groupsFor(q.user) : [] })
+    : null;
+  res.json({
+    source: doc._source, default_policy: doc.default_policy, count: doc.rules.length,
+    rules: doc.rules, probe: probe ? { policy: probe.policy, matched_index: probe.index, rule: probe.rule } : null,
+  });
 });
 
 // Integrations — third-party service links (storage today). Secret fields are *_ref (vault key names),

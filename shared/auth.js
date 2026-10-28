@@ -199,9 +199,13 @@ function findPasskeyOwner(credId) {
 const b64u = (b) => Buffer.from(b).toString('base64url');
 function sign(payloadB64) { return crypto.createHmac('sha256', secret()).update(payloadB64).digest('base64url'); }
 
-function issueSession(username, ttl = SESSION_TTL) {
+function issueSession(username, ttl = SESSION_TTL, amr = ['pwd']) {
   const now = Math.floor(Date.now() / 1000);
-  const payload = b64u(JSON.stringify({ sub: username, iat: now, exp: now + ttl, v: load().token_version || 1 }));
+  // amr = the factors this session actually presented ('pwd', 'totp', 'recovery', 'passkey').
+  // Forward-auth rules with a two_factor policy read it; a token minted before amr existed is
+  // treated as single-factor on verify, so old cookies degrade safely instead of over-granting.
+  const list = Array.isArray(amr) && amr.length ? amr.map(String) : ['pwd'];
+  const payload = b64u(JSON.stringify({ sub: username, iat: now, exp: now + ttl, amr: list, v: load().token_version || 1 }));
   return payload + '.' + sign(payload);
 }
 
@@ -216,7 +220,7 @@ function verifySession(token) {
   const now = Math.floor(Date.now() / 1000);
   if (!p.exp || p.exp < now) return null;
   if ((p.v || 1) !== (load().token_version || 1)) return null; // global revoke
-  return { sub: p.sub };
+  return { sub: p.sub, amr: Array.isArray(p.amr) && p.amr.length ? p.amr : ['pwd'] };
 }
 
 /** Revoke every session (bump token version). */
@@ -267,11 +271,27 @@ function verifySecondFactor(username, code) {
   return verifyRecoveryCode(username, code);
 }
 
+// ── group membership (for forward-auth `group:` rules) ─────────────────────────
+// Groups are optional metadata on an account; they exist so access rules ported from an external
+// directory can keep expressing "this team" instead of enumerating users. No group = [].
+function groupsFor(username) {
+  const u = load().users[username];
+  return u && Array.isArray(u.groups) ? u.groups.map(String) : [];
+}
+function setGroups(username, groups) {
+  const d = load();
+  if (!d.users[username]) throw new Error('no such account: ' + username);
+  d.users[username].groups = Array.isArray(groups) ? groups.map(String) : [];
+  save(d);
+  return { username, groups: d.users[username].groups };
+}
+
 module.exports = {
   enabled, hasAccount, listUsers, createAccount, setPassword, verifyPassword,
   issueSession, verifySession, revokeAllSessions,
   isLockedOut, recordFail, recordSuccess,
   sessionCookie, clearCookie, tokenFromReq, requireAuth,
+  groupsFor, setGroups,
   totpEnabledFor, verifySecondFactor, totpBeginEnroll, totpConfirmEnroll, totpDisable,
   accountExists, listPasskeys, passkeysEnabled, addPasskey, updatePasskeyCounter, removePasskey, findPasskeyOwner,
   linkExternal, unlinkExternal, listExternal, findByExternal,
