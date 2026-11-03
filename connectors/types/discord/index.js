@@ -23,6 +23,7 @@ const sharedTts = require('../../../shared/speech/tts');
 const { auxUsage, estimateAudioSeconds } = require('../../../shared/usage'); // priced tts/stt cost events
 const sharedStt = require('../../../shared/speech/stt');
 const sharedWake = require('../../../shared/speech/wake');            // shared confidence-gated wake matcher (#136)
+const { BurstCoalescer, burstText } = require('./burst');             // multi-message runs land as one turn (#174)
 const voiceEngines = require('../../../shared/speech/voice-engines'); // pluggable STT/TTS role layer (#113/#139)
 
 // Assistant identity — the display name AND the spoken wake word for voice.
@@ -135,7 +136,6 @@ async function start(ctx) {
   // --- state ---
   let memory = { servers: {}, globalTimeline: [] };
   const processing = new Map();
-  const pendingReply = new Map(); // cid -> { timer, message, forced } — the reply-debounce quiet-window
   let silenced = false;
   let lastResponseTime = 0;
   const responseCount = new Map();
@@ -348,7 +348,7 @@ async function start(ctx) {
   }
 
   // --- Discord context → system_prompt_extra (server-aware authz + context) ---
-  function buildSystemExtra(message, context, forced) {
+  function buildSystemExtra(message, context, forced, burstCount = 1) {
     const mentioned = message.mentions.has(client.user);
     const mode = forced ? 'You were directly @-mentioned (silence mode is on, so only mentions reach you).'
       : mentioned ? 'You were directly @-mentioned.'
@@ -364,7 +364,8 @@ async function start(ctx) {
     return `DISCORD CONTEXT
 - You are **${NAME}** — your Discord handle here is \`${client.user.username}\`. "@${NAME}", the id <@${client.user.id}>, and any message attributed to \`${client.user.username}\` are YOU. Anyone else — including other AI agents writing in the first person ("I"/"my") — is NOT you; never mistake their words, or your own earlier messages, for something newly said to you.
 - Server: ${context.location.serverName} · Channel: #${context.location.channelName} (id ${message.channel.id}) · Participants: ${context.location.participants.join(', ')}
-- ${mode}
+- ${mode}${burstCount > 1 ? `
+- The ${burstCount} messages above arrived together as one run and are shown oldest first, which is why they are one turn rather than ${burstCount}. Answer the whole run, not only its last line.` : ''}
 - THIS message is from **${message.author.username}**. ${mentionLine} Address your reply to ${message.author.username}. Do NOT greet or address anyone else unless THIS message is literally from them — a mention of someone is not that person speaking.
 
 MULTI-AGENT CHANNEL — CRITICAL:
@@ -415,7 +416,9 @@ RESPONSE RULES:
     return chunks;
   }
 
-  async function handleMessage(message, forced) {
+  // `parts` is the whole settled run, oldest first; `message` is its last, which stays the message the
+  // reply answers and threads against. A direct call with no run is a run of one.
+  async function handleMessage(message, forced, parts) {
     const cid = message.channel.id;
     if (processing.get(cid)) {
       // A turn is already running in this channel. If THIS message is addressed to us, queue it into the
@@ -447,36 +450,51 @@ RESPONSE RULES:
       // context bleed — e.g. resuming a session dominated by one other agent in a
       // different channel and continuing to address that agent.
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
-      let text = message.cleanContent || message.content; // resolve <@id>/<@&role> tags to readable @names so the model knows who's who
-      text = (await replyRef(message)) + text; // if this is a Discord reply, tell the model WHAT it answers (multi-agent threading)
+      // resolve <@id>/<@&role> tags to readable @names so the model knows who's who, and prefix any
+      // Discord reply reference so it knows WHAT a message answers (multi-agent threading)
+      //
+      // INVARIANT, and it is load-bearing: `burst` feeds BOTH the prompt text below and the part
+      // count handed to buildSystemExtra, so the turn that claims "these N messages arrived together"
+      // is the same turn that carries them. Anything that asserts the count from one source and
+      // assembles the text from another makes the claim a lie the model cannot detect, which is the
+      // failure this whole change exists to fix: the old prompt said the channel's back-and-forth was
+      // already in the session while the superseded messages had been dropped. Raised by Eve, who
+      // found the same coupling holding up the observed-context claim in core (`catchUp` is drained
+      // into the very turn whose system prompt says it is present) and pointed out that it rots the
+      // moment someone moves one half of it.
+      const burst = Array.isArray(parts) && parts.length ? parts : [message];
+      const refs = new Map();
+      for (const m of burst) refs.set(m.id, await replyRef(m));
+      let text = burstText(burst, (m) => (refs.get(m.id) || '') + (m.cleanContent || m.content));
       // Vision: download supported image attachments and pass them as real image
       // content (base64) so the assistant actually SEES them — not a CDN URL it can't open.
       // Non-image / oversized / unsupported attachments stay as a text URL mention.
       const SUPPORTED_IMG = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       const MAX_IMG_BYTES = 5 * 1024 * 1024;
       const imageAttachments = [];
-      if (message.attachments.size > 0) {
+      if (burst.some((m) => m.attachments.size > 0)) {
         const savedNotes = [];
         // Register every inbound attachment on the shared, channel-agnostic upload surface so
         // it's findable from any channel — and so non-image files survive Discord's expiring
         // CDN URLs (we keep the bytes on disk, not just a link).
-        const register = (buf, a, kind) => {
+        const register = (buf, a, kind, from) => {
           try {
             const rec = ctx.uploads.save({
               channel: 'discord', instance: ctx.instanceId, buffer: buf,
               filename: a.name, mime: (a.contentType || '').split(';')[0].trim() || 'application/octet-stream', kind,
-              caption: message.content || '', sender: message.author.username, senderId: message.author.id,
+              // Credited to the message it actually rode in on, not to the last one of the run.
+              caption: from.content || '', sender: from.author.username, senderId: from.author.id,
               conversationKey,
             });
             savedNotes.push(`- ${kind || 'file'}: ${rec.filename} (${rec.mime}, ${ctx.uploads.humanSize(rec.size)}) → ${rec.path}`);
           } catch (e) { ctx.log(`[upload] register failed ${a.name}: ${e.message}`); }
         };
-        for (const a of message.attachments.values()) {
+        for (const from of burst) for (const a of from.attachments.values()) {
           const mt = (a.contentType || '').split(';')[0].trim();
           const isImg = SUPPORTED_IMG.includes(mt);
           try {
             const buf = Buffer.from(await (await fetch(a.url)).arrayBuffer());
-            register(buf, a, isImg ? 'image' : 'file');
+            register(buf, a, isImg ? 'image' : 'file', from);
             if (isImg && imageAttachments.length < 5 && (a.size || 0) <= MAX_IMG_BYTES) {
               imageAttachments.push({ type: 'image', media_type: mt, data: buf.toString('base64'), name: a.name });
             }
@@ -498,7 +516,7 @@ RESPONSE RULES:
         public: message.channel.type !== 1, // guild channel = public; DM (type 1) = private
         channel_context: { channelId: cid, server: context.location.serverName, channel: context.location.channelName },
         context: { scope_id: sid ? `guild:${sid}` : `dm:${message.author.id}`, scope_name: context.location.serverName },
-        system_prompt_extra: buildSystemExtra(message, context, forced),
+        system_prompt_extra: buildSystemExtra(message, context, forced, burst.length),
       };
 
       // Directly-addressed messages can't be [[NO_REPLY]], so it's safe to stream intermediary
@@ -604,17 +622,17 @@ RESPONSE RULES:
   // and answer. Without this, the first block grabs the processing lock and we reply to a fragment,
   // and multiple agents race each other. The trigger is always the LATEST message in the settled
   // window; `forced` (a silence-mode @mention) is sticky across the window.
+  // The window is unchanged; what changed is that the messages it supersedes are KEPT. Replacing the
+  // pending entry used to discard them, and they reached neither handleMessage (timer cleared) nor
+  // observe() (the dispatcher below skips observe for anything that schedules a reply), so every
+  // message of an addressed run except the last was dropped from the session the model sees. #174.
+  const bursts = new BurstCoalescer({
+    windowMs: replyDebounceMs,
+    onFlush: ({ parts, trigger, forced }) => { handleMessage(trigger, forced, parts).catch(() => {}); },
+  });
   function scheduleReply(message, forced) {
-    const cid = message.channel.id;
     if (replyDebounceMs <= 0) { handleMessage(message, forced).catch(() => {}); return; }
-    const prev = pendingReply.get(cid);
-    if (prev) clearTimeout(prev.timer);
-    const entry = { message, forced: !!forced || !!(prev && prev.forced) };
-    entry.timer = setTimeout(() => {
-      pendingReply.delete(cid);
-      handleMessage(entry.message, entry.forced).catch(() => {});
-    }, replyDebounceMs);
-    pendingReply.set(cid, entry);
+    bursts.add(message.channel.id, message, forced);
   }
 
   // --- Discord client ---
@@ -1164,7 +1182,7 @@ RESPONSE RULES:
   await client.login(token);
 
   return {
-    async stop() { clearInterval(hbTimer); try { await client.destroy(); } catch (_) {} try { httpServer.close(); } catch (_) {} persistMemory(); },
+    async stop() { clearInterval(hbTimer); bursts.stop(); try { await client.destroy(); } catch (_) {} try { httpServer.close(); } catch (_) {} persistMemory(); },
     health() { return { online: !!client.user, silenced }; },
   };
 }

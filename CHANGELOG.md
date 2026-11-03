@@ -45,6 +45,22 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   resolved by the same default-deny resolver as screen access. Private keys resolve from the TRUST
   vault at connect time and never reach a model's context. `asmltr device shell|kill-shell`.
 
+- **A multi-message run on Discord lands as one turn, with all of it.** The connector already waited
+  for a channel to go quiet before replying, so a turn would not start on half a thought
+  (`reply_debounce_ms`, default 3000). The waiting worked; the content did not. Each new message
+  replaced the single pending entry, so the messages the window superseded reached neither the turn
+  (their timer was cleared) nor the observe path (the dispatcher skips observe for anything addressed
+  enough to schedule a reply), and every message of an addressed run except the last was dropped from
+  the session the model sees, while the prompt told it the channel's back-and-forth was already in its
+  history. An owner DM was the worst case, since every message in a DM is addressed by definition.
+  Raising the window made it worse rather than better, because a longer wait supersedes more messages.
+  The run is now accumulated instead of discarded and handed to the one turn, oldest first, with the
+  last message still the one the reply answers; attachments come from every part, credited to the
+  message they arrived on; and the assistant is told the part count so it knows it is answering a run.
+  Bounded at 20 parts, reporting what it dropped. Same shape as the Telegram album coalescer, on a
+  surface that has to infer the grouping rather than being told it.
+  ([#174](https://github.com/jarethmt/asmltr/issues/174))
+
 ### Fixed
 
 - **The dashboard's remote-desktop control could never have worked.** The web viewer listened for

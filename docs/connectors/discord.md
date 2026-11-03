@@ -109,6 +109,28 @@ order explains all the behavior:
    uses its name (lead/trail/mid), asks a question involving it, matches a relevant topic, or it's
    mid-thread. This is what lets it chime in on a passive name-drop.
 
+### Multi-message runs become one turn
+
+People send one thought as several messages. Discord has no marker for that, unlike a Telegram album's
+shared `media_group_id`, so the connector infers a run from timing: it waits for the channel to go
+quiet for `reply_debounce_ms` (default 3000), resetting on each new message, and then runs one turn.
+
+That turn carries **every message of the run**, oldest first, with the last one as the message the
+reply answers and threads against. The assistant is told how many parts it is looking at, so it knows
+it is answering a run rather than a single line. Attachments from every part come along, each credited
+to the message it actually arrived on. A run is capped at 20 parts; past that the oldest are dropped
+and the count reports how many, so the loss is not silent.
+
+Before [#174](https://github.com/jarethmt/asmltr/issues/174), the wait worked and the content did not.
+Each new message replaced the single pending entry, so the superseded ones reached neither the turn nor
+the observe path, and every message of an addressed run except the last was dropped from the session
+the model sees. Sending "can you look at the slicer queue", then "specifically the 502s", then "and
+whether D2 is still blocked" produced one turn that had only seen the third. An owner DM was the worst
+case, since every message in a DM is addressed by definition.
+
+Raising `reply_debounce_ms` used to make that worse rather than better, because a longer window
+supersedes more messages. It is now what it reads like: how long to wait for someone to finish.
+
 Two more guards apply when it *does* generate a reply:
 
 - **Self-gating** — the core prompt tells it, in a multi-agent room, to emit only the token
