@@ -452,6 +452,16 @@ RESPONSE RULES:
       const conversationKey = sid ? `discord:${ctx.instanceId}:channel:${cid}` : `discord:${ctx.instanceId}:dm:${message.author.id}`;
       // resolve <@id>/<@&role> tags to readable @names so the model knows who's who, and prefix any
       // Discord reply reference so it knows WHAT a message answers (multi-agent threading)
+      //
+      // INVARIANT, and it is load-bearing: `burst` feeds BOTH the prompt text below and the part
+      // count handed to buildSystemExtra, so the turn that claims "these N messages arrived together"
+      // is the same turn that carries them. Anything that asserts the count from one source and
+      // assembles the text from another makes the claim a lie the model cannot detect, which is the
+      // failure this whole change exists to fix: the old prompt said the channel's back-and-forth was
+      // already in the session while the superseded messages had been dropped. Raised by Eve, who
+      // found the same coupling holding up the observed-context claim in core (`catchUp` is drained
+      // into the very turn whose system prompt says it is present) and pointed out that it rots the
+      // moment someone moves one half of it.
       const burst = Array.isArray(parts) && parts.length ? parts : [message];
       const refs = new Map();
       for (const m of burst) refs.set(m.id, await replyRef(m));
