@@ -10,20 +10,6 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
 
 ### Added
 
-- **A multi-message run on Discord lands as one turn, with all of it.** The connector already waited
-  for a channel to go quiet before replying, so a turn would not start on half a thought
-  (`reply_debounce_ms`, default 3000). The waiting worked; the content did not. Each new message
-  replaced the single pending entry, so the messages the window superseded reached neither the turn
-  (their timer was cleared) nor the observe path (the dispatcher skips observe for anything addressed
-  enough to schedule a reply), and every message of an addressed run except the last was dropped from
-  the session the model sees, while the prompt told it the channel's back-and-forth was already in its
-  history. An owner DM was the worst case, since every message in a DM is addressed by definition. The
-  run is now accumulated instead of discarded and handed to the one turn, oldest first, with the last
-  message still the one the reply answers; attachments come from every part, credited to the message
-  they arrived on; and the assistant is told the part count so it knows it is answering a run. Bounded
-  at 20 parts, reporting what it dropped. Same shape as the Telegram album coalescer, on a surface
-  that has to infer the grouping rather than being told it.
-  ([#174](https://github.com/jarethmt/asmltr/issues/174))
 
 - **The Android notification reader no longer talks over you** (mobile app 0.9.0). It asks whether the
   ear is actually free before reading a synopsis: a live call (cellular or VoIP), Do Not Disturb, a
@@ -109,6 +95,21 @@ channel tracks `origin/main`. See [docs/UPDATER-DESIGN.md](docs/UPDATER-DESIGN.m
   already used. The JSON `data_base64` form still works, so no existing client breaks. New knob
   `ASMLTR_RAW_BODY_LIMIT` (default `1024mb`) bounds a raw body, and a body over it returns JSON
   naming the limit instead of an HTML stack trace.
+
+- **A multi-message run on Discord lands as one turn, with all of it.** The connector already waited
+  for a channel to go quiet before replying, so a turn would not start on half a thought
+  (`reply_debounce_ms`, default 3000). The waiting worked; the content did not. Each new message
+  replaced the single pending entry, so the messages the window superseded reached neither the turn
+  (their timer was cleared) nor the observe path (the dispatcher skips observe for anything addressed
+  enough to schedule a reply), and every message of an addressed run except the last was dropped from
+  the session the model sees, while the prompt told it the channel's back-and-forth was already in its
+  history. An owner DM was the worst case, since every message in a DM is addressed by definition. The
+  run is now accumulated instead of discarded and handed to the one turn, oldest first, with the last
+  message still the one the reply answers; attachments come from every part, credited to the message
+  they arrived on; and the assistant is told the part count so it knows it is answering a run. Bounded
+  at 20 parts, reporting what it dropped. Same shape as the Telegram album coalescer, on a surface
+  that has to infer the grouping rather than being told it.
+  ([#174](https://github.com/jarethmt/asmltr/issues/174))
 
 ### Changed
 
