@@ -2,6 +2,7 @@
 const { sendPolicyFromConfig } = require('./send-policy');
 const { parseAuthResults: parseAuthResultsAligned, alignsWithFrom } = require('./auth-align');
 const { persistAuthRejectLine } = require('./auth-reject-persist');
+const { isTrustedLocalSubmission } = require('./local-submission');
 const {
   escapeHtml,
   stripDiscordChrome,
@@ -234,6 +235,18 @@ const meta = {
       email_address: { type: 'string', title: 'From address (blank = use the user_bws_key value)', default: '' },
       from_name: { type: 'string', title: 'From display name', default: NAME },
       mailbox: { type: 'string', title: 'IMAP mailbox to watch', default: 'INBOX' },
+      ingest_only: {
+        type: 'boolean',
+        title: 'Ingest only (watch and index this mailbox; never generate a reply or a draft)',
+        description: 'ON = a read path: mail is parsed, attachments land on the upload surface, threads and telemetry are recorded, and the engine is never asked for anything — so no auto-reply, no draft, no tokens. Explicit sends still work: you can be ASKED to mail from this address and it will go. Turn OFF, per address, to let it answer on its own under the Send policy below. New instances default to ON.',
+        default: true,
+      },
+      local_domains: {
+        type: 'string',
+        title: 'Our own mail domains, comma-separated (enables the authenticated-local-submission path)',
+        description: 'Mail submitted with a password to our own server carries no Authentication-Results, so the auth gate would reject it. Listing a domain here lets such a message through ONLY on positive evidence: From is in this list, a DKIM-Signature carries that same d=, every Received hop is loopback/RFC1918, and no allowlisted Authentication-Results is present. Blank = off (fail closed, upstream default).',
+        default: '',
+      },
       approval_policy: { type: 'string', title: 'Send policy', default: 'always_draft', enum: ['always_draft', 'auto_send_full_trust', 'always_send', 'trust_tier:1', 'trust_tier:2', 'trust_tier:3'] },
       signature: { type: 'string', title: 'Signature (blank = auto from from_name)', default: '' },
       signature_image: { type: 'string', title: 'Filesystem PNG mailed inline as cid:assistant-sig (blank = no CID attach)', default: '' },
@@ -378,6 +391,22 @@ function listAuthenticationResults(parsed) {
   return out;
 }
 
+/** All occurrences of a repeated header, as raw values (Received, DKIM-Signature, ...). */
+function headerLinesAll(parsed, name) {
+  const key = String(name || '').toLowerCase();
+  const out = [];
+  if (parsed && Array.isArray(parsed.headerLines)) {
+    for (const h of parsed.headerLines) {
+      if (String(h.key || '').toLowerCase() !== key) continue;
+      const body = h.line ? String(h.line).replace(new RegExp('^' + key + ':\\s*', 'i'), '') : String(h.value == null ? '' : h.value);
+      if (body.trim()) out.push(body);
+    }
+  }
+  if (out.length) return out;
+  const one = headerLine(parsed, name);
+  return one ? String(one).split(/\n+/).filter((x) => x.trim()) : [];
+}
+
 function hasArcAuthenticationResults(parsed) {
   return !!String(headerLine(parsed, 'arc-authentication-results') || '').trim();
 }
@@ -401,12 +430,25 @@ function authHeaderText(parsed, allow) {
  */
 function authDisposition(parsed, opts) {
   const allow = (opts && opts.authservIds) || loadAuthservAllowlist();
+  const localDomains = (opts && opts.localDomains) || [];
   const empty = parseAuthResults('');
+  // Authenticated local submission: our own server signed it and it never touched the internet.
+  // Checked first because such a message legitimately has NO Authentication-Results at all —
+  // see local-submission.js for why this is positive evidence and not absence-reasoning.
+  const localOk = () => isTrustedLocalSubmission({
+    fromAddr: (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '',
+    received: headerLinesAll(parsed, 'received'),
+    dkimSignatures: headerLinesAll(parsed, 'dkim-signature'),
+    hasAllowlistedAR: listAuthenticationResults(parsed).some((h) => allow.includes(parseAuthservId(h))),
+    localDomains,
+  });
   if (!allow.length) {
+    if (localOk()) return { present: false, results: empty, passed: true, failed: false, raw: '', reason: 'authenticated local submission', local: true, aligned: true };
     return { present: false, results: empty, passed: false, failed: true, raw: '', reason: 'authserv unset' };
   }
   const headers = listAuthenticationResults(parsed);
   if (!headers.length) {
+    if (localOk()) return { present: false, results: empty, passed: true, failed: false, raw: '', reason: 'authenticated local submission', local: true, aligned: true };
     const reason = hasArcAuthenticationResults(parsed) ? 'ARC-only' : 'missing AR';
     return { present: false, results: empty, passed: false, failed: true, raw: '', reason };
   }
@@ -416,12 +458,18 @@ function authDisposition(parsed, opts) {
   }
   const results = parseAuthResults(raw);
   const present = true;
+  // DKIM and SPF must each pass. DMARC may be `none`: a domain that publishes no DMARC record
+  // yields dmarc=none, and plenty of legitimate senders are in that state (twilio.zendesk.com
+  // reaches this mailbox as dkim=pass spf=pass dmarc=none). Requiring dmarc=pass rejected them
+  // all. Alignment is still enforced below, so `none` costs us nothing a passing DMARC provided.
   const parts = [
     ['DKIM', results.dkim],
     ['SPF', results.spf],
-    ['DMARC', results.dmarc],
   ];
   const failedParts = parts.filter(([, v]) => v !== 'pass').map(([k, v]) => k + '=' + (v || 'missing'));
+  if (results.dmarc && results.dmarc !== 'pass' && results.dmarc !== 'none') {
+    failedParts.push('DMARC=' + results.dmarc);
+  }
   const fromRaw = (parsed.from && parsed.from.value && parsed.from.value[0] && parsed.from.value[0].address) || '';
   const aligned = alignsWithFrom(fromRaw, results);
   const passed = failedParts.length === 0 && aligned;
@@ -910,6 +958,11 @@ async function start(ctx) {
   const MAILBOX = cfg.mailbox || 'INBOX';
   const fromName = cfg.from_name || NAME;
   const policy = sendPolicyFromConfig(cfg);
+  // Ingest-only is a SEPARATE axis from the send policy. always_draft still asks the engine for a
+  // reply and parks it; this never asks at all. It suppresses self-initiated mail (auto-reply and
+  // drafts) but deliberately does NOT block an explicit, operator-requested send.
+  const ingestOnly = cfg.ingest_only === true;
+  const localDomains = String(cfg.local_domains || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || (
     `\n\n\n${fromName}\nAI Assistant to the owner\n\n\n` +
@@ -983,7 +1036,7 @@ async function start(ctx) {
     const body = (parsed.text || parsed.html || '').toString().trim();
 
     // Auth-Results before persist/uploads/thread/telemetry. Reject: no attachments, no log_only.
-    const auth = authDisposition(parsed);
+    const auth = authDisposition(parsed, { localDomains });
     if (authRejected(auth)) {
       const summary = formatAuthSummary(auth);
       const reason = (auth && auth.reason) || 'auth failed';
@@ -1126,6 +1179,16 @@ async function start(ctx) {
     extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags.';
     extra += ' Do not retype or restyle the signature; the connector appends it. Do not use Discord -# or 💭 in a letter (if you do, send-time unwraps it). Use markdown for emphasis; headings only when they help, not on a two-line note.';
     extra += ' ' + LETTER_ONLY_EXTRA;
+    // Ingest-only stops HERE. Everything above is the ingest itself — uploads, thread context,
+    // inbound telemetry, auth verdict — and it has all happened. What we skip is asking the engine
+    // for a reply, which is what would produce an auto-reply or a draft. An explicit send through
+    // /out is untouched: this mutes the mailbox's own voice, it does not take away the ability to
+    // mail from it when asked.
+    if (ingestOnly) {
+      ctx.log(`ingest-only: recorded mail from ${fromAddr} (${subject}) — engine not invoked`);
+      return { handled: true, ingestOnly: true };
+    }
+
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,

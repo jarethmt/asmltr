@@ -38,7 +38,7 @@ test('email processMessage uses sendPolicyFromConfig / loaded policy, not a hard
 test('processMessage runs auth before log_only persist and attachment save', () => {
   const src = fs.readFileSync(path.join(__dirname, '../connectors/types/email/index.js'), 'utf8');
   const fn = src.slice(src.indexOf('async function processMessage'), src.indexOf('async function processMessage') + 9000);
-  const authAt = fn.indexOf('authDisposition(parsed)');
+  const authAt = fn.indexOf('authDisposition(parsed');  // tolerant of added args (localDomains)
   const logAt = fn.indexOf('persistLogOnlyAlert');
   const upAt = fn.indexOf('ctx.uploads.save');
   const threadAt = fn.indexOf('threads.set');

@@ -84,10 +84,32 @@ test('dmarc pass does not excuse a dkim or spf miss', () => {
   assert.match(a.reason, /SPF=fail/);
 });
 
-test('spf pass and dkim pass without dmarc is a fail', () => {
+// POLICY CHANGE (16 Nov 2026, agreed with the operator): dmarc=none is accepted when DKIM and
+// SPF both pass AND the From aligns. Domains that publish no DMARC record are common and
+// legitimate — twilio.zendesk.com reaches this mailbox as dkim=pass spf=pass dmarc=none and was
+// being rejected outright. Alignment is what keeps this safe, so it is still required.
+test('dkim+spf pass with no dmarc data at all still fails — nothing to align against', () => {
   const a = authDisposition(parsedWith('mx.example; dkim=pass; spf=pass'), { authservIds: ['mx.example'] });
   assert.equal(a.failed, true);
-  assert.match(a.reason, /DMARC=missing/);
+  assert.match(a.reason, /does not align/);
+});
+
+test('dmarc=none passes when dkim and spf pass and the From aligns', () => {
+  const a = authDisposition(
+    parsedWith('mx.example; dkim=pass header.d=example.com; spf=pass smtp.mailfrom=example.com; dmarc=none'),
+    { authservIds: ['mx.example'] },
+  );
+  assert.equal(a.passed, true, a.reason);
+  assert.equal(a.failed, false);
+});
+
+test('dmarc=fail is still a hard fail even with dkim+spf pass', () => {
+  const a = authDisposition(
+    parsedWith('mx.example; dkim=pass header.d=example.com; spf=pass smtp.mailfrom=example.com; dmarc=fail'),
+    { authservIds: ['mx.example'] },
+  );
+  assert.equal(a.failed, true);
+  assert.match(a.reason, /DMARC=fail/);
 });
 
 test('softfail SPF is not a pass', () => {
