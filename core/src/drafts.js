@@ -68,8 +68,16 @@ function shouldHold(policy, resolved) {
   if (policy === 'always_draft') return true;
   if (policy === 'auto_send_full_trust') return !(resolved && resolved.bypass_moderation);
   const m = /^trust_tier:(\d+)$/.exec(policy);
-  if (m) return (Number(resolved && resolved.trust_tier) || 0) < Number(m[1]);
-  return false; // unknown policy → fail open to send (never silently swallow a reply)
+  if (m) {
+    // An unresolved sender must never be auto-answered, whatever the floor says. resolve()
+    // hands back trust_tier 0 for an unknown, and 0 is the MOST-trusted end of this scale,
+    // so without this guard a stranger compares as well as the owner does.
+    if (!resolved || resolved.is_default) return true;
+    const tier = Number(resolved.trust_tier);
+    if (!Number.isFinite(tier)) return true; // no usable tier → hold
+    return tier < Number(m[1]);
+  }
+  return true; // unknown policy → fail closed (hold); never auto-send on a policy we can't read
 }
 
 module.exports = { create, get, list, setStatus, pendingCount, shouldHold };
