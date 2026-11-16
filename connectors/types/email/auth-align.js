@@ -18,7 +18,10 @@ function parseAuthResults(headerText) {
     if (!out[k]) out[k] = m[2].toLowerCase();
   }
   const i = /(?:^|[;\s])(?:header\.)?i\s*=\s*@?([A-Za-z0-9.-]+)/i.exec(s);
-  const d = /(?:^|[;\s])d\s*=\s*@?([A-Za-z0-9.-]+)/i.exec(s);
+  // `header.d=` is what rspamd actually writes ("dkim=pass header.d=zendesk.com header.s=...").
+  // Without the optional prefix this never matched on our own mail, so DKIM alignment only
+  // worked by accident when a `header.from=` happened to be present too.
+  const d = /(?:^|[;\s])(?:header\.)?d\s*=\s*@?([A-Za-z0-9.-]+)/i.exec(s);
   if (i) out.dkimD = i[1].toLowerCase();
   else if (d) out.dkimD = d[1].toLowerCase();
   const mf = /(?:smtp\.mailfrom|header\.mailfrom)\s*=\s*<?([^;>\s]+)>?/i.exec(s);
@@ -31,7 +34,14 @@ function parseAuthResults(headerText) {
 function alignsWithFrom(fromAddr, results) {
   const fromDom = domainOf(fromAddr);
   if (!fromDom) return false;
-  const cands = [results && results.dkimD, domainOf(results && results.spfMailfrom), results && results.headerFrom]
+  // Candidates are the domains something was actually PROVEN for: the DKIM signing domain and
+  // the SPF envelope sender. `header.from` is deliberately NOT one of them — it is a restatement
+  // of the From we are checking, so including it made alignment self-satisfying: an attacker who
+  // signs with their own domain (dkim=pass, spf=pass for evil.example) and forges
+  // `From: owner@victim` got aligned=true off the victim's own name. Harmless while dmarc=pass
+  // was mandatory, exploitable the moment dmarc=none became acceptable. The function name and
+  // its test both say "dkim d= / spf mailfrom"; this makes that true.
+  const cands = [results && results.dkimD, domainOf(results && results.spfMailfrom)]
     .map((x) => domainOf(x)).filter(Boolean);
   if (!cands.length) return false;
   return cands.some((d) => fromDom === d || fromDom.endsWith('.' + d) || d.endsWith('.' + fromDom));

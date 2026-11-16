@@ -27,3 +27,34 @@ test("the owner's real gmail passes and aligns", () => {
   assert.equal(r.dmarc, 'pass');
   assert.equal(alignsWithFrom('jarethmt@gmail.com', r), true);
 });
+
+// rspamd writes `header.d=`, not a bare `d=`. The original regex required a boundary before
+// `d`, so our own server's headers never yielded a DKIM domain and alignment only succeeded
+// when a `header.from=` happened to be present as well. Real header from this mailbox:
+test('DKIM domain is extracted from the header.d= form rspamd emits', () => {
+  const r = parseAuthResults(ZENDESK);
+  assert.equal(r.dkimD, 'zendesk.com');
+  // twilio.zendesk.com is a subdomain of the signing domain, so it aligns (relaxed).
+  assert.equal(alignsWithFrom('consumertrustsupport@twilio.zendesk.com', r), true);
+});
+
+test('a bare d= still works, and an unrelated From still fails to align', () => {
+  const bare = parseAuthResults('mx.example; dkim=pass d=example.com; spf=pass; dmarc=pass');
+  assert.equal(bare.dkimD, 'example.com');
+  assert.equal(alignsWithFrom('x@example.com', bare), true);
+  assert.equal(alignsWithFrom('x@evil.example', bare), false);
+});
+
+// header.from must never count as alignment evidence: it restates the From being checked, so
+// including it let an attacker who signs with their OWN domain satisfy alignment using the
+// victim's name. Latent while dmarc=pass was mandatory; live once dmarc=none is accepted.
+test('a self-signed forgery cannot align via header.from', () => {
+  const r = parseAuthResults(
+    'pidgey.thoughtspacedesigns.com; dkim=pass header.d=evil.example; ' +
+    'spf=pass smtp.mailfrom=evil.example; dmarc=none header.from=victim-no-dmarc.com');
+  assert.equal(r.dkim, 'pass');
+  assert.equal(r.spf, 'pass');
+  assert.equal(alignsWithFrom('owner@victim-no-dmarc.com', r), false);
+  // It still aligns for the domain it actually proved.
+  assert.equal(alignsWithFrom('x@evil.example', r), true);
+});
