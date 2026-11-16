@@ -23,6 +23,7 @@ const Database = require('better-sqlite3');
 const DB_PATH = process.env.ASMLTR_TRUST_DB || path.join(__dirname, '..', '..', 'data', 'trust.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
+const { identifierLookups } = require('./ident-lookups');
 db.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS principals (
@@ -228,10 +229,13 @@ function resolve(envelope) {
   const { raw_id, raw_username, api_key } = envelope.sender || {};
   const scopeId = envelope.context && envelope.context.scope_id;
 
-  // identifier match: (surface,id) → (surface,username) → (apikey,key)
+  // identifier match, via the shared lookup policy. On email/discord/telegram the
+  // DISPLAY NAME is attacker-controlled, so it must never be matched against an
+  // identifier — otherwise `From: "jareth@thoughtspacedesigns.com" <anyone@any>`
+  // resolves to the owner. identifierLookups() also lowercases email identifiers
+  // so case cannot be used to dodge or to hit a differently-cased row.
   let pid = null;
-  for (const [s, v] of [[surface, raw_id], [surface, raw_username], ['apikey', api_key]]) {
-    if (!v) continue;
+  for (const [s, v] of identifierLookups(surface, { raw_id, raw_username, api_key })) {
     const row = _identBySurfaceVal.get(s, String(v));
     if (row) { pid = row.principal_id; break; }
   }
