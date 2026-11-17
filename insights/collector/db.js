@@ -26,6 +26,9 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('location')) db.exec('ALTER TABLE sessions ADD COLUMN location TEXT');
   if (!cols.includes('activity')) db.exec('ALTER TABLE sessions ADD COLUMN activity TEXT'); // live "what it's doing now" rollup
   if (!cols.includes('title_locked')) db.exec('ALTER TABLE sessions ADD COLUMN title_locked INTEGER DEFAULT 0'); // 1 = manually set, AI gen must not overwrite
+  // the Claude Code transcript JSONL for a CLI session — the pointer back to the real on-disk
+  // conversation, so a registry row can be joined to its content (and `--resume`d).
+  if (!cols.includes('transcript_path')) db.exec('ALTER TABLE sessions ADD COLUMN transcript_path TEXT');
   const mcols = db.prepare('PRAGMA table_info(system_metrics)').all().map((c) => c.name);
   if (!mcols.includes('swap_used_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_used_mb INTEGER DEFAULT 0');
   if (!mcols.includes('swap_total_mb')) db.exec('ALTER TABLE system_metrics ADD COLUMN swap_total_mb INTEGER DEFAULT 0');
@@ -86,7 +89,11 @@ const _upsertSession = db.prepare(`
     updated_unix = excluded.updated_unix
 `);
 
-const SESSION_EVENTS = new Set(['inbound', 'outbound', 'tool', 'token-usage', 'session-start']);
+// 'session-end' MUST be in here: the projection below branches on it to retire the row, but the
+// guard that gates the projection excluded it — so every SessionEnd was ingested as an event and
+// then silently dropped on the floor (92 of them before 2026-11-17), leaving clean exits as
+// 'active' and making reconcile.js's tracker mirror the only thing that ever ended a session.
+const SESSION_EVENTS = new Set(['inbound', 'outbound', 'tool', 'token-usage', 'session-start', 'session-end']);
 
 /**
  * Ingest one event (already-built shape from shared/events.js). Writes the spine
@@ -175,8 +182,9 @@ const ingestEvent = db.transaction((raw) => {
     // attach/control metadata (working dir, multiplexer, pane, pid) rides on a session-start event
     if (row.event_type === 'session-start' && evt.payload) {
       const p = evt.payload;
-      if (p.working_dir || p.multiplexer || p.tmux_target || p.pid || p.task) {
-        _setSessionMeta.run(p.working_dir || null, p.multiplexer || null, p.tmux_target || null, p.pid || null, p.task || null, row.session_id);
+      if (p.working_dir || p.multiplexer || p.tmux_target || p.pid || p.task || p.engine_session_id || p.transcript_path) {
+        _setSessionMeta.run(p.working_dir || null, p.multiplexer || null, p.tmux_target || null, p.pid || null, p.task || null,
+          p.engine_session_id || null, p.transcript_path || null, row.session_id);
       }
     }
   }
@@ -190,6 +198,70 @@ function fmtLocation(server, channel) {
   if (s) return s;
   if (c) return `#${c}`;
   return server || null; // e.g. "Direct Message"
+}
+
+// --- session reconciliation --------------------------------------------------
+// A row says `status: 'active'` because something told us a session started; nothing tells us when
+// it dies ABNORMALLY. Claude Code's SessionEnd hook only fires on a clean exit, so a SIGKILL, an
+// OOM kill, or a host reboot leaves the row claiming to be active forever. Measured on this host
+// 2026-11-17: 156 rows said active, 4 were real.
+//
+// So liveness is verified at READ time (self-healing, no new state to keep in sync) with a periodic
+// sweep as a backstop for rows nobody happens to read.
+//
+// Two rules keep this honest:
+//   1. RETIRE-ONLY. We mark a dead row 'ended'; we never flip 'ended' back to 'active'. A live
+//      screen pane whose claude session already ended is a CORRECT 'ended' row — the pane outlives
+//      the conversation — so resurrecting on a live pid would reintroduce the lie from the far side.
+//   2. ONLY process-backed rows. A channel conversation (discord/telegram/email) legitimately has
+//      NO pid: core runs those turns in-process, and the conversation's lifecycle is core's to own,
+//      not ours to guess from the process table. 136 of those 156 rows had no pid. Touching them
+//      would retire live conversations.
+function _pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } // EPERM = alive, not ours
+}
+function _procComm(pid) {
+  try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return null; }
+}
+// A recorded pid is the multiplexer (screen/tmux) or the engine itself. pid_max is 4194304 here, so
+// recycling is slow — but it is not impossible, and a recycled pid pointing at an unrelated process
+// would otherwise read as "still alive". Match the comm so a recycled pid reads as dead, not live.
+const _LIVE_COMM = /^(screen|tmux|claude|node|bash|sh)$/;
+function sessionRowIsDead(row) {
+  if (!row || row.kind === 'persistent') return false;   // daemons are the connector manager's business
+  if (row.status !== 'active' && row.status !== 'idle') return false;
+  if (!row.pid) return false;                             // pid-less → channel conversation, not ours to judge
+  if (!_pidAlive(row.pid)) return true;
+  const comm = _procComm(row.pid);
+  return !!comm && !_LIVE_COMM.test(comm);                // pid recycled by something unrelated
+}
+
+const _retireSession = db.prepare(
+  "UPDATE sessions SET status = 'ended', updated_unix = ? WHERE session_id = ? AND status IN ('active','idle')"
+);
+/**
+ * Verify liveness of process-backed rows and retire the dead ones. Returns the rows with their
+ * corrected status so a caller can hand them straight to the API without a second read.
+ */
+function reconcileSessionRows(rows) {
+  const now = Date.now();
+  const dead = [];
+  for (const r of rows || []) if (sessionRowIsDead(r)) dead.push(r);
+  if (dead.length) {
+    db.transaction(() => { for (const r of dead) _retireSession.run(now, r.session_id); })();
+    const ids = new Set(dead.map((r) => r.session_id));
+    return (rows || []).map((r) => (ids.has(r.session_id) ? { ...r, status: 'ended' } : r));
+  }
+  return rows || [];
+}
+
+const _allLiveish = db.prepare("SELECT * FROM sessions WHERE status IN ('active','idle') AND pid IS NOT NULL");
+/** Backstop sweep: retire dead process-backed rows nobody read. Returns how many it retired. */
+function sweepStaleSessions() {
+  const rows = _allLiveish.all();
+  const before = rows.filter(sessionRowIsDead).length;
+  reconcileSessionRows(rows);
+  return before;
 }
 
 // --- read queries (REST API) -------------------------------------------------
@@ -245,16 +317,21 @@ function insertAssessment(a) { _insAssessment.run(a); }
 // --- session upsert used by reconcile.js (richer column set) -----------------
 const _reconcileUpsert = db.prepare(`
   INSERT INTO sessions (session_id, surface, kind, pid, identity, context, working_dir, task, status,
-                        started_unix, last_activity_unix, tool_count, multiplexer, tmux_target, updated_unix)
+                        started_unix, last_activity_unix, tool_count, multiplexer, tmux_target,
+                        engine_session_id, updated_unix)
   VALUES (@sid, @surface, @kind, @pid, @identity, @context, @working_dir, @task, @status,
-          @started_unix, @last_activity_unix, @tool_count, @multiplexer, @tmux_target, @now)
+          @started_unix, @last_activity_unix, @tool_count, @multiplexer, @tmux_target,
+          @engine_session_id, @now)
   ON CONFLICT(session_id) DO UPDATE SET
     pid = excluded.pid, context = excluded.context, working_dir = excluded.working_dir,
     task = excluded.task, status = excluded.status, last_activity_unix = excluded.last_activity_unix,
     tool_count = excluded.tool_count, multiplexer = excluded.multiplexer,
-    tmux_target = excluded.tmux_target, updated_unix = excluded.updated_unix
+    tmux_target = excluded.tmux_target, updated_unix = excluded.updated_unix,
+    -- COALESCE, never overwrite: the hook may already have recorded the engine id from inside the
+    -- session, and the tracker mirror must not blank it back out on the next sweep.
+    engine_session_id = COALESCE(excluded.engine_session_id, sessions.engine_session_id)
 `);
-function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, ...s }); }
+function reconcileUpsert(s) { _reconcileUpsert.run({ tmux_target: null, engine_session_id: null, ...s }); }
 
 // AI-generated titles NEVER overwrite a manually-set (locked) one.
 const _setTitle = db.prepare('UPDATE sessions SET title = ? WHERE session_id = ? AND COALESCE(title_locked, 0) = 0');
@@ -274,7 +351,8 @@ const _setLocation = db.prepare('UPDATE sessions SET location = ? WHERE session_
 // working dir + multiplexer + pane target + pid. COALESCE so a null never clobbers a known value.
 const _setSessionMeta = db.prepare(`UPDATE sessions SET
   working_dir = COALESCE(?, working_dir), multiplexer = COALESCE(?, multiplexer),
-  tmux_target = COALESCE(?, tmux_target), pid = COALESCE(?, pid), task = COALESCE(?, task)
+  tmux_target = COALESCE(?, tmux_target), pid = COALESCE(?, pid), task = COALESCE(?, task),
+  engine_session_id = COALESCE(?, engine_session_id), transcript_path = COALESCE(?, transcript_path)
   WHERE session_id = ?`);
 const _getTitle = db.prepare('SELECT title, title_locked FROM sessions WHERE session_id = ?');
 function getTitle(session_id) { const r = _getTitle.get(session_id); return r ? r.title : null; }
@@ -295,4 +373,4 @@ const insertSystemSample = db.transaction((s) => {
   });
 });
 
-module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, insertAssessment, q, DB_PATH };
+module.exports = { db, ingestEvent, reconcileUpsert, setTitle, setTitleManual, getTitle, isTitleLocked, setActivity, insertSystemSample, insertAssessment, reconcileSessionRows, sweepStaleSessions, sessionRowIsDead, q, DB_PATH };

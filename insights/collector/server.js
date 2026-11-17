@@ -36,6 +36,7 @@ const HOST = '127.0.0.1';
 const TOKEN = process.env.ASMLTR_INSIGHTS_TOKEN || '';
 const CONTROL_TOKEN = process.env.ASMLTR_INSIGHTS_CONTROL_TOKEN || '';
 const RECONCILE_MS = Number(process.env.ASMLTR_RECONCILE_MS || 15000);
+const SWEEP_MS = Number(process.env.ASMLTR_SWEEP_MS) || 10 * 60 * 1000; // stale-session backstop sweep
 const SAMPLE_MS = Number(process.env.ASMLTR_SAMPLE_MS || 30000);
 const TAIL_MS = Number(process.env.ASMLTR_TAIL_MS || 5000);
 const ENABLE_TAILER = process.env.ASMLTR_ENABLE_TAILER !== '0';
@@ -197,7 +198,11 @@ app.post('/ingest', requireToken, (req, res) => {
 
 // --- read API ----------------------------------------------------------------
 app.get('/api/sessions', requireToken, (req, res) => {
-  const rows = req.query.active === '1' ? dbmod.q.activeSessions.all() : dbmod.q.sessions.all({ limit: Number(req.query.limit) || 200 });
+  const raw = req.query.active === '1' ? dbmod.q.activeSessions.all() : dbmod.q.sessions.all({ limit: Number(req.query.limit) || 200 });
+  // Verify liveness before reporting: an 'active' row whose process died abnormally never gets a
+  // SessionEnd, so without this the list (and `asmltr ls` / map / who on top of it) overstates what
+  // is running. Retire-only, and process-backed rows only — see reconcileSessionRows in db.js.
+  const rows = dbmod.reconcileSessionRows(raw);
   res.json({ sessions: rows, count: rows.length });
 });
 app.get('/api/update-status', requireToken, (req, res) => res.json(_updateStatus));
@@ -498,6 +503,18 @@ server.listen(PORT, HOST, () => {
   if (!TOKEN) console.warn('[collector] WARNING: ASMLTR_INSIGHTS_TOKEN unset — auth disabled (dev mode)');
 
   reconcile.start(dbmod, RECONCILE_MS, (n) => io.emit('sessions-changed', { count: n }));
+  // Backstop for rows reconcile.start() can never reach: it mirrors the TRACKER FILES, so a row
+  // that aged out of a tracker (or arrived from the hook with no pane, keyed by raw engine uuid)
+  // is written 'active' once on session-start and then never revisited. 16 such rows from Jun–Sep
+  // 2026 were still claiming active on 2026-11-17. This sweeps the TABLE, not the trackers.
+  const sweepStale = () => {
+    try {
+      const n = dbmod.sweepStaleSessions();
+      if (n) { console.log(`[sweep] retired ${n} stale session row(s)`); io.emit('sessions-changed', { count: n }); }
+    } catch (e) { console.warn('[sweep] failed:', e.message); }
+  };
+  setTimeout(sweepStale, 15000).unref?.();              // once shortly after boot
+  setInterval(sweepStale, SWEEP_MS).unref?.();
   sampler.start(dbmod, SAMPLE_MS, (s) => io.emit('system-sample', s));
   setTimeout(reflect, 20000).unref?.();               // first pass shortly after boot
   setInterval(reflect, REFLECT_CHECK_MS).unref?.();   // then change-triggered on each check

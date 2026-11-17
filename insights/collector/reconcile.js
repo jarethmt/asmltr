@@ -63,6 +63,7 @@ function reconcileSource(db, src) {
       tool_count: s.tool_count || 0,
       multiplexer: s.multiplexer || src.defaults.multiplexer,
       tmux_target: s.tmux_target || null,
+      engine_session_id: s.engine_session_id || null,  // minted by the launcher → makes the row resumable
       now: Date.now(),
     });
     n++;

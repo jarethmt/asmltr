@@ -12,6 +12,7 @@
  *   4. Attach you. Detach leaves it running + monitored; quitting the CLI ends it.
  */
 const { spawn, execFileSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -23,6 +24,8 @@ const HOME = os.homedir();
 const TRACKER = process.env.ASMLTR_CLI_TRACKER_PATH || path.join(HOME, '.asmltr', 'cli-sessions.json');
 const IDENTITY = process.env.ASMLTR_CLI_IDENTITY || (os.userInfo().username || 'cli');
 
+// single-quote for /bin/sh: the only unsafe char inside '' is ' itself.
+function shq(v) { return "'" + String(v).replace(/'/g, `'\\''`) + "'"; }
 function readTracker() { try { return JSON.parse(fs.readFileSync(TRACKER, 'utf8')); } catch { return { sessions: [] }; } }
 function writeTracker(t) { fs.mkdirSync(path.dirname(TRACKER), { recursive: true }); fs.writeFileSync(TRACKER, JSON.stringify(t)); }
 function upsert(entry) {
@@ -48,6 +51,10 @@ function profile(id, cwd) {
       envPrefix: perm === 'bypassPermissions' ? 'export IS_SANDBOX=1; ' : '',
       args: [...(perm && perm !== 'default' ? ['--permission-mode', perm] : []), ...(appended ? ['--append-system-prompt', appended] : []), ...extra],
       tailer: 'claude-tailer.js',
+      // the claude CLI lets us CHOOSE the session uuid up front (--session-id); the SDK only tells
+      // you afterwards. Minting it means the registry row knows its engine id from the first
+      // instant, instead of never (0 of 141 CLI records carried one before 2026-11-17).
+      supportsSessionId: true,
     };
   }
   const model = engines.modelFor(id);
@@ -81,13 +88,44 @@ async function main() {
   const name = `asmltr-cli-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const p = profile(id, cwd);
 
+  // ORPHAN GUARD. We spawn DETACHED and then attach the caller. With no TTY the attach fails
+  // instantly, but the pane is alive and waiting on stdin forever — so a non-interactive caller
+  // creates a session nobody can ever type into, holding an idle engine (~300MB) plus its whole
+  // MCP fleet until the host reboots. 51 such sessions accumulated here over 123 days; each had
+  // exactly one event (session-start) and never ran a single turn.
+  // Headless therefore requires PRINT mode (-p/--print), which runs the prompt and EXITS. A bare
+  // prompt argument is not enough: without -p the engine stays interactive, so it answers the
+  // prompt and then waits on stdin forever — an orphan with one turn of work in it instead of zero.
+  // (That is precisely how `eve status` — an alias that LAUNCHED a session whose prompt was the
+  // word "status" — went recursive and spawned ~20 sessions in 16 minutes on 2026-11-17.)
+  const hasTTY = !!(process.stdin.isTTY && process.stdout.isTTY);
+  const isPrint = args.includes('-p') || args.includes('--print');
+  if (!hasTTY && !isPrint) {
+    console.error(`asmltr ${id}: refusing to launch — no terminal to attach to, and not in print mode.`);
+    console.error('  Detached + interactive = a pane nobody can type into, idling until the host reboots.');
+    console.error(`  Interactive use: run \`asmltr ${id}\` from a real terminal.`);
+    console.error(`  Scripted use:    \`asmltr ${id} -p "<prompt>"\`  (runs the prompt, then exits).`);
+    console.error('  To list sessions (a common mix-up — this command LAUNCHES one): `asmltr ls`.');
+    process.exit(2);
+  }
+
+  // Mint the engine session id up front so the registry row can point at its own transcript and be
+  // resumed later. Skipped if the caller is already steering session identity themselves.
+  const callerOwnsSession = args.some((a) => ['--session-id', '--resume', '-r', '--continue', '-c', '--fork-session'].includes(String(a)));
+  const engineSessionId = p.supportsSessionId && !callerOwnsSession ? crypto.randomUUID() : null;
+  const idArgs = engineSessionId ? ['--session-id', engineSessionId] : [];
+
+  // The pane's own shell retires the session on the way out — whatever the exit code, including the
+  // crash/kill paths that never reach Claude Code's SessionEnd hook. Runs BEFORE the linger sleep so
+  // the row is honest immediately rather than 30s later.
+  const endGuard = `${shq(process.execPath)} ${shq(path.join(__dirname, 'lib', 'session-ended.js'))} ${shq(name)} "$ec" >/dev/null 2>&1 || true; `;
   // Lingers on non-zero exit so a broken launch is visible on attach instead of a vanished pane.
-  const guard = p.envPrefix + '"$0" "$@"; ec=$?; if [ $ec -ne 0 ]; then echo; echo "[asmltr] ' + id + ' exited with code $ec (see above); this pane closes in 30s"; sleep 30; fi';
-  if (!M.spawnDetached(name, cwd, ['bash', '-c', guard, bin, ...p.args, ...args])) { console.error(`asmltr ${id}: failed to start ${MUX} session`); process.exit(1); }
+  const guard = p.envPrefix + '"$0" "$@"; ec=$?; ' + endGuard + 'if [ $ec -ne 0 ]; then echo; echo "[asmltr] ' + id + ' exited with code $ec (see above); this pane closes in 30s"; sleep 30; fi';
+  if (!M.spawnDetached(name, cwd, ['bash', '-c', guard, bin, ...p.args, ...idArgs, ...args])) { console.error(`asmltr ${id}: failed to start ${MUX} session`); process.exit(1); }
 
   upsert({
     session_id: name, surface: p.surface, engine: id, identity: IDENTITY,
-    multiplexer: MUX, tmux_target: name, pid: M.pid(name),
+    multiplexer: MUX, tmux_target: name, pid: M.pid(name), engine_session_id: engineSessionId,
     cwd, working_dir: cwd, task: `${id} — ${path.basename(cwd)}`,
     started_unix: Math.floor(launchTs / 1000), last_activity_unix: Math.floor(launchTs / 1000),
     tool_count: 0, status: 'active',

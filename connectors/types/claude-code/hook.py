@@ -126,6 +126,12 @@ def main():
     sid = mux_name or data.get("session_id")  # pane name unifies with the tracker; else the uuid
     if not sid:
         return
+    # Keep the PANE NAME as the key (that is what unifies this with the tracker and `asmltr ls`),
+    # but stop throwing away the engine's own session uuid and transcript path. Without them a
+    # registry row can never be joined back to the real conversation on disk or be --resume'd —
+    # which is exactly the state every CLI session was in before 2026-11-17.
+    engine_sid = data.get("session_id")
+    transcript_path = data.get("transcript_path")
 
     base = {"surface": "claude-code", "session_id": sid, "identity": identity, "source": "claude-code-hook"}
     events = []
@@ -145,6 +151,7 @@ def main():
         events.append({**base, "event_type": "session-start", "payload": {
             "working_dir": cwd, "multiplexer": mux, "tmux_target": mux_name, "pid": pid,
             "task": f"claude — {os.path.basename(cwd)}" if cwd else "claude",
+            "engine_session_id": engine_sid, "transcript_path": transcript_path,
         }})
     elif event_name == "UserPromptSubmit":
         prompt = (data.get("prompt") or "").strip()
