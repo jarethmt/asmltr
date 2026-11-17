@@ -207,10 +207,13 @@ app.get('/api/sessions', requireToken, (req, res) => {
 });
 app.get('/api/update-status', requireToken, (req, res) => res.json(_updateStatus));
 app.get('/api/events', requireToken, (req, res) => {
+  // ?types=inbound,outbound,… filters IN SQL so `limit` counts the rows the caller actually wants.
+  const types = String(req.query.types || '').split(',').map((t) => t.trim()).filter(Boolean);
   const rows = dbmod.q.events.all({
     surface: req.query.surface || null,
     identity: req.query.identity || null,
     session: req.query.session || null,
+    types: types.length ? JSON.stringify(types) : null,
     since: Number(req.query.since) || 0,
     limit: Math.min(Number(req.query.limit) || 100, 1000),
   });

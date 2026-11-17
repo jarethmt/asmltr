@@ -268,11 +268,16 @@ function sweepStaleSessions() {
 const q = {
   sessions: db.prepare(`SELECT * FROM sessions ORDER BY last_activity_unix DESC LIMIT @limit`),
   activeSessions: db.prepare(`SELECT * FROM sessions WHERE status = 'active' ORDER BY last_activity_unix DESC`),
+  // @types is an optional JSON array of event_type values. It exists because @limit is applied by
+  // SQLite BEFORE any caller-side filtering: a reader that wants the last N *conversation* events
+  // would otherwise spend its whole budget on token-usage rows (the single most common type —
+  // 10,727 of 23,649 on this host), and get a handful of turns back instead of N.
   events: db.prepare(`
     SELECT * FROM events
     WHERE (@surface IS NULL OR surface = @surface)
       AND (@identity IS NULL OR identity = @identity)
       AND (@session IS NULL OR session_id = @session)
+      AND (@types IS NULL OR event_type IN (SELECT value FROM json_each(@types)))
       AND ts >= @since
     ORDER BY ts DESC LIMIT @limit
   `),

@@ -130,6 +130,13 @@ async function cmdEvents(f) {
   console.log(A.dim(`\n${events.length} events`));
 }
 
+// Which event types `asmltr context` actually prints. Single source of truth: it drives BOTH the
+// server-side `types` filter and the local render filter, so the two can never drift apart and make
+// `-n` lie again. --full additionally shows tool results and thinking.
+const DISPLAY_EVENTS = (full) => (full
+  ? ['inbound', 'outbound', 'tool', 'tool_result', 'thinking']
+  : ['inbound', 'outbound', 'tool']);
+
 async function cmdContext(rest) {
   // asmltr context <session-id> [-n <events>] [--full]
   // A condensed, readable transcript + live status of one session, BY ID — the drill-down primitive:
@@ -148,7 +155,13 @@ async function cmdContext(rest) {
   const { sessions } = await api('/api/sessions');
   const s = (sessions || []).find((x) => x.session_id === id) || (sessions || []).find((x) => String(x.session_id).includes(id));
   const sid = (s && s.session_id) || id;
-  const { events } = await api('/api/events?' + new URLSearchParams({ session: sid, limit: String(limit) }).toString());
+  // Ask for exactly the event types we RENDER, so -n counts transcript lines. Without this the
+  // limit is spent before the filter below ever runs: token-usage is the most common event type, so
+  // `-n 60` on a busy session returned a handful of turns (`-n 6` on a 3,378-event session gave 3).
+  // The type list must match the render filter, including --full's extra types, or the limit is
+  // again approximate. An older collector ignores `types` and the filter below still protects us.
+  const types = DISPLAY_EVENTS(full);
+  const { events } = await api('/api/events?' + new URLSearchParams({ session: sid, types: types.join(','), limit: String(limit) }).toString());
 
   console.log(A.bold('═ session ') + sid);
   if (s) {
@@ -159,7 +172,7 @@ async function cmdContext(rest) {
   } else {
     console.log(A.dim('  (session not in the live table — showing its recorded events)'));
   }
-  const rows = (events || []).slice().reverse().filter((e) => ['inbound', 'outbound', 'tool', 'tool_result', 'thinking'].includes(e.event_type));
+  const rows = (events || []).slice().reverse().filter((e) => types.includes(e.event_type));
   console.log(A.dim(`─ transcript · ${rows.length} events, oldest→newest ─`));
   const cap = full ? 100000 : 500;
   for (const e of rows) {
