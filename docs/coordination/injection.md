@@ -102,9 +102,11 @@ stopped it, and returns **no actions** — so the connector posts *nothing* to t
 
 ## 2. CLI sessions — send keys into the tmux pane
 
-`asmltr claude` runs an interactive Claude Code TUI inside a **tmux** session (see the wrapper in
-`cli/asmltr-claude.js`). There is no SDK turn to resume — it's a live terminal program. So "injection"
-here means literally **typing into its pane**, and "takeover" means **attaching to the tmux session**.
+`asmltr claude` runs an interactive Claude Code TUI inside a **multiplexer** session — **screen** by
+default, tmux via `ASMLTR_MULTIPLEXER=tmux` (see the launcher in `cli/asmltr-engine.js`, which
+generalizes this to any reasoning-engine CLI). There is no SDK turn to resume — it's a live terminal
+program. So "injection" here means literally **typing into its pane**, and "takeover" means
+**attaching to that multiplexer session**.
 
 How such a session gets on the dashboard in the first place:
 
@@ -189,6 +191,6 @@ flowchart LR
 | outbound route storage (`setOutboundRoute`) | `core/src/sessions.js` |
 | unified outbound `POST /send` → connector `/out` | `connectors/manager/server.js` |
 | `send-keys` control + audit | `insights/collector/control.js`, `server.js` |
-| CLI wrapper + transcript tailer + reconcile | `cli/asmltr-claude.js`, `cli/lib/claude-tailer.js`, `insights/collector/reconcile.js` |
+| CLI launcher + transcript tailer + reconcile | `cli/asmltr-engine.js`, `cli/lib/claude-tailer.js`, `insights/collector/reconcile.js` |
 | TUI steer/stop | `cli/tui.js` |
 | dashboard conversation-details pane | `insights/dashboard/src/components/SessionDetail.vue` |

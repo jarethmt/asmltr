@@ -53,7 +53,7 @@ function setSdkAutoUpdate(b) { try { fs.writeFileSync(sdkAutoFile(), b ? '1' : '
 
 // Permission mode for INTERACTIVE `asmltr claude` (terminal) sessions. Default 'bypassPermissions'
 // (full-autonomy — no per-action approval), matching how channel sessions already run. Persisted so
-// the GUI/TUI can toggle it; asmltr-claude.js reads it at launch. Channel/SDK sessions are unaffected.
+// the GUI/TUI can toggle it; asmltr-engine.js reads it at launch. Channel/SDK sessions are unaffected.
 const VALID_PERM = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 function getCliPermissionMode() {
   try { const v = fs.readFileSync(cliPermFile(), 'utf8').trim(); if (VALID_PERM.includes(v)) return v; } catch (_) {}
