@@ -24,7 +24,7 @@ const TYPE_META = {
   s3: { label: 's3', icon: ['fas', 'server'], color: '#8B5CF6' },
   local: { label: 'local', icon: ['fas', 'folder-open'], color: '#34D399' },
   mail: { label: 'mail', icon: ['fas', 'envelope'], color: '#EC4899' },
-  caldav: { label: 'calendar', icon: ['fas', 'calendar'], color: '#F59E0B' },
+  caldav: { label: 'calendar', icon: ['fas', 'calendar-days'], color: '#F59E0B' },
   carddav: { label: 'contacts', icon: ['fas', 'address-book'], color: '#60A5FA' }
 }
 function typeMeta(t) {
@@ -119,11 +119,13 @@ const TYPE_FIELDS = {
     { key: 'password_ref', label: 'Password', ref: true }
   ],
   caldav: [
+    { key: 'email_address', label: 'Email address', placeholder: 'you@example.com' },
     { key: 'base_url', label: 'Collection URL', placeholder: 'https://host/SOGo/dav/user@d.com/Calendar/', mono: true },
     { key: 'username_ref', label: 'Username', ref: true },
     { key: 'password_ref', label: 'Password', ref: true }
   ],
   carddav: [
+    { key: 'email_address', label: 'Email address', placeholder: 'you@example.com' },
     { key: 'base_url', label: 'Collection URL', placeholder: 'https://host/SOGo/dav/user@d.com/Contacts/', mono: true },
     { key: 'username_ref', label: 'Username', ref: true },
     { key: 'password_ref', label: 'Password', ref: true }
@@ -133,21 +135,36 @@ const TYPE_FIELDS = {
 // Provider presets. Choosing one prefills hosts and sets `auth`, so the operator picks
 // "Gmail" rather than remembering imap.gmail.com — and an OAuth provider deliberately hides the
 // credential fields, because the secret arrives from the consent flow, not from a form.
+// Each provider declares EXACTLY which fields it asks for. An OAuth provider asks for the address
+// and nothing else: hosts are known, and the credential arrives from consent — so showing an IMAP
+// host or a password field there is just a form the operator has to ignore.
 const PROVIDERS = {
   mail: [
-    { id: 'imap', label: 'IMAP / SMTP', hint: 'mailcow, Dovecot, any standard server — authenticates with a stored password',
+    { id: 'imap', label: 'IMAP / SMTP', icon: ['fas', 'server'],
+      hint: 'mailcow, Dovecot, any standard server — authenticates with a stored password',
+      ask: ['email_address', 'imap_host', 'imap_port', 'smtp_host', 'smtp_port', 'from_name', 'user_ref', 'password_ref'],
       preset: { imap_port: '993', smtp_port: '587' }, oauth: false },
-    { id: 'gmail', label: 'Gmail / Google Workspace', hint: 'authorize with Google; one consent also covers calendar and contacts',
+    { id: 'gmail', label: 'Gmail / Google Workspace', icon: ['fas', 'envelope'],
+      hint: 'just the address — authorize with Google afterwards; one consent also covers calendar and contacts',
+      ask: ['email_address', 'from_name'],
       preset: { imap_host: 'imap.gmail.com', imap_port: '993', smtp_host: 'smtp.gmail.com', smtp_port: '587' }, oauth: true }
   ],
   caldav: [
-    { id: 'sogo', label: 'SOGo / mailcow', hint: 'https://host/SOGo/dav/<address>/Calendar/', preset: {}, oauth: false },
-    { id: 'google', label: 'Google Calendar', hint: 'authorize with Google', oauth: true,
+    { id: 'sogo', label: 'SOGo / mailcow', icon: ['fas', 'server'],
+      hint: 'a CalDAV collection URL plus a stored password',
+      ask: ['base_url', 'username_ref', 'password_ref'], preset: {}, oauth: false },
+    { id: 'google', label: 'Google Calendar', icon: ['fas', 'calendar-days'],
+      hint: 'just the address — the collection URL is derived and Google authorizes it',
+      ask: ['email_address'], oauth: true,
       urlTemplate: (a) => `https://apidata.googleusercontent.com/caldav/v2/${encodeURIComponent(a)}/` }
   ],
   carddav: [
-    { id: 'sogo', label: 'SOGo / mailcow', hint: 'https://host/SOGo/dav/<address>/Contacts/', preset: {}, oauth: false },
-    { id: 'google', label: 'Google Contacts', hint: 'authorize with Google', oauth: true,
+    { id: 'sogo', label: 'SOGo / mailcow', icon: ['fas', 'server'],
+      hint: 'a CardDAV collection URL plus a stored password',
+      ask: ['base_url', 'username_ref', 'password_ref'], preset: {}, oauth: false },
+    { id: 'google', label: 'Google Contacts', icon: ['fas', 'address-book'],
+      hint: 'just the address — the collection URL is derived and Google authorizes it',
+      ask: ['email_address'], oauth: true,
       urlTemplate: (a) => `https://www.googleapis.com/carddav/v1/principals/${encodeURIComponent(a)}/lists/default/` }
   ]
 }
@@ -204,12 +221,17 @@ function pickProvider(pr) {
 
 // An OAuth provider must not ask for a password: the secret comes from the consent flow. The URL
 // for Google DAV collections is derived from the address, so that is hidden too.
+// The form is the provider's `ask` list, in that order. Anything a provider does not ask for is
+// either preset or derived, so it never reaches the operator.
 const visibleFields = computed(() => {
   const all = chosenType.value ? TYPE_FIELDS[chosenType.value] || [] : []
   const pr = chosenProvider.value
-  if (!pr || !pr.oauth) return all
-  return all.filter((f) => !['password_ref', 'user_ref', 'username_ref'].includes(f.key))
-    .filter((f) => !(pr.urlTemplate && f.key === 'base_url'))
+  if (!pr) return all
+  if (!Array.isArray(pr.ask)) return all
+  const byKey = Object.fromEntries(all.map((f) => [f.key, f]))
+  return pr.ask
+    .map((k) => byKey[k] || { key: k, label: k.replace(/_ref$/, '').replace(/_/g, ' '), ref: k.endsWith('_ref') })
+    .filter(Boolean)
 })
 
 function toggleStoreNew(key) {
@@ -240,6 +262,8 @@ async function onCreate() {
       if (v) config[f.key] = v
     }
     const pr = chosenProvider.value
+    // hidden presets (hosts/ports) still belong in the stored config
+    if (pr && pr.preset) for (const [k, v] of Object.entries(pr.preset)) if (!config[k]) config[k] = v
     if (pr && pr.oauth) {
       config.auth = 'oauth2'
       // derive the collection URL for Google DAV from the address rather than making the
@@ -562,7 +586,12 @@ onMounted(load)
           @click="pickProvider(pr)"
         >
           <div class="flex items-center justify-between gap-3">
-            <span class="text-sm font-semibold text-slate-100">{{ pr.label }}</span>
+            <span class="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <span v-if="pr.icon" class="text-lg" :style="{ color: typeMeta(chosenType).color }">
+                <AppIcon :name="pr.icon" />
+              </span>
+              {{ pr.label }}
+            </span>
             <span v-if="pr.oauth" class="rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
               needs authorizing
             </span>
