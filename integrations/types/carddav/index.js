@@ -70,13 +70,27 @@ async function open(rawCfg = {}) {
       try {
         rows = await c.report(url, body, 'address-data');
       } catch (e) {
-        if (/\b(501|403|405)\b/.test(String(e.message))) {
+        const msg = String(e.message);
+        // Google answers addressbook-query with 400 INVALID_ARGUMENT — it supports PROPFIND and
+        // addressbook-multiget, not an open-ended query. Fall back to listing hrefs then fetching
+        // them, which is what a real CardDAV client does against Google.
+        if (/\b400\b/.test(msg)) {
+          const listed = await c.listResources(url);
+          const hrefs = listed.slice(0, limit);
+          const got = [];
+          for (const h of hrefs) {
+            try { const { data, etag } = await c.getItem(h.url); got.push({ href: h.href, url: h.url, etag, ...summarise(data), vcard: data }); }
+            catch (_) { /* skip an individual card rather than losing the whole book */ }
+          }
+          return Object.assign(got, { enumerable: true, via: 'propfind' });
+        }
+        if (/\b(501|403|405)\b/.test(msg)) {
           return Object.assign([], { enumerable: false, reason: 'collection does not support enumeration (search-only, e.g. a GAL)' });
         }
         throw e;
       }
       const out = rows.slice(0, limit).map((r) => ({ href: r.href, url: r.url, etag: r.etag, ...summarise(r.data), vcard: r.data }));
-      return Object.assign(out, { enumerable: true });
+      return Object.assign(out, { enumerable: true, via: 'addressbook-query' });
     },
     /**
      * Search a directory by name or email — the only way to query a GAL.

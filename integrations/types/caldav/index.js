@@ -25,20 +25,50 @@ async function withToken(cfg) {
   return { ...cfg, access_token };
 }
 
-function icalField(ics, field) {
-  // unfold RFC5545 continuation lines before matching
+/**
+ * Isolate the VEVENT before reading fields. An ICS from Google carries a VTIMEZONE whose DST rules
+ * have their OWN DTSTART (typically `19700308T020000`) — and that one comes FIRST in the document,
+ * so matching the whole body reported every event as starting in 1970.
+ */
+function veventOf(ics) {
   const flat = String(ics || '').replace(/\r?\n[ \t]/g, '');
-  const m = new RegExp(`^${field}(?:;[^:\\n]*)?:(.*)$`, 'im').exec(flat);
+  const m = /BEGIN:VEVENT([\s\S]*?)END:VEVENT/i.exec(flat);
+  return m ? m[1] : flat;
+}
+
+function icalField(ics, field, { scope = 'vevent' } = {}) {
+  const body = scope === 'vevent' ? veventOf(ics) : String(ics || '').replace(/\r?\n[ \t]/g, '');
+  const m = new RegExp(`^${field}(?:;[^:\\n]*)?:(.*)$`, 'im').exec(body);
   return m ? m[1].trim() : null;
+}
+
+/** The TZID off DTSTART, so a floating local time is interpretable. */
+function icalTzid(ics) {
+  const m = /^DTSTART;[^:\n]*TZID=([^;:\n]+)/im.exec(veventOf(ics));
+  return m ? m[1].trim() : null;
+}
+
+/** `20261119T143000` / `20261119` / `…Z` → ISO, so callers are not parsing iCalendar themselves. */
+function icalToIso(v) {
+  if (!v) return null;
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(String(v).trim());
+  if (!m) return null;
+  const [, y, mo, d, hh, mi, ss, z] = m;
+  if (!hh) return `${y}-${mo}-${d}`;                                  // all-day
+  return z ? `${y}-${mo}-${d}T${hh}:${mi}:${ss}Z` : `${y}-${mo}-${d}T${hh}:${mi}:${ss}`;
 }
 
 /** Summarise an event without pretending to be a full iCalendar parser. */
 function summarise(ics) {
+  const rawStart = icalField(ics, 'DTSTART');
+  const rawEnd = icalField(ics, 'DTEND');
   return {
     uid: icalField(ics, 'UID'),
     summary: icalField(ics, 'SUMMARY'),
-    start: icalField(ics, 'DTSTART'),
-    end: icalField(ics, 'DTEND'),
+    start: icalToIso(rawStart) || rawStart,
+    end: icalToIso(rawEnd) || rawEnd,
+    tzid: icalTzid(ics),
+    all_day: !!(rawStart && /^\d{8}$/.test(rawStart)),
     location: icalField(ics, 'LOCATION'),
     organizer: icalField(ics, 'ORGANIZER'),
     status: icalField(ics, 'STATUS'),
@@ -93,4 +123,6 @@ async function probe(cfg = {}) {
   return { ok: true, calendars: cals.length, names: cals.map((x) => x.name).filter(Boolean).slice(0, 8) };
 }
 
-module.exports = { open, probe, kind: 'tools', lifecycle: 'passive' };
+// `summarise` and the date helper are exported so the VTIMEZONE trap can be tested against the
+// REAL parser rather than a reimplementation of it in the test.
+module.exports = { open, probe, kind: 'tools', lifecycle: 'passive', summarise, icalToIso, veventOf };
