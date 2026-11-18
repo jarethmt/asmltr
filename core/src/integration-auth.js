@@ -64,6 +64,12 @@ async function saveClient({ client_id, client_secret, client_type = 'web' }) {
   return { saved: true, client_type };
 }
 
+/** The email address inside a config value or an integration name, lowercased. */
+function emailOf(v) {
+  const m = /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/.exec(String(v || ''));
+  return m ? m[0].toLowerCase() : null;
+}
+
 function needsOAuth(it) { return !!it && (it.config || {}).auth === 'oauth2'; }
 
 /** Has this integration actually got a usable refresh token? */
@@ -172,15 +178,18 @@ async function complete({ state: s, code, integration_id }) {
 
   const patch = { auth: 'oauth2', refresh_token_ref: refKey, oauth_client_id_ref: K_ID, oauth_client_secret_ref: K_SECRET };
   const touched = [];
+  const want = emailOf(account);
   for (const sib of integrations.list()) {
     const cfg = sib.config || {};
     if (cfg.auth !== 'oauth2') continue;
-    const sibAccount = cfg.email_address || sib.name;
-    if (String(sibAccount).toLowerCase().indexOf(String(account).toLowerCase()) === -1) continue;
+    // EXACT address match. Substring matching here would cross-wire credentials: authorizing
+    // a@gmail.com also matches aa@gmail.com, which would silently stamp the wrong account's
+    // integrations with this refresh token. An address is an identity, so compare it as one.
+    if (emailOf(cfg.email_address || sib.name) !== want) continue;
     integrations.update(sib.id, { config: { ...cfg, ...patch } });
     touched.push({ id: sib.id, type: sib.type, name: sib.name });
   }
   return { account, granted_scopes: String(scope || '').split(' ').filter(Boolean), authorized: touched };
 }
 
-module.exports = { state, start, complete, saveClient, readClient, needsOAuth, CALLBACK_PATH };
+module.exports = { state, start, complete, saveClient, readClient, needsOAuth, emailOf, CALLBACK_PATH };

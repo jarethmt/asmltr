@@ -56,3 +56,18 @@ test('authUrl asks for an offline grant with forced consent', () => {
   assert.match(u, /prompt=consent/);
   assert.match(u, /mail\.google\.com/);
 });
+
+// One Google consent covers mail+calendar+contacts for ONE account, so completing it stamps that
+// account's siblings. Matching by substring would cross-wire credentials: authorizing
+// a@gmail.com also matches aa@gmail.com, silently giving it the wrong refresh token.
+const intAuth = require('../core/src/integration-auth');
+
+test('account matching is exact on the email address, not a substring', () => {
+  assert.equal(intAuth.emailOf('jarethmt@gmail.com mail'), 'jarethmt@gmail.com');
+  assert.equal(intAuth.emailOf('thoughtspacewebsites@gmail.com calendar'), 'thoughtspacewebsites@gmail.com');
+  assert.equal(intAuth.emailOf('no address here'), null);
+  // the specific trap: one address being a substring of another must NOT collide
+  assert.notEqual(intAuth.emailOf('aa@gmail.com'), intAuth.emailOf('a@gmail.com'));
+  // case and surrounding text must not matter
+  assert.equal(intAuth.emailOf('  Jareth <JarethMT@Gmail.com> contacts'), 'jarethmt@gmail.com');
+});
