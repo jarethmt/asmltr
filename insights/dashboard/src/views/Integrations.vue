@@ -9,48 +9,6 @@ import { integrations, vaultApi } from '@/services/api'
 import PageHeader from '@/components/PageHeader.vue'
 import ModalShell from '@/components/ModalShell.vue'
 
-onMounted(loadGoogleStatus)
-
-// ── Google connect ──────────────────────────────────────────────────────────
-// One Google consent grants mail + calendar + contacts together, so finishing it creates three
-// integrations sharing a single refresh token. Which flow is possible depends on the operator's
-// OAuth client, so /status is asked FIRST and drives what this panel offers:
-//   redirect  Web client + a configured public origin → one click, browser returns to us
-//   paste     Desktop client → Google only allows loopback redirects, so the code is pasted back
-//   disabled  no usable client → say what to create instead of failing mid-wizard
-const g = reactive({
-  status: null, loading: false, account: '', state: null, authUrl: '', mode: '',
-  code: '', busy: false, error: null, done: null, open: false,
-})
-
-async function loadGoogleStatus() {
-  g.loading = true; g.error = null
-  try { g.status = await integrations.googleStatus() }
-  catch (e) { g.error = e.message } finally { g.loading = false }
-}
-
-async function googleBegin() {
-  g.error = null; g.done = null
-  if (!g.account.trim()) { g.error = 'Enter the Google address to connect'; return }
-  g.busy = true
-  try {
-    const r = await integrations.googleStart(g.account.trim())
-    g.state = r.state; g.authUrl = r.auth_url; g.mode = r.mode
-    window.open(r.auth_url, '_blank', 'noopener')
-  } catch (e) { g.error = e.message } finally { g.busy = false }
-}
-
-async function googleFinish() {
-  g.error = null
-  if (!g.code.trim()) { g.error = 'Paste the code (or the whole redirected URL)'; return }
-  g.busy = true
-  try {
-    g.done = await integrations.googleClaim({ state: g.state, code: g.code.trim(), account: g.account.trim() })
-    g.code = ''; g.state = null; g.authUrl = ''
-    await load()
-  } catch (e) { g.error = e.message } finally { g.busy = false }
-}
-
 // ── list state ──────────────────────────────────────────────────────────────
 const items = ref([])
 const loading = ref(false)
@@ -64,7 +22,10 @@ const busy = reactive({}) // id -> action string in flight
 const TYPE_META = {
   webdav: { label: 'webdav', icon: ['fas', 'globe'], color: '#22D3EE' },
   s3: { label: 's3', icon: ['fas', 'server'], color: '#8B5CF6' },
-  local: { label: 'local', icon: ['fas', 'folder-open'], color: '#34D399' }
+  local: { label: 'local', icon: ['fas', 'folder-open'], color: '#34D399' },
+  mail: { label: 'mail', icon: ['fas', 'envelope'], color: '#EC4899' },
+  caldav: { label: 'calendar', icon: ['fas', 'calendar'], color: '#F59E0B' },
+  carddav: { label: 'contacts', icon: ['fas', 'address-book'], color: '#60A5FA' }
 }
 function typeMeta(t) {
   return TYPE_META[t] || { label: t, icon: ['fas', 'globe'], color: '#94A3B8' }
@@ -76,6 +37,8 @@ function summary(it) {
   if (it.type === 'webdav') return [c.base_url, c.root].filter(Boolean)
   if (it.type === 's3') return [c.endpoint, c.bucket, c.prefix].filter(Boolean)
   if (it.type === 'local') return [c.root].filter(Boolean)
+  if (it.type === 'mail') return [c.email_address, c.imap_host, c.auth === 'oauth2' ? 'oauth' : 'password'].filter(Boolean)
+  if (it.type === 'caldav' || it.type === 'carddav') return [c.base_url, c.auth === 'oauth2' ? 'oauth' : 'password'].filter(Boolean)
   return []
 }
 
@@ -85,6 +48,7 @@ async function load() {
   try {
     const r = await integrations.list()
     items.value = r.integrations || []
+    refreshAuthStates(items.value)   // fire-and-forget: cards render, badges fill in
   } catch (e) {
     error.value = e.message
   } finally {
@@ -141,10 +105,56 @@ const TYPE_FIELDS = {
     { key: 'prefix', label: 'Prefix', placeholder: 'asmltr/', mono: true },
     { key: 'access_key_id_ref', label: 'Access key ID', ref: true },
     { key: 'secret_access_key_ref', label: 'Secret access key', ref: true }
+  ],
+  // mail/caldav/carddav each serve TWO providers. The provider preset (below) decides which
+  // fields matter, so an operator adding Gmail is not asked for an IMAP host.
+  mail: [
+    { key: 'email_address', label: 'Email address', placeholder: 'you@example.com' },
+    { key: 'imap_host', label: 'IMAP host', placeholder: 'imap.example.com', mono: true },
+    { key: 'imap_port', label: 'IMAP port', placeholder: '993' },
+    { key: 'smtp_host', label: 'SMTP host', placeholder: 'smtp.example.com', mono: true },
+    { key: 'smtp_port', label: 'SMTP port', placeholder: '587' },
+    { key: 'from_name', label: 'From name', placeholder: 'Your Name' },
+    { key: 'user_ref', label: 'Username', ref: true },
+    { key: 'password_ref', label: 'Password', ref: true }
+  ],
+  caldav: [
+    { key: 'base_url', label: 'Collection URL', placeholder: 'https://host/SOGo/dav/user@d.com/Calendar/', mono: true },
+    { key: 'username_ref', label: 'Username', ref: true },
+    { key: 'password_ref', label: 'Password', ref: true }
+  ],
+  carddav: [
+    { key: 'base_url', label: 'Collection URL', placeholder: 'https://host/SOGo/dav/user@d.com/Contacts/', mono: true },
+    { key: 'username_ref', label: 'Username', ref: true },
+    { key: 'password_ref', label: 'Password', ref: true }
   ]
 }
 
-const step = ref('type') // 'type' | 'form'
+// Provider presets. Choosing one prefills hosts and sets `auth`, so the operator picks
+// "Gmail" rather than remembering imap.gmail.com — and an OAuth provider deliberately hides the
+// credential fields, because the secret arrives from the consent flow, not from a form.
+const PROVIDERS = {
+  mail: [
+    { id: 'imap', label: 'IMAP / SMTP', hint: 'mailcow, Dovecot, any standard server — authenticates with a stored password',
+      preset: { imap_port: '993', smtp_port: '587' }, oauth: false },
+    { id: 'gmail', label: 'Gmail / Google Workspace', hint: 'authorize with Google; one consent also covers calendar and contacts',
+      preset: { imap_host: 'imap.gmail.com', imap_port: '993', smtp_host: 'smtp.gmail.com', smtp_port: '587' }, oauth: true }
+  ],
+  caldav: [
+    { id: 'sogo', label: 'SOGo / mailcow', hint: 'https://host/SOGo/dav/<address>/Calendar/', preset: {}, oauth: false },
+    { id: 'google', label: 'Google Calendar', hint: 'authorize with Google', oauth: true,
+      urlTemplate: (a) => `https://apidata.googleusercontent.com/caldav/v2/${encodeURIComponent(a)}/` }
+  ],
+  carddav: [
+    { id: 'sogo', label: 'SOGo / mailcow', hint: 'https://host/SOGo/dav/<address>/Contacts/', preset: {}, oauth: false },
+    { id: 'google', label: 'Google Contacts', hint: 'authorize with Google', oauth: true,
+      urlTemplate: (a) => `https://www.googleapis.com/carddav/v1/principals/${encodeURIComponent(a)}/lists/default/` }
+  ]
+}
+function providersFor(t) { return PROVIDERS[t] || [] }
+
+const step = ref('type') // 'type' | 'provider' | 'form'
+const chosenProvider = ref(null)
 const chosenType = ref(null)
 const nameField = ref('')
 const fields = reactive({}) // key -> value string
@@ -168,22 +178,45 @@ function openAdd() {
     .catch(() => (vaultKeys.value = []))
 }
 
-function pickType(t) {
-  chosenType.value = t
-  step.value = 'form'
+function resetFormFields(t) {
   Object.keys(fields).forEach((k) => delete fields[k])
   Object.keys(storeNew).forEach((k) => delete storeNew[k])
-  for (const f of TYPE_FIELDS[t]) {
+  for (const f of TYPE_FIELDS[t] || []) {
     fields[f.key] = ''
     if (f.ref) storeNew[f.key] = { open: false, name: '', value: '' }
   }
 }
 
+function pickType(t) {
+  chosenType.value = t
+  chosenProvider.value = null
+  resetFormFields(t)
+  // types that serve more than one provider ask which first, so the form can be the right shape
+  step.value = providersFor(t).length ? 'provider' : 'form'
+}
+
+function pickProvider(pr) {
+  chosenProvider.value = pr
+  resetFormFields(chosenType.value)
+  for (const [k, v] of Object.entries(pr.preset || {})) fields[k] = v
+  step.value = 'form'
+}
+
+// An OAuth provider must not ask for a password: the secret comes from the consent flow. The URL
+// for Google DAV collections is derived from the address, so that is hidden too.
+const visibleFields = computed(() => {
+  const all = chosenType.value ? TYPE_FIELDS[chosenType.value] || [] : []
+  const pr = chosenProvider.value
+  if (!pr || !pr.oauth) return all
+  return all.filter((f) => !['password_ref', 'user_ref', 'username_ref'].includes(f.key))
+    .filter((f) => !(pr.urlTemplate && f.key === 'base_url'))
+})
+
 function toggleStoreNew(key) {
   if (storeNew[key]) storeNew[key].open = !storeNew[key].open
 }
 
-const currentFields = computed(() => (chosenType.value ? TYPE_FIELDS[chosenType.value] : []))
+const currentFields = computed(() => visibleFields.value)
 const canSubmit = computed(() => !!chosenType.value && !!nameField.value.trim())
 
 async function onCreate() {
@@ -206,14 +239,96 @@ async function onCreate() {
       const v = (fields[f.key] || '').trim()
       if (v) config[f.key] = v
     }
-    await integrations.create({ type: chosenType.value, name: nameField.value.trim(), config })
+    const pr = chosenProvider.value
+    if (pr && pr.oauth) {
+      config.auth = 'oauth2'
+      // derive the collection URL for Google DAV from the address rather than making the
+      // operator paste a long templated URL
+      const addr = (fields.email_address || nameField.value || '').trim()
+      if (pr.urlTemplate && addr) config.base_url = pr.urlTemplate(addr)
+      if (addr && chosenType.value === 'mail') config.email_address = addr
+    }
+    const made = await integrations.create({ type: chosenType.value, name: nameField.value.trim(), config })
     addOpen.value = false
     await load()
+    // an OAuth integration is created UNAUTHORIZED — take the operator straight to its wizard
+    // instead of leaving a card that silently cannot connect
+    if (pr && pr.oauth && made && made.id) openAuth(items.value.find((x) => x.id === made.id) || made)
   } catch (e) {
     formError.value = e.message
   } finally {
     submitting.value = false
   }
+}
+
+// ── per-card authorization ──────────────────────────────────────────────────
+// Each integration runs its OWN flow from its own card. `auth` state is fetched per card so a
+// card can say "needs authorizing" before the operator clicks anything, and so a provider that
+// needs no flow (a stored password) simply never shows the control.
+const authState = reactive({})   // integration id -> state from GET /:id/auth
+const auth = reactive({
+  open: false, it: null, st: null, loading: false, busy: false, error: null, done: null,
+  authUrl: '', state: null, mode: '', code: '',
+  clientId: '', clientSecret: '', clientType: 'web', savingClient: false,
+})
+
+async function refreshAuthStates(list) {
+  await Promise.all((list || []).map(async (it) => {
+    try { authState[it.id] = await integrations.authState(it.id) }
+    catch (_) { authState[it.id] = null }
+  }))
+}
+function needsAuthorizing(it) {
+  const a = authState[it.id]
+  return !!a && a.required && !a.authorized
+}
+function authBadge(it) {
+  const a = authState[it.id]
+  if (!a || !a.required) return null
+  return a.authorized ? { text: 'authorized', cls: 'text-emerald-300' } : { text: 'needs authorizing', cls: 'text-amber-300' }
+}
+
+async function openAuth(it) {
+  auth.open = true; auth.it = it; auth.st = null; auth.error = null; auth.done = null
+  auth.authUrl = ''; auth.state = null; auth.code = ''; auth.loading = true
+  try {
+    auth.st = await integrations.authState(it.id)
+    authState[it.id] = auth.st
+    const c = await integrations.oauthClient()
+    if (c && c.client_type) auth.clientType = c.client_type
+  } catch (e) { auth.error = e.message } finally { auth.loading = false }
+}
+
+async function saveOauthClient() {
+  auth.error = null
+  if (!auth.clientId.trim() || !auth.clientSecret.trim()) { auth.error = 'Both the client ID and secret are required'; return }
+  auth.savingClient = true
+  try {
+    await integrations.saveOauthClient({ client_id: auth.clientId.trim(), client_secret: auth.clientSecret.trim(), client_type: auth.clientType })
+    auth.clientId = ''; auth.clientSecret = ''
+    auth.st = await integrations.authState(auth.it.id)      // mode may now be `redirect`
+    authState[auth.it.id] = auth.st
+  } catch (e) { auth.error = e.message } finally { auth.savingClient = false }
+}
+
+async function beginAuth() {
+  auth.error = null; auth.busy = true
+  try {
+    const r = await integrations.authStart(auth.it.id)
+    auth.state = r.state; auth.authUrl = r.auth_url; auth.mode = r.mode
+    window.open(r.auth_url, '_blank', 'noopener')
+  } catch (e) { auth.error = e.message } finally { auth.busy = false }
+}
+
+async function finishAuth() {
+  auth.error = null
+  if (!auth.code.trim()) { auth.error = 'Paste the code (or the whole redirected URL)'; return }
+  auth.busy = true
+  try {
+    auth.done = await integrations.authClaim(auth.it.id, { state: auth.state, code: auth.code.trim() })
+    auth.code = ''; auth.authUrl = ''; auth.state = null
+    await load()
+  } catch (e) { auth.error = e.message } finally { auth.busy = false }
 }
 
 onMounted(load)
@@ -237,106 +352,6 @@ onMounted(load)
         </button>
       </template>
     </PageHeader>
-
-    <!-- Google connect: one consent -> mail + calendar + contacts -->
-    <section class="glass mb-6 rounded-2xl p-4">
-      <div class="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h3 class="text-sm font-semibold text-slate-200">Connect a Google account</h3>
-          <p class="text-xs text-slate-400">
-            One consent grants mail, calendar and contacts — three integrations sharing a single
-            refresh token. Revoking it in Google revokes all three.
-          </p>
-        </div>
-        <button class="glass glass-hover px-3 py-1.5 text-xs text-slate-300" @click="loadGoogleStatus">
-          <AppIcon glyph="↻" /> Recheck
-        </button>
-      </div>
-
-      <p v-if="g.loading" class="text-xs text-slate-400">Checking what this install can do…</p>
-
-      <!-- no usable client: say what to create, do not offer a dead wizard -->
-      <div v-else-if="g.status && g.status.mode === 'disabled'"
-           class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-        <p class="text-xs font-semibold text-amber-300">OAuth unavailable — {{ g.status.reason }}</p>
-        <ol class="mt-2 list-decimal space-y-1 pl-5 text-xs text-amber-200/90">
-          <li v-for="(stepText, i) in g.status.how_to_fix" :key="i">{{ stepText }}</li>
-        </ol>
-      </div>
-
-      <div v-else-if="g.status">
-        <!-- why this mode, stated plainly -->
-        <div class="mb-3 rounded-xl bg-slate-800/40 p-3 text-xs">
-          <p class="text-slate-300">
-            <span class="font-semibold">Flow:</span>
-            <span v-if="g.status.mode === 'redirect'" class="text-emerald-300">one-click redirect</span>
-            <span v-else class="text-sky-300">copy the code back (one extra step)</span>
-            <span class="text-slate-500"> · client type {{ g.status.client_type }}</span>
-          </p>
-          <p class="mt-1 text-slate-400">Callback: <code class="text-slate-300">{{ g.status.callback_url }}</code></p>
-          <p v-if="g.status.reason" class="mt-1 text-slate-400">{{ g.status.reason }}</p>
-          <p v-if="g.status.warning" class="mt-1 text-amber-300">{{ g.status.warning }}</p>
-          <ul v-if="g.status.how_to_fix" class="mt-1 list-disc space-y-0.5 pl-5 text-slate-400">
-            <li v-for="(h, i) in g.status.how_to_fix" :key="i">{{ h }}</li>
-          </ul>
-          <p class="mt-1 text-slate-500">Scopes: {{ g.status.scopes }}</p>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <input
-            v-model="g.account"
-            placeholder="you@gmail.com"
-            class="min-w-[16rem] flex-1 rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet"
-          />
-          <button
-            :disabled="g.busy"
-            class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
-            @click="googleBegin"
-          >
-            {{ g.busy ? 'Working…' : 'Begin consent' }}
-          </button>
-        </div>
-
-        <!-- paste step, only once consent has been opened -->
-        <div v-if="g.authUrl" class="mt-3 rounded-xl bg-slate-800/40 p-3">
-          <p class="text-xs text-slate-400">
-            A Google tab was opened. If it did not,
-            <a :href="g.authUrl" target="_blank" rel="noopener" class="text-brand-violet underline">open it here</a>.
-          </p>
-          <template v-if="g.mode !== 'redirect'">
-            <p class="mt-2 text-xs text-slate-400">
-              After approving, the page Google lands on <strong>will fail to load</strong> — that is
-              expected. Copy the whole address-bar URL and paste it below.
-            </p>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <input
-                v-model="g.code"
-                placeholder="paste the redirected URL, or just the code=… value"
-                class="min-w-[18rem] flex-1 rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet"
-              />
-              <button
-                :disabled="g.busy"
-                class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
-                @click="googleFinish"
-              >
-                Finish
-              </button>
-            </div>
-          </template>
-          <p v-else class="mt-2 text-xs text-slate-400">
-            Approve in that tab and you will be returned here automatically.
-          </p>
-        </div>
-
-        <p v-if="g.error" class="mt-2 text-xs text-rose-300">{{ g.error }}</p>
-        <div v-if="g.done" class="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
-          <p class="font-semibold text-emerald-300">Connected {{ g.done.account }}</p>
-          <p class="mt-1 text-emerald-200/90">
-            Created: {{ g.done.integrations.map(i => i.type).join(', ') }}
-          </p>
-        </div>
-      </div>
-    </section>
 
     <p
       v-if="error"
@@ -381,6 +396,15 @@ onMounted(load)
 
         <!-- action row -->
         <div class="mt-1 flex flex-wrap items-center gap-2 border-t border-white/5 pt-3">
+          <button
+            v-if="authState[it.id] && authState[it.id].required"
+            type="button"
+            class="act"
+            :class="needsAuthorizing(it) ? 'text-amber-300' : 'text-emerald-300'"
+            @click="openAuth(it)"
+          >
+            <AppIcon glyph="🔑" /> {{ needsAuthorizing(it) ? 'Authorize' : 'Re-authorize' }}
+          </button>
           <button type="button" class="act" :disabled="!!busy[it.id]" @click="onTest(it)">
             <template v-if="busy[it.id] === 'test'">…</template>
             <template v-else><AppIcon glyph="✓" /> Test</template>
@@ -415,14 +439,14 @@ onMounted(load)
     <ModalShell
       v-if="addOpen"
       title="Add integration"
-      :subtitle="chosenType ? `${typeMeta(chosenType).label} storage link` : 'Pick a storage type'"
+      :subtitle="step === 'type' ? 'Pick what to connect' : (step === 'provider' ? `${typeMeta(chosenType).label} — pick a provider` : `${typeMeta(chosenType).label}${chosenProvider ? ' · ' + chosenProvider.label : ''}`)"
       wide
       @close="addOpen = false"
     >
       <!-- step 1: pick a type -->
       <div v-if="step === 'type'" class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <button
-          v-for="t in ['webdav', 's3', 'local']"
+          v-for="t in ['mail', 'caldav', 'carddav', 'webdav', 's3', 'local']"
           :key="t"
           type="button"
           class="glass glass-hover flex flex-col items-center gap-2 p-5 text-center"
@@ -528,6 +552,26 @@ onMounted(load)
         </p>
       </form>
 
+      <!-- step 1b: pick a provider (only for types that serve more than one) -->
+      <div v-if="step === 'provider'" class="space-y-2">
+        <button
+          v-for="pr in providersFor(chosenType)"
+          :key="pr.id"
+          type="button"
+          class="glass glass-hover w-full rounded-xl p-3 text-left"
+          @click="pickProvider(pr)"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-sm font-semibold text-slate-100">{{ pr.label }}</span>
+            <span v-if="pr.oauth" class="rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+              needs authorizing
+            </span>
+          </div>
+          <p class="mt-1 text-xs text-slate-400">{{ pr.hint }}</p>
+        </button>
+        <button type="button" class="act mt-1" @click="step = 'type'">← back</button>
+      </div>
+
       <template v-if="step === 'form'" #footer>
         <button
           type="button"
@@ -545,6 +589,119 @@ onMounted(load)
           {{ submitting ? 'Adding…' : 'Add integration' }}
         </button>
       </template>
+    </ModalShell>
+
+    <!-- per-card authorization wizard -->
+    <ModalShell
+      v-if="auth.open"
+      :title="`Authorize — ${auth.it ? auth.it.name : ''}`"
+      :subtitle="auth.st && auth.st.provider === 'google' ? 'Google: one consent covers mail, calendar and contacts' : 'Authorization'"
+      wide
+      @close="auth.open = false"
+    >
+      <p v-if="auth.loading" class="text-sm text-slate-400">Checking what this integration needs…</p>
+
+      <div v-else-if="auth.st" class="space-y-3">
+        <!-- nothing to do -->
+        <p v-if="!auth.st.required" class="rounded-xl bg-slate-800/40 p-3 text-xs text-slate-300">
+          {{ auth.st.note }}
+        </p>
+
+        <template v-else>
+          <!-- current state -->
+          <div class="rounded-xl bg-slate-800/40 p-3 text-xs">
+            <p class="text-slate-300">
+              <span class="font-semibold">Status:</span>
+              <span :class="auth.st.authorized ? 'text-emerald-300' : 'text-amber-300'">
+                {{ auth.st.authorized ? 'authorized' : 'not yet authorized' }}
+              </span>
+              <span v-if="auth.st.client_type" class="text-slate-500">
+                · {{ auth.st.client_type }} client ({{ auth.st.client_source }})
+              </span>
+            </p>
+            <p v-if="auth.st.callback_url" class="mt-1 text-slate-400">
+              Callback: <code class="text-slate-300">{{ auth.st.callback_url }}</code>
+            </p>
+            <p v-if="auth.st.reason" class="mt-1 text-slate-400">{{ auth.st.reason }}</p>
+            <p v-if="auth.st.warning" class="mt-1 text-amber-300">{{ auth.st.warning }}</p>
+            <ul v-if="auth.st.how_to_fix" class="mt-1 list-disc space-y-0.5 pl-5 text-slate-400">
+              <li v-for="(h, i) in auth.st.how_to_fix" :key="i">{{ h }}</li>
+            </ul>
+            <p v-if="auth.st.scopes" class="mt-1 text-slate-500">Scopes: {{ auth.st.scopes }}</p>
+          </div>
+
+          <!-- supply / replace the OAuth client. This is what unlocks the https redirect. -->
+          <details class="rounded-xl bg-slate-800/40 p-3" :open="auth.st.mode === 'needs_client'">
+            <summary class="cursor-pointer text-xs font-semibold text-slate-300">
+              OAuth client {{ auth.st.mode === 'needs_client' ? '(required)' : '(replace)' }}
+            </summary>
+            <p class="mt-2 text-xs text-slate-400">
+              Stored in the vault, never on disk. A <strong>Web application</strong> client plus a
+              configured public URL gives one-click consent; a Desktop client can only use a
+              loopback redirect, which means copying a code back.
+            </p>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+              <input v-model="auth.clientId" placeholder="client ID"
+                class="rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet" />
+              <input v-model="auth.clientSecret" type="password" placeholder="client secret"
+                class="rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet" />
+              <select v-model="auth.clientType"
+                class="rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700">
+                <option value="web">Web application</option>
+                <option value="installed">Desktop app</option>
+              </select>
+              <button :disabled="auth.savingClient"
+                class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                @click="saveOauthClient">
+                {{ auth.savingClient ? 'Saving…' : 'Save client' }}
+              </button>
+            </div>
+          </details>
+
+          <!-- begin consent -->
+          <div v-if="auth.st.ready" class="flex flex-wrap items-center gap-2">
+            <button :disabled="auth.busy"
+              class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+              @click="beginAuth">
+              {{ auth.busy ? 'Working…' : (auth.st.authorized ? 'Re-authorize' : 'Begin consent') }}
+            </button>
+            <span class="text-xs text-slate-500">
+              {{ auth.st.mode === 'redirect' ? 'opens Google, returns here automatically' : 'opens Google, then paste the code back' }}
+            </span>
+          </div>
+
+          <!-- paste step -->
+          <div v-if="auth.authUrl" class="rounded-xl bg-slate-800/40 p-3">
+            <p class="text-xs text-slate-400">
+              A Google tab was opened. If not,
+              <a :href="auth.authUrl" target="_blank" rel="noopener" class="text-brand-violet underline">open it here</a>.
+            </p>
+            <template v-if="auth.mode !== 'redirect'">
+              <p class="mt-2 text-xs text-slate-400">
+                After approving, the page Google lands on <strong>will fail to load</strong> — expected.
+                Copy the whole address-bar URL and paste it below.
+              </p>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <input v-model="auth.code" placeholder="paste the redirected URL, or just the code=… value"
+                  class="min-w-[18rem] flex-1 rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet" />
+                <button :disabled="auth.busy"
+                  class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                  @click="finishAuth">Finish</button>
+              </div>
+            </template>
+            <p v-else class="mt-2 text-xs text-slate-400">Approve in that tab and you will be returned here.</p>
+          </div>
+
+          <p v-if="auth.error" class="text-xs text-rose-300">{{ auth.error }}</p>
+          <div v-if="auth.done" class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
+            <p class="font-semibold text-emerald-300">Authorized {{ auth.done.account }}</p>
+            <p class="mt-1 text-emerald-200/90">
+              One grant covered {{ auth.done.authorized.length }} integration(s):
+              {{ auth.done.authorized.map(a => a.type).join(', ') }}
+            </p>
+          </div>
+        </template>
+      </div>
     </ModalShell>
   </div>
 </template>
