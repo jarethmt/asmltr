@@ -18,7 +18,9 @@
  *   email_address,              // defaults to the resolved `user`
  *   from_name,
  *   auth = 'password' | 'oauth2',
- *   access_token_ref,           // oauth2 only — XOAUTH2 bearer
+ *   // oauth2 (Gmail): the long-lived refresh token is the stored secret; an access token is
+ *   // minted per open. One Google grant covers mail + calendar + contacts + tasks.
+ *   refresh_token_ref, oauth_client_id_ref, oauth_client_secret_ref,
  * }
  */
 const { ImapFlow } = require('imapflow');
@@ -27,21 +29,36 @@ const { simpleParser } = require('mailparser');
 
 function need(cfg, k) { if (!cfg[k]) throw new Error(`mail integration: ${k} required`); return cfg[k]; }
 
-function imapAuth(cfg) {
+/**
+ * Google access tokens live an hour, so one is never stored. With auth=oauth2 the config carries
+ * the long-lived REFRESH token as a vault ref and a fresh access token is minted here, at open
+ * time — so a token expiring between sessions is a non-event.
+ */
+async function resolveAccessToken(cfg) {
+  if (cfg.access_token) return cfg.access_token;           // caller supplied one explicitly
+  if (!cfg.refresh_token) throw new Error('mail integration: refresh_token (or access_token) required for auth=oauth2');
+  const google = require('../../../shared/google-oauth');
+  const { access_token } = await google.accessToken({
+    client_id: need(cfg, 'oauth_client_id'),
+    client_secret: need(cfg, 'oauth_client_secret'),
+    refresh_token: cfg.refresh_token,
+  });
+  return access_token;
+}
+
+function imapAuth(cfg, token) {
   const user = need(cfg, 'user');
-  if (cfg.auth === 'oauth2') {
-    if (!cfg.access_token) throw new Error('mail integration: access_token required for auth=oauth2');
-    return { user, accessToken: cfg.access_token };
-  }
+  if (cfg.auth === 'oauth2') return { user, accessToken: token };
   return { user, pass: need(cfg, 'password') };
 }
 
 /** Open a live handle. Caller MUST call close(). */
 async function open(cfg = {}) {
   const address = cfg.email_address || cfg.user;
+  const token = cfg.auth === 'oauth2' ? await resolveAccessToken(cfg) : null;
   const imapOpts = {
     host: need(cfg, 'imap_host'), port: Number(cfg.imap_port) || 993, secure: true,
-    auth: imapAuth(cfg), logger: false,
+    auth: imapAuth(cfg, token), logger: false,
   };
   let client = null;
   async function imap() {
@@ -53,7 +70,7 @@ async function open(cfg = {}) {
   function smtp() {
     const port = Number(cfg.smtp_port) || 587;
     const auth = cfg.auth === 'oauth2'
-      ? { type: 'OAuth2', user: cfg.user, accessToken: cfg.access_token }
+      ? { type: 'OAuth2', user: cfg.user, accessToken: token }
       : { user: cfg.user, pass: cfg.password };
     return nodemailer.createTransport({ host: need(cfg, 'smtp_host'), port, secure: port === 465, auth });
   }
