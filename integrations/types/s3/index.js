@@ -90,4 +90,4 @@ class S3Storage {
 }
 
 registerDriver('s3', (cfg) => new S3Storage(cfg));
-module.exports = { S3Storage };
+module.exports = { S3Storage, kind: 'storage', lifecycle: 'passive' };

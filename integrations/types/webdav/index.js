@@ -118,4 +118,4 @@ function parseMultistatus(xml) {
 }
 
 registerDriver('webdav', (cfg) => new WebdavStorage(cfg));
-module.exports = { WebdavStorage };
+module.exports = { WebdavStorage, kind: 'storage', lifecycle: 'passive' };
