@@ -72,10 +72,47 @@ async function openStorage(iid) {
   return storage.getStorage({ type: it.type, config: await resolveConfig(it.config) });
 }
 
-/** Connectivity test — open + a cheap list. { ok } or { ok:false, error }. */
-async function test(iid) {
-  try { const s = await openStorage(iid); await s.list('', { recursive: false }); return { ok: true }; }
-  catch (e) { return { ok: false, error: e.message }; }
+/**
+ * Open a non-storage integration (`tools` / `transport`) — the driver's own handle rather than the
+ * storage contract. Storage drivers self-register with shared/storage and are opened by
+ * openStorage(); everything else exports its own `open(config)`.
+ *
+ * The caller owns the handle and MUST close() it. Passive means nothing is running until this is
+ * called and nothing stays running after it is closed.
+ */
+async function openTool(iid) {
+  const it = get(iid);
+  if (!it) throw new Error('integration not found: ' + iid);
+  if (it.kind === 'storage') throw new Error(`integration ${iid} is storage — use openStorage()`);
+  let driver;
+  try { driver = require('./types/' + it.type); }
+  catch (e) { throw new Error(`no driver for integration type '${it.type}': ${e.message}`); }
+  if (typeof driver.open !== 'function') throw new Error(`driver '${it.type}' exports no open()`);
+  return driver.open(await resolveConfig(it.config));
 }
 
-module.exports = { KINDS, LIFECYCLES, list, get, create, update, remove, openStorage, test, resolveConfig };
+/** Open whichever kind this integration is. */
+async function open(iid) {
+  const it = get(iid);
+  if (!it) throw new Error('integration not found: ' + iid);
+  return it.kind === 'storage' ? openStorage(iid) : openTool(iid);
+}
+
+/**
+ * Connectivity test. { ok } or { ok:false, error }.
+ * Storage: open + a cheap list. Others: the driver's own probe() if it has one, else just open/close
+ * — so a driver without a probe still gets a real connect attempt rather than a false pass.
+ */
+async function test(iid) {
+  const it = get(iid);
+  if (!it) return { ok: false, error: 'integration not found: ' + iid };
+  try {
+    if (it.kind === 'storage') { const s = await openStorage(iid); await s.list('', { recursive: false }); return { ok: true }; }
+    const driver = require('./types/' + it.type);
+    if (typeof driver.probe === 'function') return { ok: true, ...(await driver.probe(await resolveConfig(it.config))) };
+    const h = await openTool(iid);
+    try { return { ok: true }; } finally { if (h && typeof h.close === 'function') await h.close(); }
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+module.exports = { KINDS, LIFECYCLES, list, get, create, update, remove, openStorage, openTool, open, test, resolveConfig };

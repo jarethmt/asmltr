@@ -228,3 +228,113 @@ session. This is the same idea pointed at a machine session — and the two shou
 
 Pushing a live session to the phone as an interstitial builds on the same shared viewer module and
 the existing `open-remote-desktop` push. Deliberately not specified here.
+
+---
+
+# T4 — one account, two uses: mail as an integration with an optional channel
+
+> **Status:** architecture, agreed with the operator 2026-11-18. Extends the definition above; does
+> not amend it. Email is the first case the original document did not consider, and it is not
+> mentioned anywhere above.
+
+## The case the definition did not cover
+
+The test above is purpose: *does the agent initiate this to gain a capability?* It resolves GitHub
+(conversation) against remote desktop (capability) cleanly, because those are different things.
+
+It does not answer what happens when **one external account yields both.** A mailbox is:
+
+- a **capability** — search it, read it, send from it, reach its calendar and contacts, on demand,
+  mid-task, with no process running; and
+- a **channel** — mail arrives unbidden and the agent may answer it.
+
+Same credential. Same account. Both at once. The same is true of Discord (a conversation *and* guild
+administration — `POST /channels`, `POST /servers` already live on the connector) and of Google
+(mail, calendar, contacts, tasks under a single OAuth grant).
+
+## The resolution: the integration is the base; the channel is optional and references it
+
+**The authenticated link to an external account is an integration.** It is optional, per-install,
+and the agent reaches outward through it. That is true of every mailbox we hold, including ones that
+will never speak.
+
+**A channel is an optional behaviour layered on top of one**, expressed as a connector instance that
+**references** its integration by `integration_id`:
+
+```jsonc
+// integrations.json — the account link. No process. Always required first.
+{ "id": "int_mail_jareth", "type": "mail", "kind": "tools", "lifecycle": "passive",
+  "name": "jareth@thoughtspacedesigns.com",
+  "config": { "imap_host": "…", "smtp_host": "…",
+              "user_ref": "asmltr_mail_jareth_tsd",
+              "password_ref": "asmltr_mail_jareth_tsd_password" } }
+
+// connectors — ONLY for a mailbox that should answer on its own.
+{ "type": "email", "integration_id": "int_mail_jareth", "enabled": true,
+  "config": { "approval_policy": "auto_send_full_trust" } }
+```
+
+**It is a reference, not nesting.** That matters for three reasons, and it is the one place the
+operator's framing ("the connector rides along inside the integration") is worth refining:
+
+1. The document above places **connectors in core** and integrations in optional, and makes them
+   symmetric — connectors+trust govern inbound, integrations+grants govern outbound. Nesting a core
+   subsystem inside an optional record inverts that. A reference preserves it.
+2. **The supervisor does not change.** A connector instance remains exactly what it is today, with
+   its own health, restart and logs. Only its credentials now come from somewhere shared.
+3. It still gives the operator the behaviour they asked for: the listener is **enabled or disabled
+   from the Connectors pane**, independently of the account link, because it is a separate record.
+
+This mirrors the reasoning already used above for devices: *the device registry is core; the
+transports are integrations — the registry describes machines, integrations supply the wires.* Here:
+**connectors describe channels; integrations supply the account.**
+
+## What this deletes
+
+`connectors/types/email` grew an **`ingest_only`** flag (2026-11-17) whose only job is to suppress
+the thing that makes a connector a connector. Six mailboxes run supervised IMAP IDLE processes and
+are forbidden from ever answering.
+
+That flag is the smell this stage removes. Those six are integrations that were forced into a
+connector costume because **a connector was the only way to attach a mailbox at all** — the same
+mechanical reason that once put a screen-sharing broker in `connectors/types/`. The pathology
+repeated; the document predicted it.
+
+## Do they need a daemon at all? No.
+
+Worth stating plainly, because it is the real prize. A passive mail integration runs **no process**.
+
+Every operation performed across a full triage session on 2026-11-17 — inventory 927 messages,
+classify, forward receipts, archive, read threads, send replies — was done with **on-demand IMAP
+from a script**. The six supervised connectors contributed nothing to any of it. They were running
+IDLE loops, writing thread state and staging attachments for mail nobody had asked about yet.
+
+So the default is: **ingest nothing until asked.** Seven supervised email processes become **one**
+(`eve@`, which genuinely answers), and six passive links that cost nothing until a session opens
+them. That also removes a standing context-consumption risk — work was being done per inbound
+message regardless of whether anyone wanted it.
+
+A listener is justified when something must happen *without being asked*: answering mail, or a push
+notification. Indexing "in case" is not that.
+
+## Trust and audit
+
+These live on the **integration**, not on a separate account object. An earlier draft of this stage
+proposed an `account` layer above both; the operator rejected it correctly — many integrations are
+not account-shaped at all (a backup target, a WebDAV root), so hoisting "account" to the base would
+fit mail and misfit half the registry. The integration record is already the thing with an identity,
+a credential and a lifecycle. Outbound authorization belongs there, next to the device grants that
+the document above already places on that side of the symmetry.
+
+## Staging — per the migration principle above
+
+Never a big bang. `eve@` is a live channel and the six carry real client mail.
+
+1. **Mail integration type**, passive. Prove it against a mailbox read-only.
+2. **`integration_id` on connector instances**; credential resolution falls back to inline config so
+   every existing connector keeps working untouched.
+3. **Migrate the six** to integration-only. Their connectors stop; nothing else changes. Delete
+   `ingest_only`.
+4. **`eve@` last** — an integration plus a connector that references it. This is the only one where
+   a mistake silences a working channel.
+5. **Google** as a `mail` + `caldav` + `carddav` integration triple on one OAuth grant.

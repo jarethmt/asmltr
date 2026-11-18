@@ -5,6 +5,9 @@
   "description": "Outward-facing optional capabilities the agent reaches out to use (docs/INTEGRATIONS.md)",
   "dependencies": {
     "express": "^4.21.2",
+    "imapflow": "^1.0.191",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.9.16",
     "ssh2": "^1.17.0"
   }
 }
