@@ -1020,6 +1020,31 @@ app.patch('/v2/integrations/:id', (req, res) => { const r = integrations.update(
 app.delete('/v2/integrations/:id', (req, res) => res.json({ ok: integrations.remove(req.params.id) }));
 app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integrations.test(req.params.id)));
 
+// ---- Google account connect (one consent -> mail + calendar + contacts integrations) ----
+// See core/src/google-connect.js for why there are three modes. The UI asks /status FIRST so it
+// can render the right path, or an explanation, instead of failing at the end of a wizard.
+const googleConnect = require('./google-connect');
+app.get('/v2/integrations/google/status', (req, res) => res.json(googleConnect.status()));
+app.post('/v2/integrations/google/start', (req, res) => {
+  try { res.json(googleConnect.start(req.body || {})); }
+  catch (e) { res.status(e.status || 400).json({ error: e.message, detail: e.detail }); }
+});
+// Browser lands here in `redirect` mode. Completes, then bounces back to the dashboard.
+app.get(googleConnect.CALLBACK_PATH, async (req, res) => {
+  try {
+    const out = await googleConnect.complete({ state: req.query.state, code: req.query.code });
+    const to = '/#/integrations?google=' + encodeURIComponent(out.account);
+    res.redirect(302, to);
+  } catch (e) {
+    res.status(400).send('<h3>Google connect failed</h3><pre>' + String(e.message).replace(/[<>&]/g, '') + '</pre>');
+  }
+});
+// `paste` mode posts the copied code here.
+app.post('/v2/integrations/google/claim', async (req, res) => {
+  try { res.json(await googleConnect.complete(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // Vault key management — metadata only (names/tiers/access counts), NEVER values. Store/delete a
 // credential. Values are write-only from the GUI; retrieval is the SACRED core's job, not the UI's.
 app.get('/v2/vault/secrets', async (req, res) => {

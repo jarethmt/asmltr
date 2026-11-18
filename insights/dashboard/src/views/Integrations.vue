@@ -9,6 +9,48 @@ import { integrations, vaultApi } from '@/services/api'
 import PageHeader from '@/components/PageHeader.vue'
 import ModalShell from '@/components/ModalShell.vue'
 
+onMounted(loadGoogleStatus)
+
+// ── Google connect ──────────────────────────────────────────────────────────
+// One Google consent grants mail + calendar + contacts together, so finishing it creates three
+// integrations sharing a single refresh token. Which flow is possible depends on the operator's
+// OAuth client, so /status is asked FIRST and drives what this panel offers:
+//   redirect  Web client + a configured public origin → one click, browser returns to us
+//   paste     Desktop client → Google only allows loopback redirects, so the code is pasted back
+//   disabled  no usable client → say what to create instead of failing mid-wizard
+const g = reactive({
+  status: null, loading: false, account: '', state: null, authUrl: '', mode: '',
+  code: '', busy: false, error: null, done: null, open: false,
+})
+
+async function loadGoogleStatus() {
+  g.loading = true; g.error = null
+  try { g.status = await integrations.googleStatus() }
+  catch (e) { g.error = e.message } finally { g.loading = false }
+}
+
+async function googleBegin() {
+  g.error = null; g.done = null
+  if (!g.account.trim()) { g.error = 'Enter the Google address to connect'; return }
+  g.busy = true
+  try {
+    const r = await integrations.googleStart(g.account.trim())
+    g.state = r.state; g.authUrl = r.auth_url; g.mode = r.mode
+    window.open(r.auth_url, '_blank', 'noopener')
+  } catch (e) { g.error = e.message } finally { g.busy = false }
+}
+
+async function googleFinish() {
+  g.error = null
+  if (!g.code.trim()) { g.error = 'Paste the code (or the whole redirected URL)'; return }
+  g.busy = true
+  try {
+    g.done = await integrations.googleClaim({ state: g.state, code: g.code.trim(), account: g.account.trim() })
+    g.code = ''; g.state = null; g.authUrl = ''
+    await load()
+  } catch (e) { g.error = e.message } finally { g.busy = false }
+}
+
 // ── list state ──────────────────────────────────────────────────────────────
 const items = ref([])
 const loading = ref(false)
@@ -195,6 +237,106 @@ onMounted(load)
         </button>
       </template>
     </PageHeader>
+
+    <!-- Google connect: one consent -> mail + calendar + contacts -->
+    <section class="glass mb-6 rounded-2xl p-4">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200">Connect a Google account</h3>
+          <p class="text-xs text-slate-400">
+            One consent grants mail, calendar and contacts — three integrations sharing a single
+            refresh token. Revoking it in Google revokes all three.
+          </p>
+        </div>
+        <button class="glass glass-hover px-3 py-1.5 text-xs text-slate-300" @click="loadGoogleStatus">
+          <AppIcon glyph="↻" /> Recheck
+        </button>
+      </div>
+
+      <p v-if="g.loading" class="text-xs text-slate-400">Checking what this install can do…</p>
+
+      <!-- no usable client: say what to create, do not offer a dead wizard -->
+      <div v-else-if="g.status && g.status.mode === 'disabled'"
+           class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+        <p class="text-xs font-semibold text-amber-300">OAuth unavailable — {{ g.status.reason }}</p>
+        <ol class="mt-2 list-decimal space-y-1 pl-5 text-xs text-amber-200/90">
+          <li v-for="(stepText, i) in g.status.how_to_fix" :key="i">{{ stepText }}</li>
+        </ol>
+      </div>
+
+      <div v-else-if="g.status">
+        <!-- why this mode, stated plainly -->
+        <div class="mb-3 rounded-xl bg-slate-800/40 p-3 text-xs">
+          <p class="text-slate-300">
+            <span class="font-semibold">Flow:</span>
+            <span v-if="g.status.mode === 'redirect'" class="text-emerald-300">one-click redirect</span>
+            <span v-else class="text-sky-300">copy the code back (one extra step)</span>
+            <span class="text-slate-500"> · client type {{ g.status.client_type }}</span>
+          </p>
+          <p class="mt-1 text-slate-400">Callback: <code class="text-slate-300">{{ g.status.callback_url }}</code></p>
+          <p v-if="g.status.reason" class="mt-1 text-slate-400">{{ g.status.reason }}</p>
+          <p v-if="g.status.warning" class="mt-1 text-amber-300">{{ g.status.warning }}</p>
+          <ul v-if="g.status.how_to_fix" class="mt-1 list-disc space-y-0.5 pl-5 text-slate-400">
+            <li v-for="(h, i) in g.status.how_to_fix" :key="i">{{ h }}</li>
+          </ul>
+          <p class="mt-1 text-slate-500">Scopes: {{ g.status.scopes }}</p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <input
+            v-model="g.account"
+            placeholder="you@gmail.com"
+            class="min-w-[16rem] flex-1 rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet"
+          />
+          <button
+            :disabled="g.busy"
+            class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            @click="googleBegin"
+          >
+            {{ g.busy ? 'Working…' : 'Begin consent' }}
+          </button>
+        </div>
+
+        <!-- paste step, only once consent has been opened -->
+        <div v-if="g.authUrl" class="mt-3 rounded-xl bg-slate-800/40 p-3">
+          <p class="text-xs text-slate-400">
+            A Google tab was opened. If it did not,
+            <a :href="g.authUrl" target="_blank" rel="noopener" class="text-brand-violet underline">open it here</a>.
+          </p>
+          <template v-if="g.mode !== 'redirect'">
+            <p class="mt-2 text-xs text-slate-400">
+              After approving, the page Google lands on <strong>will fail to load</strong> — that is
+              expected. Copy the whole address-bar URL and paste it below.
+            </p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                v-model="g.code"
+                placeholder="paste the redirected URL, or just the code=… value"
+                class="min-w-[18rem] flex-1 rounded-xl bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none ring-1 ring-slate-700 focus:ring-brand-violet"
+              />
+              <button
+                :disabled="g.busy"
+                class="rounded-xl bg-brand-gradient px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                @click="googleFinish"
+              >
+                Finish
+              </button>
+            </div>
+          </template>
+          <p v-else class="mt-2 text-xs text-slate-400">
+            Approve in that tab and you will be returned here automatically.
+          </p>
+        </div>
+
+        <p v-if="g.error" class="mt-2 text-xs text-rose-300">{{ g.error }}</p>
+        <div v-if="g.done" class="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
+          <p class="font-semibold text-emerald-300">Connected {{ g.done.account }}</p>
+          <p class="mt-1 text-emerald-200/90">
+            Created: {{ g.done.integrations.map(i => i.type).join(', ') }}
+          </p>
+        </div>
+      </div>
+    </section>
 
     <p
       v-if="error"

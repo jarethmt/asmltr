@@ -73,7 +73,13 @@ export const integrations = {
   create: (payload) => postCore('/v2/integrations', payload),
   update: (id, patch) => reqCore('PATCH', `/v2/integrations/${id}`, patch),
   remove: (id) => reqCore('DELETE', `/v2/integrations/${id}`),
-  test: (id) => postCore(`/v2/integrations/${id}/test`)
+  test: (id) => postCore(`/v2/integrations/${id}/test`),
+  // Google account connect — one consent yields mail + calendar + contacts integrations.
+  // Ask status() first: it reports which of the three flows is possible (redirect / paste /
+  // disabled) so the UI never walks the operator into a wizard that cannot finish.
+  googleStatus: () => getCore('/v2/integrations/google/status'),
+  googleStart: (account) => postCore('/v2/integrations/google/start', { account }),
+  googleClaim: (payload) => postCore('/v2/integrations/google/claim', payload)
 }
 
 // TRUST vault — status + key management (metadata only; values are write-only from the GUI).
