@@ -1020,29 +1020,42 @@ app.patch('/v2/integrations/:id', (req, res) => { const r = integrations.update(
 app.delete('/v2/integrations/:id', (req, res) => res.json({ ok: integrations.remove(req.params.id) }));
 app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integrations.test(req.params.id)));
 
-// ---- Google account connect (one consent -> mail + calendar + contacts integrations) ----
-// See core/src/google-connect.js for why there are three modes. The UI asks /status FIRST so it
-// can render the right path, or an explanation, instead of failing at the end of a wizard.
-const googleConnect = require('./google-connect');
-app.get('/v2/integrations/google/status', (req, res) => res.json(googleConnect.status()));
-app.post('/v2/integrations/google/start', (req, res) => {
-  try { res.json(googleConnect.start(req.body || {})); }
+// ---- Per-integration authorization (see core/src/integration-auth.js) ----
+// Authorization lives ON the integration it authorizes, not in a page-level panel: integrations
+// are storage targets, DAV collections, transports and tool links, so one global consent pane
+// would fit exactly one of them and rot as providers are added.
+const intAuth = require('./integration-auth');
+app.get('/v2/integrations/:id/auth', async (req, res) => {
+  try { res.json(await intAuth.state(req.params.id)); }
+  catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
+app.post('/v2/integrations/:id/auth/start', async (req, res) => {
+  try { res.json(await intAuth.start(req.params.id)); }
   catch (e) { res.status(e.status || 400).json({ error: e.message, detail: e.detail }); }
 });
-// Browser lands here in `redirect` mode. Completes, then bounces back to the dashboard.
-app.get(googleConnect.CALLBACK_PATH, async (req, res) => {
-  try {
-    const out = await googleConnect.complete({ state: req.query.state, code: req.query.code });
-    const to = '/#/integrations?google=' + encodeURIComponent(out.account);
-    res.redirect(302, to);
-  } catch (e) {
-    res.status(400).send('<h3>Google connect failed</h3><pre>' + String(e.message).replace(/[<>&]/g, '') + '</pre>');
-  }
-});
-// `paste` mode posts the copied code here.
-app.post('/v2/integrations/google/claim', async (req, res) => {
-  try { res.json(await googleConnect.complete(req.body || {})); }
+app.post('/v2/integrations/:id/auth/claim', async (req, res) => {
+  try { res.json(await intAuth.complete({ ...(req.body || {}), integration_id: req.params.id })); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Operator-supplied OAuth client. Storing a WEB client here is what makes the public-https
+// redirect reachable without touching the filesystem.
+app.get('/v2/integrations/oauth-client/google', async (req, res) => {
+  const c = await intAuth.readClient();
+  res.json({ configured: !!c.type, client_type: c.type, source: c.source,
+             client_id_tail: c.client_id ? String(c.client_id).slice(-24) : null });
+});
+app.post('/v2/integrations/oauth-client/google', async (req, res) => {
+  try { res.json(await intAuth.saveClient(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Browser lands here in `redirect` mode; state identifies which integration started it.
+app.get(intAuth.CALLBACK_PATH, async (req, res) => {
+  try {
+    const out = await intAuth.complete({ state: req.query.state, code: req.query.code });
+    res.redirect(302, '/#/integrations?authorized=' + encodeURIComponent(out.account));
+  } catch (e) {
+    res.status(400).send('<h3>Authorization failed</h3><pre>' + String(e.message).replace(/[<>&]/g, '') + '</pre>');
+  }
 });
 
 // Vault key management — metadata only (names/tiers/access counts), NEVER values. Store/delete a

@@ -77,9 +77,15 @@ export const integrations = {
   // Google account connect — one consent yields mail + calendar + contacts integrations.
   // Ask status() first: it reports which of the three flows is possible (redirect / paste /
   // disabled) so the UI never walks the operator into a wizard that cannot finish.
-  googleStatus: () => getCore('/v2/integrations/google/status'),
-  googleStart: (account) => postCore('/v2/integrations/google/start', { account }),
-  googleClaim: (payload) => postCore('/v2/integrations/google/claim', payload)
+  // Per-integration authorization. Each card drives its own flow; authState() is safe to call for
+  // any integration and reports required:false for ones that authenticate with a stored secret.
+  authState: (id) => getCore(`/v2/integrations/${id}/auth`),
+  authStart: (id) => postCore(`/v2/integrations/${id}/auth/start`),
+  authClaim: (id, payload) => postCore(`/v2/integrations/${id}/auth/claim`, payload),
+  // Operator-supplied Google OAuth client. Supplying a WEB client is what unlocks the
+  // public-https redirect instead of the paste fallback.
+  oauthClient: () => getCore('/v2/integrations/oauth-client/google'),
+  saveOauthClient: (payload) => postCore('/v2/integrations/oauth-client/google', payload)
 }
 
 // TRUST vault — status + key management (metadata only; values are write-only from the GUI).
