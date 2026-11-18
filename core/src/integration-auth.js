@@ -81,6 +81,32 @@ async function authorized(it) {
 }
 
 /**
+ * Remaining life of the grant, straight from Google. A consent screen in "Testing" issues refresh
+ * tokens that expire in 7 DAYS, and that cannot be extended by refreshing — the exchange returns a
+ * new access token only. Surfacing the countdown is the difference between a scheduled two-minute
+ * re-authorize and discovering months later that nothing has worked, which is how the Tasks grant
+ * died. Returns null when it cannot be determined; never throws, since this is only decoration.
+ */
+async function grantLife(it) {
+  try {
+    const cfg = it.config || {};
+    if (!cfg.refresh_token_ref) return null;
+    const [refresh_token, client_id, client_secret] = await Promise.all([
+      secrets.get(cfg.refresh_token_ref), secrets.get(K_ID), secrets.get(K_SECRET),
+    ]);
+    if (!refresh_token || !client_id || !client_secret) return null;
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id, client_secret, refresh_token, grant_type: 'refresh_token' }).toString(),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.error) return { alive: false, error: j.error || `HTTP ${res.status}` };
+    const secs = Number(j.refresh_token_expires_in);
+    return { alive: true, days_left: Number.isFinite(secs) ? Number((secs / 86400).toFixed(2)) : null };
+  } catch (_) { return null; }
+}
+
+/**
  * Per-integration auth state. `mode` is a fact about the Google client, surfaced BEFORE the
  * operator starts anything so a wizard never dead-ends.
  */
@@ -93,7 +119,10 @@ async function state(id) {
   }
   const c = await readClient();
   const org = origin();
-  const base = { integration_id: id, type: it.type, required: true, authorized: await authorized(it), provider: 'google', scopes: google.scopeList() };
+  const isAuthed = await authorized(it);
+  const life = isAuthed ? await grantLife(it) : null;
+  const base = { integration_id: id, type: it.type, required: true, authorized: isAuthed, provider: 'google', scopes: google.scopeList(),
+    ...(life ? { grant: life } : {}) };
 
   if (!c.type) {
     return { ...base, mode: 'needs_client', ready: false,
