@@ -484,13 +484,38 @@ onMounted(load)
       </div>
 
       <!-- step 2: per-type form -->
-      <form v-else class="flex flex-col gap-4" @submit.prevent="onCreate">
+      <!-- step 1b: pick a provider (only for types that serve more than one) -->
+      <div v-if="step === 'provider'" class="space-y-2">
+        <button
+          v-for="pr in providersFor(chosenType)"
+          :key="pr.id"
+          type="button"
+          class="glass glass-hover w-full rounded-xl p-3 text-left"
+          @click="pickProvider(pr)"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <span class="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <span v-if="pr.icon" class="text-lg" :style="{ color: typeMeta(chosenType).color }">
+                <AppIcon :name="pr.icon" />
+              </span>
+              {{ pr.label }}
+            </span>
+            <span v-if="pr.oauth" class="rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+              needs authorizing
+            </span>
+          </div>
+          <p class="mt-1 text-xs text-slate-400">{{ pr.hint }}</p>
+        </button>
+        <button type="button" class="act mt-1" @click="step = 'type'">← back</button>
+      </div>
+
+      <form v-if="step === 'form'" class="flex flex-col gap-4" @submit.prevent="onCreate">
         <button
           type="button"
           class="self-start text-xs font-medium text-slate-400 transition-colors hover:text-slate-200"
-          @click="step = 'type'"
+          @click="step = providersFor(chosenType).length ? 'provider' : 'type'"
         >
-          ← Back to type
+          ← Back{{ providersFor(chosenType).length ? ' to provider' : ' to type' }}
         </button>
 
         <!-- name -->
@@ -575,31 +600,6 @@ onMounted(load)
           {{ formError }}
         </p>
       </form>
-
-      <!-- step 1b: pick a provider (only for types that serve more than one) -->
-      <div v-if="step === 'provider'" class="space-y-2">
-        <button
-          v-for="pr in providersFor(chosenType)"
-          :key="pr.id"
-          type="button"
-          class="glass glass-hover w-full rounded-xl p-3 text-left"
-          @click="pickProvider(pr)"
-        >
-          <div class="flex items-center justify-between gap-3">
-            <span class="flex items-center gap-2 text-sm font-semibold text-slate-100">
-              <span v-if="pr.icon" class="text-lg" :style="{ color: typeMeta(chosenType).color }">
-                <AppIcon :name="pr.icon" />
-              </span>
-              {{ pr.label }}
-            </span>
-            <span v-if="pr.oauth" class="rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
-              needs authorizing
-            </span>
-          </div>
-          <p class="mt-1 text-xs text-slate-400">{{ pr.hint }}</p>
-        </button>
-        <button type="button" class="act mt-1" @click="step = 'type'">← back</button>
-      </div>
 
       <template v-if="step === 'form'" #footer>
         <button
