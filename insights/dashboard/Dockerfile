@@ -24,3 +24,26 @@ FROM nginx:alpine
 COPY insights/dashboard/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/insights/dashboard/dist /usr/share/nginx/html
 EXPOSE 80
+
+# ---- CVE-2026-111497 (brotli decoder out-of-bounds write) -------------------
+# Alpine ships the REAL upstream release (it does not backport into the version string the way
+# Debian/Ubuntu do), so grading by upstream version is correct here. Fixed releases are
+# 1.0.10 / 1.1.1 / 1.2.1. This ASSERTS the result and FAILS THE BUILD if the base image ever
+# stops shipping a fixed brotli-libs, so a future rebuild cannot silently reintroduce the bug.
+# Pure shell arithmetic deliberately — no python, no nested quoting. Added 2026-11-11.
+RUN set -eux; \
+    apk update; \
+    apk upgrade --no-cache brotli-libs; \
+    V="$(apk info -v | grep '^brotli-libs-' | head -1 | sed 's/^brotli-libs-//')"; \
+    UP="${V%%-r*}"; MAJ="${UP%%.*}"; _R="${UP#*.}"; MIN="${_R%%.*}"; PAT="${_R#*.}"; \
+    OK=0; \
+    if [ "$MAJ" = 1 ]; then \
+      case "$MIN" in \
+        0) [ "$PAT" -ge 10 ] && OK=1 ;; \
+        1) [ "$PAT" -ge 1 ]  && OK=1 ;; \
+        2) [ "$PAT" -ge 1 ]  && OK=1 ;; \
+      esac; \
+    fi; \
+    [ "$OK" = 1 ] || { echo "ASSERT FAILED: brotli-libs $V is not a fixed release"; exit 1; }; \
+    echo "ASSERT OK: brotli-libs $V (CVE-2026-111497 fixed upstream release)"
+# ----------------------------------------------------------------------------

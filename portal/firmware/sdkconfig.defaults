@@ -38,3 +38,57 @@ CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
 # olm sends one WG peer per granted site (all relayed through the exit node), so raise the
 # peer cap above the single-peer default.
 CONFIG_WIREGUARD_MAX_PEERS=8
+
+# --- R5: WireGuard crypto stack headroom ---
+# The WG handshake (x25519/chacha/blake2s, refc impl) runs on the lwIP TCPIP task and the driver
+# path; the default stacks overflow during bring-up (crash/reboot loop). The esp_wireguard spike
+# flagged ~+5KB. Give TCPIP + main generous headroom.
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# --- R5: enable octal PSRAM (N16R8) — the TLS handshake to the mesh server verifies a large
+# 4096-bit RSA cert chain and exhausted the internal heap (mbedtls X509_ALLOC_FAILED / -0x2880) with
+# BLE+Wi-Fi+USB+display+olm all resident. Spill large allocations to PSRAM. ---
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# --- R5: route mbedtls TLS allocations to PSRAM (fixes SSL_ALLOC_FAILED / -0x7F00) while keeping
+# Wi-Fi/lwIP + DMA buffers in internal RAM. Lower the "always internal" threshold so the big TLS
+# buffers + cert chain land in PSRAM, and free them after each handshake. ---
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+
+# --- R5: add ISRG "Root YR" (LE 2026 root) + ISRG Root X1 to the cert bundle as trust anchors, so
+# BOTH esp_http_client (get-token) and esp_websocket_client use the same well-tested crt_bundle path
+# and verify the new chain (anchoring directly at Root YR sidesteps the cross-sign the stale bundle
+# couldn't verify). ---
+
+# --- R5 diag: restore dynamic TLS buffers (load-bearing for internal-RAM headroom) + allow DEBUG
+# logs so esp-tls can report the cert-verify flags behind -0x2700. ---
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# allow FreeRTOS task stacks in PSRAM (xTaskCreateWithCaps) — the olm message handler needs a large
+# stack for WireGuard bring-up, which the fragmented internal heap can't provide.
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
+
+# --- diag: core dump to flash so panics are capturable via esptool even when it reboot-loops ---
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# --- R5: internal-RAM relief so the TLS handshake's dynamic buffers can allocate (they pull from
+# internal, which BLE+Wi-Fi+USB+stacks had starved). Fewer static Wi-Fi RX buffers + a smaller main
+# task stack free ~13KB internal; the olm task stack is moved to PSRAM in code. ---
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
+
+# --- R5: CRITICAL for WireGuard-netif + esp_netif coexistence. Without this, esp_netif maps a lwIP
+# netif to its esp_netif via netif->state — but the WG netif stores wireguardif's device there, so
+# esp_netif's DHCP callback derefs it as an esp_netif and panics (confirmed via coredump). This moves
+# esp_netif's pointer to a dedicated netif client-data slot, so the WG netif cleanly returns NULL. ---
+# Flip LWIP_ESP_NETIF_DATA on: esp_netif then stores its back-pointer in the netif client_data slot
+# instead of netif->state, leaving netif->state free for the raw wireguardif device. (The lwipopts
+# macro is gated on this symbol OR PPP; bridge is the light lever — PPP drags in a whole stack.)
+CONFIG_ESP_NETIF_BRIDGE_EN=y

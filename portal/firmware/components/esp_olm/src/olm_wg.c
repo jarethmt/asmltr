@@ -15,15 +15,26 @@
 #include "lwip/ip.h"       /* ip_input (netif input fn) */
 #include "lwip/inet.h"
 
-#include "wireguardif.h"   /* vendored esp_wireguard (src/ exported) */
+#include "wireguardif.h"          /* vendored esp_wireguard (src/ exported) */
+#include "wireguard-platform.h"   /* wireguard_platform_init — seeds the WG crypto RNG */
 
 static const char *TAG = "olm_wg";
 
 static struct netif  s_wg_netif;
 static struct netif *s_netif = NULL;
+static bool          s_platform_inited = false;
 static char          s_priv_b64[OLM_B64KEYLEN];           /* kept alive for netif lifetime     */
 static struct { char pub[OLM_B64KEYLEN]; uint8_t idx; } s_peers[OLM_MAX_PEERS];
 static int           s_npeers = 0;
+
+/* popcount of a contiguous netmask (host order) -> prefix length */
+static int mask_to_prefix(uint32_t m) { int p = 0; while (m) { p += (int)(m & 1u); m >>= 1; } return p; }
+/* number of leading bits two addresses (host order) share -> largest prefix whose block holds both */
+static int leading_equal_bits(uint32_t a, uint32_t b) {
+    uint32_t x = a ^ b; int p = 0;
+    for (int i = 31; i >= 0; i--) { if (x & (1u << i)) break; p++; }
+    return p;
+}
 
 /* prefix length -> IPv4 netmask (host order) */
 static uint32_t prefix_to_mask(int prefix)
@@ -125,6 +136,14 @@ static esp_err_t add_one_peer(const olm_peer_t *p)
 
 esp_err_t olm_wg_up(olm_ctx_t *c, const olm_connect_t *cfg)
 {
+    /* Seed the WireGuard crypto platform ONCE before any wireguardif use. The high-level
+     * esp_wireguard_init() does this; we use the low-level API directly, so we must. Without it the
+     * device-init RNG (cookie_secret) draws from an unseeded DRBG and panics. */
+    if (!s_platform_inited) {
+        if (wireguard_platform_init() != ESP_OK) { ESP_LOGE(TAG, "wireguard_platform_init failed"); return ESP_FAIL; }
+        s_platform_inited = true;
+    }
+
     if (s_netif) olm_wg_down(c);
 
     ip4_addr_t ip, mask, gw;
@@ -134,6 +153,33 @@ esp_err_t olm_wg_up(olm_ctx_t *c, const olm_connect_t *cfg)
     }
     ip4_addr_set_zero(&gw);
 
+    /* RELAY mode is hub-and-spoke: ALL overlay traffic — our client subnet AND the utility subnet where
+     * mesh RESOURCES live (e.g. 10.201.x) — must egress this netif, encrypted to the exit node. Two
+     * things make that work: widen the netif mask so the whole overlay is on-link (lwIP hands those
+     * packets to the WG netif), and give the exit-node peer an allowed_ip covering the overlay so
+     * wireguardif actually routes them there. Without this, only the client subnet was reachable and
+     * every resource (utility subnet) was silently undeliverable. */
+    char overlay_cidr[24] = {0};
+    if (c->cfg.relay) {
+        uint32_t net    = lwip_ntohl(ip4_addr_get_u32(&ip)) & lwip_ntohl(ip4_addr_get_u32(&mask));
+        int      prefix = mask_to_prefix(lwip_ntohl(ip4_addr_get_u32(&mask)));
+        if (cfg->utility_subnet[0]) {
+            ip4_addr_t uip, umask;
+            if (parse_ip_cidr(cfg->utility_subnet, &uip, &umask, 24)) {
+                uint32_t unet = lwip_ntohl(ip4_addr_get_u32(&uip)) & lwip_ntohl(ip4_addr_get_u32(&umask));
+                int common = leading_equal_bits(net, unet);   /* smallest supernet holding both bases */
+                if (common < prefix) prefix = common;
+            }
+        }
+        uint32_t smask = (prefix == 0) ? 0u : (0xFFFFFFFFu << (32 - prefix));
+        net &= smask;
+        ip4_addr_set_u32(&mask, lwip_htonl(smask));            /* widen netif mask -> overlay on-link   */
+        snprintf(overlay_cidr, sizeof overlay_cidr, "%u.%u.%u.%u/%d",
+                 (unsigned)((net >> 24) & 0xFF), (unsigned)((net >> 16) & 0xFF),
+                 (unsigned)((net >> 8) & 0xFF),  (unsigned)(net & 0xFF), prefix);
+        ESP_LOGI(TAG, "relay overlay route: %s (via exit node)", overlay_cidr);
+    }
+
     strlcpy(s_priv_b64, c->keys.priv_b64, sizeof(s_priv_b64));
     struct wireguardif_init_data wg = { .private_key = s_priv_b64, .listen_port = 0, .bind_netif = NULL };
 
@@ -141,6 +187,15 @@ esp_err_t olm_wg_up(olm_ctx_t *c, const olm_connect_t *cfg)
     s_netif = netif_add(&s_wg_netif, &ip, &mask, &gw, &wg, &wireguardif_init, &ip_input);
     if (!s_netif) { ESP_LOGE(TAG, "netif_add failed"); return ESP_FAIL; }
     netif_set_up(s_netif);   /* NOT set_default: encrypted traffic egresses the STA */
+
+    /* give the overlay route to the exit-node peer (the relay hub); if the server didn't flag one,
+     * fall back to the first peer so the route still lands somewhere reachable. */
+    if (overlay_cidr[0] && cfg->n_peers > 0) {
+        int hub = -1;
+        for (int i = 0; i < cfg->n_peers; i++) if (cfg->peers[i].site_id == -1) { hub = i; break; }
+        if (hub < 0) hub = 0;
+        strlcpy(cfg->peers[hub].allowed_ips, overlay_cidr, sizeof(cfg->peers[hub].allowed_ips));
+    }
 
     s_npeers = 0;
     int ok = 0;

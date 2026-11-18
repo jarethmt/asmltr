@@ -23,6 +23,8 @@
 #include "trust.h"
 #include "module.h"
 #include "engine.h"
+#include "portal_drive_mesh.h"
+#include "portal_log.h"
 #include "portal_ui.h"
 #include "wifi_link.h"
 #include "portal_olm.h"
@@ -159,9 +161,10 @@ static bool cfg_chunk(const uint8_t *d, uint16_t len) {
 
 // Apply a reassembled provisioning blob: writes the "portal" NVS namespace and (re)starts the mesh
 // client. {"off":true} clears the mesh config. The app sends:
-//   { olm_server, olm_id, olm_secret, olm_org, wifi_ssid, wifi_pass }
+//   { olm_server, olm_id, olm_secret, olm_org, wifi_ssid, wifi_pass, [drive_url, drive_id, drive_tok] }
 // olm_* come from the core (provisionDongle); wifi_* are what the user typed in the app.
-static const char *CFG_KEYS[] = { "olm_server", "olm_id", "olm_secret", "olm_org", "wifi_ssid", "wifi_pass" };
+static const char *CFG_KEYS[] = { "olm_server", "olm_id", "olm_secret", "olm_org", "wifi_ssid", "wifi_pass",
+                                   "drive_url", "drive_id", "drive_tok" };  /* last 3: optional phone-bypass drive agent */
 static void apply_portal_cfg(void) {
     s_cfg_asm[s_cfg_asm_len] = 0;
     cJSON *root = cJSON_Parse((const char *)s_cfg_asm);
@@ -224,8 +227,10 @@ static int gatt_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
         return ok ? 0 : BLE_ATT_ERR_UNLIKELY;
     }
     if (ble_uuid_cmp(u, &EXEC_UUID.u) == 0) {       // driver command: [mode][data], chunked
-        if (exec_chunk(buf, olen) && s_exec_asm_len >= 1)
+        if (exec_chunk(buf, olen) && s_exec_asm_len >= 1) {
+            portal_drive_mesh_yield();   // this command is BLE-driven → return stream goes back over BLE
             engine_submit_exec(s_exec_asm[0], s_exec_asm + 1, (int)s_exec_asm_len - 1);
+        }
         return 0;
     }
     if (ble_uuid_cmp(u, &WIFI_UUID.u) == 0) {       // Wi-Fi P2P creds handoff: JSON, chunked
@@ -285,7 +290,14 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
         advertise();
         break;
     case BLE_GAP_EVENT_SUBSCRIBE:
-        if (event->subscribe.attr_handle == s_status_handle) s_status_subscribed = event->subscribe.cur_notify;
+        if (event->subscribe.attr_handle == s_status_handle) {
+            bool now = event->subscribe.cur_notify;
+            // On a fresh STATUS subscribe, replay the whole retained log ring so a late-connecting app
+            // still receives the boot/Wi-Fi/olm/route/drive-agent trace — the key fix for debugging the
+            // mesh chain without catching logs live.
+            if (now && !s_status_subscribed) portal_log_replay();
+            s_status_subscribed = now;
+        }
         if (event->subscribe.attr_handle == s_ioback_handle) s_ioback_subscribed = event->subscribe.cur_notify;
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:

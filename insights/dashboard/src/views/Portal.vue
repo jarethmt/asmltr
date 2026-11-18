@@ -208,7 +208,7 @@ async function connect(d) {
     try {
       await BleClient.startNotifications(d.deviceId, SVC_UUID, STATUS_UUID, (value) => {
         const line = new TextDecoder('utf-8').decode(value).trim()
-        if (line) statusLines.value = [...statusLines.value.slice(-49), line]
+        if (line) { statusLines.value = [...statusLines.value.slice(-49), line]; portal.trace(line).catch(() => {}) }
       })
     } catch { /* NOTIFY not available on this unit */ }
     // ioback (driver return stream) → the console. Separate char, best-effort.
@@ -337,7 +337,7 @@ async function loadLibrary() {
 function startNotifPoll() {
   if (!AN || notifTimer) return
   notifTimer = setInterval(() => {
-    try { const arr = JSON.parse(AN.bleNotifications() || '[]'); for (const l of arr) if (l) statusLines.value = [...statusLines.value.slice(-49), l] } catch (_) { /* ignore */ }
+    try { const arr = JSON.parse(AN.bleNotifications() || '[]'); for (const l of arr) if (l) { statusLines.value = [...statusLines.value.slice(-49), l]; portal.trace(l).catch(() => {}) } } catch (_) { /* ignore */ }
   }, 400)
 }
 function stopNotifPoll() { if (notifTimer) { clearInterval(notifTimer); notifTimer = null } }
@@ -475,9 +475,12 @@ async function provisionMesh() {
   meshBusy.value = true; error.value = ''
   try {
     const bundle = await portal.provisionMesh({ name })
-    const cfg = {
-      olm_server: bundle.olm_server, olm_id: bundle.olm_id, olm_secret: bundle.olm_secret,
-      olm_org: bundle.olm_org, wifi_ssid: meshSsid.value, wifi_pass: meshPass.value,
+    // Pass through every string field the core returns (olm_* and, when the drive rail is enabled,
+    // drive_url/drive_id/drive_tok) + the Wi-Fi the operator typed. The firmware writes only the keys
+    // it recognises, so forwarding the whole bundle is safe and keeps new fields working without edits.
+    const cfg = { wifi_ssid: meshSsid.value, wifi_pass: meshPass.value }
+    for (const [k, v] of Object.entries(bundle)) {
+      if (typeof v === 'string' && k !== 'name') cfg[k] = v
     }
     await chunkWrite(CFG_UUID, new TextEncoder().encode(JSON.stringify(cfg)))
     meshPass.value = ''

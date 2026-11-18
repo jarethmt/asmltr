@@ -9,6 +9,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
+#include "portal_drive_mesh.h"
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
 #include "esp_log.h"
@@ -189,8 +190,9 @@ static void ioback_task(void *arg) {
         if (n > 0) {
             // Transport selector: the Wi-Fi TCP socket (ordered + reliable) when it's up, else the
             // BLE ioback notify path (the fallback). ble_ioback_notify re-splits by the live MTU.
-            if (wifi_link_active()) wifi_link_send((const uint8_t *)buf, n);
-            else                    ble_ioback_notify((const uint8_t *)buf, n);
+            if (portal_drive_mesh_active()) portal_drive_mesh_ioback((const uint8_t *)buf, n); // phone-bypass: POST over the mesh
+            else if (wifi_link_active())    wifi_link_send((const uint8_t *)buf, n);
+            else                            ble_ioback_notify((const uint8_t *)buf, n);
         } else vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

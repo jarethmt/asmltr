@@ -382,3 +382,58 @@ Checkpoint before P1 and P2 — both rewrite live authentication paths.
 
 Two things explicitly **not** done in this arc: no SSH transport until P1 has landed, and no
 migration of the live device gateway's in-memory map until P2.
+
+
+---
+
+## Provisioning a host onto the mesh (shipped 2026-11-16)
+
+There are two ways to join a machine to the Pangolin mesh and land it in the Fleet. Both run the
+**same orchestration** — `core/src/portal/enroll.js` → `POST /v2/portal/enroll` — which does, in
+order: device row (so it appears in the Fleet immediately), `ssh`/`rd` transports at their mesh
+aliases `<slug>-ssh.mesh` / `<slug>-rd.mesh`, a short-lived revocable token, then drives
+`asmltr mesh enroll` + `asmltr mesh resource`. They differ only in how the bootstrap one-liner
+reaches the target.
+
+| | transport for the bootstrap | use when |
+|---|---|---|
+| **Portal dongle** | USB-HID (types it into the target) | the host has no agent and you cannot log in |
+| **`asmltr device provision`** | SSH (session you already have) | you can already reach the host |
+
+```sh
+asmltr device provision johto --ssh root@192.168.100.120 --os linux --kind server
+```
+
+Flags: `--os linux|macos|windows` · `--kind` (patches the row afterwards — a headless host is a
+`server`, not the `workstation` the portal path defaults to) · `--no-victory` to skip the victory lap.
+
+**Failure is non-destructive by design.** If the host-side bootstrap fails, the device row,
+transports and token all survive, the command prints the one-liner to run by hand, and it is
+safely re-runnable.
+
+### Why the CLI verb exists
+
+Until 2026-11-16 the full orchestration was reachable **only** through that REST endpoint, whose
+shape assumes the dongle's BLE/HID bridge. Provisioning a host that was already reachable over SSH
+therefore meant hand-assembling what `enroll.js` does in one call. That is exactly what happened
+with **`johto`**: its Pangolin client was created by direct `INSERT` into the Pangolin SQLite DB
+(argon2id secret hash generated with Pangolin's own `@node-rs/argon2` at `m=19456,t=2,p=1` and
+round-trip verified before writing), then the site, resource, grant, `.mesh` DNS scoping and Fleet
+row were each done by hand. `asmltr mesh enroll` would have handled the Pangolin half correctly on
+its own; nothing handled the whole job. This verb does.
+
+### Gotchas carried over from the dongle path
+
+1. **A host-mode mesh resource MUST have a non-empty alias** or it never routes. The CLI always
+   passes an explicit resource name so `<name>.mesh` is derived.
+2. **Windows newt must run as a SYSTEM scheduled task**, or the WireGuard adapter is created but
+   never transmits.
+3. **`*.mesh` only resolves via olm's DNS proxy** (`10.201.0.1`). Scope it as a routing-only domain
+   (`resolvectl domain <iface> '~mesh'`) — never make it the system resolver, or a mesh hiccup takes
+   out all DNS. On Eve this is persisted by `olm-eve-dns-scope.service`.
+
+### `kind`
+
+`workstation · server · phone · sbc · appliance · printer · other`. `server` was added 2026-11-16 —
+the fleet holds headless hosts (johto: storage + PBS) that are neither a workstation nor an
+appliance, and filing them as `appliance` lost that distinction.

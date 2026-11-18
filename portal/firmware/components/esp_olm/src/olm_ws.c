@@ -10,6 +10,9 @@
 #include "esp_timer.h"
 #include "esp_crt_bundle.h"
 #include "esp_websocket_client.h"
+#include "esp_heap_caps.h"
+#include "freertos/queue.h"
+#include "freertos/idf_additions.h"   /* xTaskCreateWithCaps (PSRAM-backed stack) */
 #include "cJSON.h"
 #include "zlib.h"
 
@@ -22,6 +25,36 @@ static olm_ws_msg_cb_t s_on_msg = NULL;
 static olm_ctx_t      *s_ctx = NULL;
 static volatile bool   s_up = false;
 static esp_timer_handle_t s_ping_timer = NULL;
+
+/* Inbound control messages are handed to a dedicated handler task, NOT processed in the websocket
+ * event callback: bringing up WireGuard (Curve25519 setup) from olm/wg/connect is very stack-hungry
+ * and overflows the small ws task. The handler task's stack lives in PSRAM so it can be large without
+ * competing for the fragmented internal heap. */
+typedef struct { char *type; char *data; } olm_msg_t;
+static QueueHandle_t s_msg_q = NULL;
+static TaskHandle_t  s_handler_task = NULL;
+
+static void olm_enqueue_msg(const char *type, const char *data)
+{
+    if (!s_msg_q) return;
+    olm_msg_t m = { strdup(type), strdup(data ? data : "{}") };
+    if (!m.type || !m.data || xQueueSend(s_msg_q, &m, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "msg queue drop (%s)", type ? type : "?");
+        free(m.type); free(m.data);
+    }
+}
+
+static void handler_task(void *arg)
+{
+    (void)arg;
+    olm_msg_t m;
+    for (;;) {
+        if (xQueueReceive(s_msg_q, &m, portMAX_DELAY) == pdTRUE) {
+            if (s_on_msg) s_on_msg(s_ctx, m.type, m.data);
+            free(m.type); free(m.data);
+        }
+    }
+}
 
 static char   *s_acc = NULL;   /* reassembly buffer */
 static int     s_acc_len = 0;
@@ -65,7 +98,7 @@ static void dispatch(const char *json, int len)
     if (cJSON_IsString(type) && type->valuestring && s_on_msg) {
         cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
         char *data_str = data ? cJSON_PrintUnformatted(data) : NULL;
-        s_on_msg(s_ctx, type->valuestring, data_str ? data_str : "{}");
+        olm_enqueue_msg(type->valuestring, data_str ? data_str : "{}");  /* handled on the big-stack task */
         if (data_str) free(data_str);
     }
     cJSON_Delete(root);
@@ -81,7 +114,7 @@ static void ws_event(void *args, esp_event_base_t base, int32_t id, void *event_
     case WEBSOCKET_EVENT_CONNECTED:
         ESP_LOGI(TAG, "ws connected");
         s_up = true;
-        if (s_on_msg) s_on_msg(s_ctx, OLM_EVT_WS_CONNECTED, "{}");
+        olm_enqueue_msg(OLM_EVT_WS_CONNECTED, "{}");
         break;
 
     case WEBSOCKET_EVENT_DISCONNECTED:
@@ -144,6 +177,17 @@ esp_err_t olm_ws_connect(olm_ctx_t *c, const char *token, olm_ws_msg_cb_t on_msg
 {
     s_ctx = c; s_on_msg = on_msg; s_up = false;
 
+    /* Message queue + handler task (created once; persist across reconnects). The handler's stack
+     * is in PSRAM (large) so WireGuard bring-up from olm/wg/connect has room the internal heap lacks. */
+    if (!s_msg_q) s_msg_q = xQueueCreate(8, sizeof(olm_msg_t));
+    if (s_msg_q && !s_handler_task) {
+        if (xTaskCreateWithCaps(handler_task, "olm-hdlr", 16384, NULL, 5, &s_handler_task,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+            ESP_LOGW(TAG, "PSRAM handler task create failed; falling back to internal stack");
+            xTaskCreate(handler_task, "olm-hdlr", 12288, NULL, 5, &s_handler_task);
+        }
+    }
+
     /* wss://host/api/v1/ws?token=<t>&clientType=olm */
     int need = strlen(c->server_host) + strlen(token) + 64;
     char *uri = malloc(need);
@@ -156,7 +200,7 @@ esp_err_t olm_ws_connect(olm_ctx_t *c, const char *token, olm_ws_msg_cb_t on_msg
         .disable_auto_reconnect = true,     /* olm_task owns reconnect + token refresh */
         .network_timeout_ms = 15000,
         .buffer_size = 4096,
-        .task_stack = 6144,
+        .task_stack = 8192,
     };
     if (c->server_tls) {
         if (c->cfg.ca_pem && c->cfg.ca_pem[0]) cfg.cert_pem = c->cfg.ca_pem;
@@ -203,6 +247,10 @@ void olm_ws_disconnect(olm_ctx_t *c)
     }
     if (c) c->ws = NULL;
     free(s_acc); s_acc = NULL; s_acc_cap = s_acc_len = 0;
+    if (s_msg_q) {   /* drop any queued messages from the dead session */
+        olm_msg_t m;
+        while (xQueueReceive(s_msg_q, &m, 0) == pdTRUE) { free(m.type); free(m.data); }
+    }
 }
 
 bool olm_ws_is_up(olm_ctx_t *c) { (void)c; return s_up && s_client; }

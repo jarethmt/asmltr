@@ -97,6 +97,18 @@ esp_err_t olm_http_get_token(olm_ctx_t *c, char *token_out, size_t token_len)
         if (cJSON_IsString(tok) && tok->valuestring && tok->valuestring[0]) {
             strlcpy(token_out, tok->valuestring, token_len);
             out = ESP_OK;
+            /* trace: the exit nodes olm would use for the base tunnel to gerbil (we don't wire them yet) */
+            cJSON *ens = data ? cJSON_GetObjectItemCaseSensitive(data, "exitNodes") : NULL;
+            int nen = cJSON_IsArray(ens) ? cJSON_GetArraySize(ens) : 0;
+            ESP_LOGI(TAG, "token ok; exitNodes=%d", nen);
+            if (nen > 0) {
+                cJSON *e0 = cJSON_GetArrayItem(ens, 0);
+                cJSON *ep = e0 ? cJSON_GetObjectItemCaseSensitive(e0, "endpoint") : NULL;
+                cJSON *rp = e0 ? cJSON_GetObjectItemCaseSensitive(e0, "relayPort") : NULL;
+                ESP_LOGI(TAG, "exitNode[0] ep=%s relayPort=%d",
+                         cJSON_IsString(ep) ? ep->valuestring : "?",
+                         rp && cJSON_IsNumber(rp) ? rp->valueint : 0);
+            }
         } else {
             ESP_LOGW(TAG, "get-token: no token in response");
         }

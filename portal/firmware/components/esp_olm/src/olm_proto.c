@@ -30,13 +30,15 @@ esp_err_t olm_proto_register(olm_ctx_t *c)
     char chain[17];
     gen_chain_id(chain, sizeof(chain));
 
+    /* Machine client: do NOT send orgId/userToken. The server gates registrations that carry an
+     * orgId behind a user identity + user-session token (access policies, 2FA, password age); a
+     * machine olm client has no user, so sending orgId makes the server reject it with
+     * USER_ID_NOT_FOUND and disconnect. olmId/secret were already authenticated at get-token. */
     cJSON *d = cJSON_CreateObject();
     cJSON_AddStringToObject(d, "publicKey",  c->keys.pub_b64);
     cJSON_AddBoolToObject(d,   "relay",      c->cfg.relay);
     cJSON_AddStringToObject(d, "olmVersion", c->cfg.olm_version);
     cJSON_AddStringToObject(d, "olmAgent",   c->cfg.olm_agent);
-    cJSON_AddStringToObject(d, "orgId",      c->cfg.org_id);
-    cJSON_AddStringToObject(d, "userToken",  "");
     cJSON_AddStringToObject(d, "chainId",    chain);
     char *s = cJSON_PrintUnformatted(d);
     cJSON_Delete(d);

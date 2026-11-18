@@ -255,7 +255,10 @@ async function provisionDongle(name, { log = noop } = {}) {
     log(`✓ dongle '${slug}' olm client created (clientId ${clientId}); creds → vault`);
   }
 
-  return {
+  // Phone-bypass drive rail (optional): if a drive token is set AND a `portal-drive` mesh resource
+  // exists, hand the dongle the overlay address of the drive-only listener + a Bearer so it can poll
+  // the core directly over WireGuard (no phone relay). Best-effort — absent → dongle stays phone-relay.
+  const bundle = {
     name: slug,
     clientId,
     olm_server: cfg.dashboardUrl,
@@ -263,6 +266,24 @@ async function provisionDongle(name, { log = noop } = {}) {
     olm_secret: olmSecret,
     olm_org: cfg.org,
   };
+  const driveTok = process.env.ASMLTR_PORTAL_DRIVE_TOKEN || '';
+  const drivePort = Number(process.env.ASMLTR_PORTAL_DRIVE_PORT || 3099);
+  if (driveTok) {
+    try {
+      const srs = (await pg.listSiteResources(cfg.org)).data;
+      const rr = srs.siteResources || srs || [];
+      const dr = Array.isArray(rr) ? rr.find((r) => r.name === 'portal-drive') : null;
+      if (dr && dr.aliasAddress) {
+        bundle.drive_url = `http://${dr.aliasAddress}:${drivePort}`;
+        bundle.drive_id = slug;
+        bundle.drive_tok = driveTok;
+        log(`· drive rail: ${bundle.drive_url} (id ${slug})`);
+      } else {
+        log('· drive rail: token set but no `portal-drive` resource — skipping drive config');
+      }
+    } catch (e) { log('· drive rail: resource lookup failed (' + e.message + ') — skipping'); }
+  }
+  return bundle;
 }
 
 async function status({ log = noop } = {}) {

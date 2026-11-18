@@ -1,9 +1,11 @@
 # asmltr Pangolin Backbone — Design
 
 asmltr's **networking plane**: a self-hosted layer that both (a) connects an instance to all its
-devices (private WireGuard mesh — agent reaches any enrolled machine) and (b) **publicly exposes
-services with TLS/routing** (reverse proxy). Pangolin does both, so **asmltr core ships no Traefik of
-its own** — Pangolin *is* the ingress. The asmltr Portal (`../../asmltr-portal/`) provisions devices onto it.
+devices (private WireGuard mesh — agent reaches any enrolled machine) and (b) can **publicly expose
+services with TLS/routing**. Pangolin runs either way: ride an external reverse proxy (the current
+default — mesh binds only the WireGuard UDP ports) **or** act as the public ingress itself through its
+built-in resource proxy, so an install needn't run a separate proxy. Pangolin-as-ingress is the chosen
+direction (§10). The asmltr Portal (`../../asmltr-portal/`) provisions devices onto it.
 
 Status: design (2026-10-19). Not yet deployed — asmltr currently rides Tailscale + a BYO reverse proxy.
 

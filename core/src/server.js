@@ -44,6 +44,7 @@ const deviceEnroll = require('./devices/enroll'); // device credential issuance 
 const deviceShell = require('./devices/shell'); // shell sessions on registered machines — one PTY, many watchers
 const portalModules = require('./portal/modules'); // Portal (BLE dongle) module signer + library (docs/PORTAL-PROTOCOL.md)
 const portalDrive = require('./portal/drive'); // Portal generic-driver relay + recipes (docs/PORTAL-DRIVE.md)
+const { startDriveListener } = require('./portal/drive-listener'); // phone-bypass mesh drive rail (drive.md §2)
 const portalEnroll = require('./portal/enroll'); // Portal persistent track — enroll/teardown/victory (PORTAL-DRIVE.md §6)
 const portalRecipes = require('./portal/recipes'); // per-OS recipes + normalizeOs (for the enroll-script endpoint)
 const meshIndex = require('../../mesh'); // Pangolin mesh plane — status() for the Fleet feed
@@ -1018,6 +1019,31 @@ app.post('/v2/integrations', (req, res) => { try { res.status(201).json(integrat
 app.patch('/v2/integrations/:id', (req, res) => { const r = integrations.update(req.params.id, req.body || {}); r ? res.json(r) : res.status(404).json({ error: 'not found' }); });
 app.delete('/v2/integrations/:id', (req, res) => res.json({ ok: integrations.remove(req.params.id) }));
 app.post('/v2/integrations/:id/test', async (req, res) => res.json(await integrations.test(req.params.id)));
+
+// ---- Google account connect (one consent -> mail + calendar + contacts integrations) ----
+// See core/src/google-connect.js for why there are three modes. The UI asks /status FIRST so it
+// can render the right path, or an explanation, instead of failing at the end of a wizard.
+const googleConnect = require('./google-connect');
+app.get('/v2/integrations/google/status', (req, res) => res.json(googleConnect.status()));
+app.post('/v2/integrations/google/start', (req, res) => {
+  try { res.json(googleConnect.start(req.body || {})); }
+  catch (e) { res.status(e.status || 400).json({ error: e.message, detail: e.detail }); }
+});
+// Browser lands here in `redirect` mode. Completes, then bounces back to the dashboard.
+app.get(googleConnect.CALLBACK_PATH, async (req, res) => {
+  try {
+    const out = await googleConnect.complete({ state: req.query.state, code: req.query.code });
+    const to = '/#/integrations?google=' + encodeURIComponent(out.account);
+    res.redirect(302, to);
+  } catch (e) {
+    res.status(400).send('<h3>Google connect failed</h3><pre>' + String(e.message).replace(/[<>&]/g, '') + '</pre>');
+  }
+});
+// `paste` mode posts the copied code here.
+app.post('/v2/integrations/google/claim', async (req, res) => {
+  try { res.json(await googleConnect.complete(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 // Vault key management — metadata only (names/tiers/access counts), NEVER values. Store/delete a
 // credential. Values are write-only from the GUI; retrieval is the SACRED core's job, not the UI's.
@@ -2287,6 +2313,17 @@ app.post('/v2/portal/enroll',   async (req, res) => { try { res.json(await porta
 app.post('/v2/portal/teardown', async (req, res) => { try { res.json(await portalEnroll.teardown(req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/v2/portal/:id/victory', async (req, res) => { try { res.json(await portalEnroll.victoryLap(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); } });
 
+// Debug trace sink: the app forwards the dongle's BLE STATUS lines here so the dongle's on-device
+// log (no UART over USB) can be read server-side while bringing up the mesh client.
+const _portalTrace = [];
+app.post('/v2/portal/trace', (req, res) => {
+  const line = (req.body || {}).line;
+  if (line) { _portalTrace.push(String(line).slice(0, 220)); if (_portalTrace.length > 800) _portalTrace.shift(); }
+  res.json({ ok: true });
+});
+app.get('/v2/portal/trace', (req, res) => res.json({ lines: _portalTrace }));
+app.delete('/v2/portal/trace', (req, res) => { _portalTrace.length = 0; res.json({ ok: true }); });
+
 // Provision a free-standing Portal dongle onto the mesh and return the NVS config bundle the app
 // writes to it over BLE (CFG char). The app supplies the dongle's name (from its BLE INFO); olm
 // creds come from here (minted/held server-side), Wi-Fi creds are entered by the user in the app.
@@ -2456,6 +2493,12 @@ if (require.main === module) {
   const server = app.listen(PORT, HOST, () => {
     console.log(`asmltr-core listening on http://${HOST}:${PORT} (concurrency ${MAX_CONCURRENT})`);
     console.log('substrate: local Agent SDK on Max subscription (NO ANTHROPIC_API_KEY path)');
+  });
+  // Dedicated, Bearer-gated drive-only listener for the phone-bypass mesh rail — shares portalDrive
+  // state with the main port, bound to 127.0.0.1, published to the dongle via a Pangolin resource.
+  startDriveListener(portalDrive, {
+    port: Number(process.env.ASMLTR_PORTAL_DRIVE_PORT || 3099),
+    token: process.env.ASMLTR_PORTAL_DRIVE_TOKEN || '',
   });
   // Agent turns (research, tool loops) can run many minutes. Node's default 5-min
   // server.requestTimeout would cut the connector→core call mid-turn (surfacing as

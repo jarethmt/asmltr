@@ -28,7 +28,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS devices (
     id                 TEXT PRIMARY KEY,
     name               TEXT NOT NULL,
-    kind               TEXT NOT NULL DEFAULT 'workstation',  -- workstation|phone|sbc|appliance|printer|other
+    kind               TEXT NOT NULL DEFAULT 'workstation',  -- workstation|server|phone|sbc|appliance|printer|other
     platform           TEXT,                                 -- windows|macos|linux|android|…
     owner_principal_id TEXT REFERENCES principals(id) ON DELETE SET NULL,
     tags               TEXT NOT NULL DEFAULT '[]',
@@ -101,7 +101,9 @@ const J = (s, d) => { try { return JSON.parse(s || ''); } catch { return d; } };
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 const TRANSPORTS = ['rd', 'ssh', 'adb', 'device-gw', 'serial', 'http', 'ble'];  // 'ble' = asmltr Portal control link (BLE GATT)
-const KINDS = ['workstation', 'phone', 'sbc', 'appliance', 'printer', 'other'];
+// 'server' added 2026-11-16: the fleet holds headless hosts (johto = storage + PBS) that are
+// neither a workstation nor an appliance. Filing them as 'appliance' lost that distinction.
+const KINDS = ['workstation', 'server', 'phone', 'sbc', 'appliance', 'printer', 'other'];
 const CAPABILITIES = ['view', 'control', 'shell', 'file', 'wake'];
 
 function slug(name) {

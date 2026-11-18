@@ -12,7 +12,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "esp_olm";
 
@@ -63,6 +66,10 @@ static void olm_task(void *arg)
         c->registered = false;
         olm_set_state(c, ESP_OLM_CONNECTING);
 
+        ESP_LOGI(TAG, "heap pre-token: internal=%u total=%u largest=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         char token[512] = {0};
         esp_err_t err = olm_http_get_token(c, token, sizeof(token));
         if (err != ESP_OK || !token[0]) {
@@ -70,14 +77,31 @@ static void olm_task(void *arg)
             goto backoff_wait;
         }
 
+        ESP_LOGI(TAG, "heap pre-ws: internal=%u total=%u largest=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         err = olm_ws_connect(c, token, olm_proto_on_msg);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "ws connect failed (%s); retry in %d ms", esp_err_to_name(err), backoff);
             goto backoff_wait;
         }
 
-        /* Connected to control plane; olm_proto will register + bring up WG as messages arrive.
-         * Stay here while the ws is up; olm_ws runs its own keepalive + read pump. */
+        /* The websocket connects ASYNCHRONOUSLY — is_up() only turns true on the CONNECTED event
+         * (~1s later). Wait for that before the keepalive loop; otherwise we'd tear the client down
+         * immediately (racing the in-flight handshake → use-after-free + endless flapping). */
+        {
+            int w = 0;
+            while (!c->stop && !olm_ws_is_up(c) && w < 12000) { vTaskDelay(pdMS_TO_TICKS(100)); w += 100; }
+        }
+        if (c->stop) break;
+        if (!olm_ws_is_up(c)) {
+            ESP_LOGW(TAG, "ws did not establish in time; retry in %d ms", backoff);
+            olm_ws_disconnect(c);
+            goto backoff_wait;
+        }
+
+        /* Connected. olm_proto registers + brings up WG as messages arrive on the handler task. */
         backoff = OLM_RECONNECT_MIN_MS;   /* a successful connect resets backoff */
         while (!c->stop && olm_ws_is_up(c)) {
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -137,7 +161,9 @@ esp_err_t esp_olm_start(const esp_olm_config_t *cfg)
     c->stop  = false;
     s_ctx = c;
 
-    if (xTaskCreate(olm_task, "olm", 8192, c, 5, &c->task) != pdPASS) {
+    BaseType_t tc = xTaskCreateWithCaps(olm_task, "olm", 8192, c, 5, &c->task, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (tc != pdPASS) tc = xTaskCreate(olm_task, "olm", 8192, c, 5, &c->task);  /* fallback to internal */
+    if (tc != pdPASS) {
         ESP_LOGE(TAG, "task create failed");
         s_ctx = NULL;
         err = ESP_ERR_NO_MEM;
