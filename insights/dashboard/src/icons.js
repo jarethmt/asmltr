@@ -19,6 +19,8 @@ import {
   faBolt, faLock, faTrashCan, faBan, faFolderOpen, faHeadphones, faScrewdriverWrench,
   faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
   faDatabase, faRightFromBracket, faLayerGroup, faTowerBroadcast,
+  // integration types: mail / caldav / carddav
+  faEnvelope, faCalendarDays, faAddressBook,
 } from '@fortawesome/free-solid-svg-icons'
 import { faDiscord, faTelegram, faGithub } from '@fortawesome/free-brands-svg-icons'
 
@@ -33,6 +35,7 @@ library.add(
   faStopwatch, faWindowMaximize, faBars, faDownload, faFileLines, faAngleLeft, faComments, faPuzzlePiece,
   faDatabase, faRightFromBracket, faLayerGroup, faTowerBroadcast,
   faDiscord, faTelegram, faGithub,
+  faEnvelope, faCalendarDays, faAddressBook,
 )
 
 // glyph (as it appears in data/source) -> ['prefix', 'icon-name']. Variation-selector-16 (U+FE0F)
