@@ -916,15 +916,16 @@ async function cmdDevice(argv, f) {
     } else {
       console.log(A.dim('  verified: mesh client present on the host'));
 
-      // The device is on the mesh and reachable BY ITS OWN client — but the operator's client has
-      // no grant to it yet, so `ssh <name>-ssh.mesh` from the admin box will resolve and then
-      // time out. Pangolin models that as rows in `clientSiteResources` (clientId x
-      // siteResourceId); newt only accepts source subnets it has been told about, so BOTH the
-      // grant and a newt restart are needed. Cost an hour to work out on 2026-11-18 — say it here
-      // so nobody rediscovers it.
-      console.log(A.dim('  note: to reach it from THIS host, grant your olm client access to the'));
-      console.log(A.dim('        new site resources, then restart newt on the target:'));
-      console.log(A.dim('        asmltr mesh grant --client <yourClientId> --site ' + (r.mesh && r.mesh.site ? r.mesh.site : '<site>')));    }    if (!bool('no-victory')) {
+      // Resources are granted to the host client named by ASMLTR_MESH_HOST_CLIENT at enroll
+      // time, so this is automatic — PROVIDED that variable names the olm client actually
+      // running here. If it names one that does not exist, ensureHostClient creates it, and the
+      // device ends up reachable only by a client nothing runs: it resolves, then times out.
+      // That was the 2026-11-18 failure (default 'host' vs Eve's real 'eve-host').
+      //
+      // newt also only accepts source subnets it has been told about, so a grant added AFTER
+      // enrolment needs `systemctl restart newt-<org>-mesh` on the target to take effect.
+      console.log(A.dim(`  granted to host client '${process.env.ASMLTR_MESH_HOST_CLIENT || 'host'}'`));
+    }    if (!bool('no-victory')) {
       const v = await coreApi(`/v2/portal/${encodeURIComponent(r.device.id)}/victory`, 'POST').catch((e) => ({ ok: false, error: e.message }));
       console.log(v.ok
         ? A.grn(`\u2713 victory lap (${v.method})`)

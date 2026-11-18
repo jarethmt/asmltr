@@ -60,11 +60,17 @@ function psInstall(token, baseUrl) {
   // Must run in an ELEVATED shell (the Portal opens one with consented UAC) — the fetched script
   // registers newt as a SYSTEM scheduled task, which a non-elevated session cannot do.
   const url = `${String(baseUrl).replace(/\/$/, '')}${ENROLL_SCRIPT_PATH}?os=windows`;
-  return (
-    `powershell -NoProfile -ExecutionPolicy Bypass -Command ` +
-    `"$t='${token}';$h=@{Authorization=('Bearer '+$t)};` +
-    `(iwr -UseBasicParsing -Headers $h '${url}').Content|iex"`
-  );
+    // Fetch, VERIFY non-empty, then invoke - and exit non-zero if anything failed. Piping
+    // straight into iex has the same defect as `curl | sh`: a failed request yields no content,
+    // iex on an empty string does nothing, and the process still exits 0, so the caller reports
+    // success for an install that never happened. Seen on the Linux path 2026-11-18.
+    return (
+      `powershell -NoProfile -ExecutionPolicy Bypass -Command ` +
+      `"$ErrorActionPreference='Stop';$t='${token}';$h=@{Authorization=('Bearer '+$t)};` +
+      `try{$c=(iwr -UseBasicParsing -Headers $h '${url}').Content}catch{Write-Error $_;exit 22};` +
+      `if([string]::IsNullOrWhiteSpace($c)){Write-Error 'empty install script';exit 23};` +
+      `iex $c"`
+    );
 }
 function shInstall(os, token, baseUrl) {
   // curl → sudo sh. The fetched script writes the systemd unit (Linux) / launchd plist (macOS) and

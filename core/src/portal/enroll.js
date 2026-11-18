@@ -42,6 +42,12 @@ const sshkey = require('../../../mesh/sshkey');
 
 // The olm client the asmltr host itself uses to REACH enrolled devices. One per install; resources
 // are granted to it so the host can open the ssh/rd wires. Overridable for multi-host setups.
+// MUST name the olm client actually running on this host, because enrolled devices' ssh/rd
+// resources are granted to it. If it names a client that does not exist, ensureHostClient
+// happily CREATES one — and then every enrolled device is reachable only by a client that
+// nothing runs. That is what happened on 2026-11-18: the default 'host' spawned an offline
+// client (id 8) while Eve's real olm is 'eve-host' (id 2), so zapdos resolved and then timed
+// out. Set ASMLTR_MESH_HOST_CLIENT explicitly; see .env.
 const HOST_CLIENT_NAME = process.env.ASMLTR_MESH_HOST_CLIENT || 'host';
 
 // The asmltr CLI binary — we shell out to `asmltr mesh …` for the server-side mesh steps (reuses the
