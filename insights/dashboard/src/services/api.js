@@ -587,6 +587,7 @@ export const portal = {
   // Mint (idempotently) the dongle's olm mesh identity; returns the NVS bundle the app writes
   // to it over BLE: { olm_server, olm_id, olm_secret, olm_org }.
   provisionMesh: (body) => postCore('/v2/portal/provision-mesh', body),
+  trace: (line) => postCore('/v2/portal/trace', { line }),   // debug: forward dongle STATUS lines to a server-side sink
 }
 
 const RD_TOKEN_KEY = 'asmltr.rd.token'

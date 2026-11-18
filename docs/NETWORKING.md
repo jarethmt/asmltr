@@ -19,9 +19,15 @@ depending on a third-party VPN. This page is the map; each area has a deeper doc
 ## The mesh (Pangolin networking plane)
 
 A self-hosted [Pangolin](https://github.com/fosrl/pangolin) control plane + gerbil (WireGuard) + per-device
-`olm`/`newt` clients. It rides your existing reverse proxy (external-Traefik mode) and binds nothing new to
-the internet except the two WireGuard UDP ports. **asmltr ships no reverse proxy of its own** — the mesh is
-the networking plane, not a competing ingress.
+`olm`/`newt` clients. **By default it runs in external-reverse-proxy mode:** you bring your own reverse
+proxy for the web surfaces, and the mesh itself binds nothing new to the internet except the two WireGuard
+UDP ports. This is the least-disruptive way to add the mesh to a host that already has a proxy.
+
+Pangolin can **also be the public ingress itself** — its built-in resource proxy (Traefik + the `badger`
+plugin) terminates TLS and routes public HTTP resources — so an install can expose services directly
+through Pangolin instead of running a separate reverse proxy. Fresh installs can start that way; an
+existing host can move services onto it one at a time. Either mode, the mesh is the single networking
+plane, not one bolted beside your proxy.
 
 - **Design deep-dive:** [Pangolin backbone](PANGOLIN-BACKBONE-DESIGN.md).
 - **Tooling:** `mesh/` in the repo — see its [README](https://github.com/jarethmt/asmltr/blob/main/mesh/README.md).

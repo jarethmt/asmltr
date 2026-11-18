@@ -235,12 +235,6 @@ const meta = {
       email_address: { type: 'string', title: 'From address (blank = use the user_bws_key value)', default: '' },
       from_name: { type: 'string', title: 'From display name', default: NAME },
       mailbox: { type: 'string', title: 'IMAP mailbox to watch', default: 'INBOX' },
-      ingest_only: {
-        type: 'boolean',
-        title: 'Ingest only (watch and index this mailbox; never generate a reply or a draft)',
-        description: 'ON = a read path: mail is parsed, attachments land on the upload surface, threads and telemetry are recorded, and the engine is never asked for anything — so no auto-reply, no draft, no tokens. Explicit sends still work: you can be ASKED to mail from this address and it will go. Turn OFF, per address, to let it answer on its own under the Send policy below. New instances default to ON.',
-        default: true,
-      },
       local_domains: {
         type: 'string',
         title: 'Our own mail domains, comma-separated (enables the authenticated-local-submission path)',
@@ -958,10 +952,6 @@ async function start(ctx) {
   const MAILBOX = cfg.mailbox || 'INBOX';
   const fromName = cfg.from_name || NAME;
   const policy = sendPolicyFromConfig(cfg);
-  // Ingest-only is a SEPARATE axis from the send policy. always_draft still asks the engine for a
-  // reply and parks it; this never asks at all. It suppresses self-initiated mail (auto-reply and
-  // drafts) but deliberately does NOT block an explicit, operator-requested send.
-  const ingestOnly = cfg.ingest_only === true;
   const localDomains = String(cfg.local_domains || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
   const ownerForward = String(cfg.owner_forward_to || '').trim().toLowerCase();
   const signature = cfg.signature || (
@@ -1179,16 +1169,6 @@ async function start(ctx) {
     extra += ' You may use standard markdown (bold, italics, headings, lists, links, code). It is converted to HTML/rich text when the email is sent. The text part stays the markdown. Do not write HTML tags.';
     extra += ' Do not retype or restyle the signature; the connector appends it. Do not use Discord -# or 💭 in a letter (if you do, send-time unwraps it). Use markdown for emphasis; headings only when they help, not on a two-line note.';
     extra += ' ' + LETTER_ONLY_EXTRA;
-    // Ingest-only stops HERE. Everything above is the ingest itself — uploads, thread context,
-    // inbound telemetry, auth verdict — and it has all happened. What we skip is asking the engine
-    // for a reply, which is what would produce an auto-reply or a draft. An explicit send through
-    // /out is untouched: this mutes the mailbox's own voice, it does not take away the ability to
-    // mail from it when asked.
-    if (ingestOnly) {
-      ctx.log(`ingest-only: recorded mail from ${fromAddr} (${subject}) — engine not invoked`);
-      return { handled: true, ingestOnly: true };
-    }
-
     const actions = await ctx.core.handle({
       channel: 'email',
       conversation_key: convKey,

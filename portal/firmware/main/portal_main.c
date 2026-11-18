@@ -18,7 +18,11 @@
 #include "usb_hid.h"
 #include "wifi_link.h"
 #include "portal_olm.h"
+#include "esp_olm.h"
+#include "portal_log.h"
+#include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "freertos/semphr.h"
 
 #define PIN_LED 38
@@ -47,6 +51,7 @@
 #define C_GREEN  0x07E6
 #define C_RED    0xF800
 #define C_BLUE   0x2D7F      // a bright, legible BLE blue (not pure 0x001F, which reads near-black)
+#define C_PURPLE 0x8AFE      // Eve violet #8B5CF6 — Wi-Fi P2P (phone-relay) transport
 
 static spi_device_handle_t spi;
 static SemaphoreHandle_t g_ui_mux = NULL;   // serialize screen+LED between the UI loop and the engine
@@ -428,7 +433,15 @@ void portal_ui_cdc_line(const char *line){
 static void status_dot_task(void *arg){
     const int x = LCD_W - 15, y = 6, sz = 11;
     for(;;){
-        uint16_t col = wifi_link_active() ? C_GREEN : (ble_is_connected() ? C_BLUE : C_RED);
+        // Link-status colour by connection quality (best first):
+        //   green  = on the mesh, driven DIRECTLY (Wi-Fi/WireGuard — no phone)
+        //   purple = Wi-Fi P2P transport (phone relay, bulk)
+        //   blue   = BLE only
+        //   red    = disconnected
+        uint16_t col = esp_olm_is_connected() ? C_GREEN
+                     : wifi_link_active()      ? C_PURPLE
+                     : ble_is_connected()      ? C_BLUE
+                     :                           C_RED;
         ui_lock();
         fill_rect(x-3, y-3, sz+6, sz+6, scale565(col, 45));   // soft halo = the glow
         fill_rect(x,   y,   sz,   sz,   col);                 // bright core
@@ -478,12 +491,15 @@ void app_main(void){
     st7789_init();
     led_init();
     ble_init();   // R3: BLE control link — advertise + GATT
+    portal_log_init();   // debug: stream ESP_LOG → BLE STATUS (trace the olm bring-up)
+    esp_log_level_set("esp-tls", ESP_LOG_DEBUG);
+    esp_log_level_set("esp-tls-mbedtls", ESP_LOG_DEBUG);
     module_init();   // libsodium + the chunked signed-module loader
     engine_init();   // the step-DSL loader engine (its own task)
     xTaskCreate(status_dot_task, "portal-dot", 2560, NULL, 3, NULL);   // persistent link-status glow
     xTaskCreate(led_task, "portal-led", 2048, NULL, 3, NULL);           // sole writer of the WS2812 (ambient + flashes)
 
-    printf("[boot] free heap=%u largest=%u internal=%u\n",
+    printf("[boot] reset_reason=%d free heap=%u largest=%u internal=%u\n", (int)esp_reset_reason(),
            (unsigned)esp_get_free_heap_size(),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));

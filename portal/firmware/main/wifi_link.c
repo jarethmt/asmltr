@@ -41,6 +41,8 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         s_have_ip = false;
         if (s_want && (s_direct || s_retries++ < 20)) { esp_wifi_connect(); }  // keep retrying (direct mode: forever)
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
+        if (e) ESP_LOGI(TAG, "STA got IP " IPSTR, IP2STR(&e->ip_info.ip));
         s_retries = 0;
         s_have_ip = true;
         if (!s_direct && s_ip_sem) xSemaphoreGive(s_ip_sem);       // P2P mode: wake the socket task to dial the GO

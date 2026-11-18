@@ -1,0 +1,14 @@
+# Docker build context is the repo root for the dashboard image (it needs shared/). Keep it lean:
+# without these the context includes every node_modules tree and a 45 MB APK.
+**/node_modules
+**/dist
+**/build
+.git
+mobile/android
+mobile/www/shared
+agents/host-remote-desktop/*.exe
+*.apk
+*.gz
+core/data
+insights/collector/data
+connectors/manager/data

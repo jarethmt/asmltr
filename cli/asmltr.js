@@ -815,7 +815,7 @@ async function cmdDevice(argv, f) {
   // The shared flags() helper leaves flags in the positional list and always consumes the next
   // token as a value, which mangles quoted names and makes a trailing boolean flag read as
   // undefined. Parse locally rather than changing a helper every other command already depends on.
-  const BOOL = new Set(['forbid', 'open']);
+  const BOOL = new Set(['forbid', 'open', 'no-victory']);
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) { if (!BOOL.has(argv[i].slice(2))) i++; continue; }
@@ -854,6 +854,60 @@ async function cmdDevice(argv, f) {
     console.log('  ' + A.grn(c.code) + '\n');
     console.log(A.dim('  single-use. On the machine, run the host agent once with:'));
     console.log(A.dim(`    host-remote-desktop.exe -broker <broker-url> -enroll ${c.code}`));
+    return;
+  }
+  // asmltr device provision <name> --ssh <user@host> — the SSH counterpart to the Portal
+  // dongle's USB-HID bridge. Identical orchestration (POST /v2/portal/enroll: Fleet row +
+  // ssh/rd transports at <slug>-*.mesh + mesh site/resource + one-time token); the only
+  // difference is that the bootstrap one-liner is delivered over an SSH session we already have,
+  // instead of being typed into the target by a dongle.
+  //
+  // WHY IT EXISTS: until 2026-11-16 the full orchestration was reachable ONLY via that REST
+  // endpoint, which is shaped around the dongle. Provisioning a host you can already SSH into
+  // therefore meant hand-assembling what portal/enroll.js does in one call — which is exactly
+  // what had to be done for `johto`, by hand, against the Pangolin SQLite DB. This closes it.
+  if (verb === 'provision') {
+    const name = rest[1];
+    const target = f.ssh;
+    if (!name || !target) {
+      return console.log(A.red('usage: asmltr device provision <name> --ssh <user@host> [--os linux|macos|windows] [--kind server] [--no-victory]'));
+    }
+    const osk = (f.os || 'linux').toLowerCase();
+    console.log(A.dim(`\u00b7 enrolling '${name}' (${osk}) \u2026`));
+    const r = await coreApi('/v2/portal/enroll', 'POST', { os: osk, deviceName: name });
+    const wires = ((r.device && r.device.transports) || []).map((t) => `${t.transport}@${t.address || '-'}`).join(' ');
+    console.log(A.grn(`\u2713 device '${r.device.id}'`) + A.dim(` registered \u2014 ${wires || 'no transports'}`));
+    if (r.mesh) {
+      const st = r.mesh.status || 'unknown';
+      const bits = [st, r.mesh.site ? `site=${r.mesh.site.name}` : null, r.mesh.resources ? `resources=${r.mesh.resources.length}` : null].filter(Boolean).join(' ');
+      console.log((st === 'ok' ? A.grn('\u2713 mesh ') : A.yel('\u00b7 mesh ')) + A.dim(bits));
+      if (st === 'not-configured') console.log(A.yel('  mesh not provisioned \u2014 device + token kept; run `asmltr mesh provision`, then re-run'));
+    }
+    // A headless host is a 'server', not the 'workstation' the portal path assumes.
+    if (f.kind) {
+      await coreApi(`/v2/devices/${encodeURIComponent(r.device.id)}`, 'PATCH', { kind: f.kind });
+      console.log(A.dim(`  kind set to ${f.kind}`));
+    }
+    console.log(A.dim(`\u00b7 running bootstrap on ${target} \u2026`));
+    const sh = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', target, r.bootstrapCommand], { encoding: 'utf8', timeout: 600000 });
+    if (sh.status !== 0) {
+      // Deliberately non-destructive: the device row, transports and token all survive a
+      // host-side failure, so this is safely re-runnable.
+      console.log(A.red(`\u2717 bootstrap failed on ${target} (exit ${sh.status})`));
+      console.log(A.dim(((sh.stderr || sh.stdout || '').trim().split('\n').slice(-6).join('\n')) || '(no output)'));
+      console.log(A.dim('  device, transports and token are intact \u2014 fix the host and re-run, or run this on it by hand:'));
+      console.log('  ' + r.bootstrapCommand);
+      return;
+    }
+    console.log(A.grn('\u2713 mesh client installed on the host'));
+    if (!bool('no-victory')) {
+      const v = await coreApi(`/v2/portal/${encodeURIComponent(r.device.id)}/victory`, 'POST').catch((e) => ({ ok: false, error: e.message }));
+      console.log(v.ok
+        ? A.grn(`\u2713 victory lap (${v.method})`)
+        : A.yel(`\u00b7 victory lap did not land (${v.error || 'a fresh tunnel may need a few seconds'}) \u2014 informational, enroll stands`));
+    }
+    const sshWire = ((r.device && r.device.transports) || []).find((t) => t.transport === 'ssh');
+    console.log(A.dim(`\n  reach it: ssh ${sshWire && sshWire.address ? sshWire.address : name + '-ssh.mesh'}`));
     return;
   }
   if (verb === 'grant') {
@@ -945,6 +999,9 @@ async function cmdDevice(argv, f) {
 
   ls                                        every registered device, online or not
   add "<name>" [--kind K --platform P --owner <pid>]
+  provision <name> --ssh <user@host> [--os linux --kind server --no-victory]
+                                            full mesh enroll over SSH: Fleet row +
+                                            transports + mesh site/resource + install
   enroll <device_id> [--transport rd]       mint a single-use enrollment code
   grant <principal> <device> <capability> [--transport T --forbid --expires <ms>]
   grants <device_id>                        who may do what here

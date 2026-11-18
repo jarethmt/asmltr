@@ -122,6 +122,7 @@ nav:
       - Mesh client (esp_olm): portal/mesh-client.md
       - Control protocol: portal/control-protocol.md
       - Remote drive: portal/drive.md
+      - Debugging the mesh chain: portal/debugging.md
       - Android over ADB: portal/android-adb.md
     - Remote desktop: REMOTE-DESKTOP.md
   - Identity, auth & trust:
