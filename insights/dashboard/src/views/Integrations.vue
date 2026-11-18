@@ -647,6 +647,13 @@ onMounted(load)
               <span v-if="auth.st.client_type" class="text-slate-500">
                 · {{ auth.st.client_type }} client ({{ auth.st.client_source }})
               </span>
+              <span v-if="auth.st.grant && auth.st.grant.days_left != null"
+                    :class="auth.st.grant.days_left < 2 ? 'text-rose-300' : 'text-slate-400'">
+                · grant expires in {{ auth.st.grant.days_left }} day(s)
+              </span>
+              <span v-else-if="auth.st.grant && auth.st.grant.alive === false" class="text-rose-300">
+                · grant is DEAD ({{ auth.st.grant.error }}) — re-authorize
+              </span>
             </p>
             <p v-if="auth.st.callback_url" class="mt-1 text-slate-400">
               Callback: <code class="text-slate-300">{{ auth.st.callback_url }}</code>
