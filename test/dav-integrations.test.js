@@ -80,3 +80,50 @@ test('writes require explicit payloads — no half-built VEVENT/vCard guessing',
   await assert.rejects(() => card.putContact({ url: 'https://h/a/x.vcf' }), /url \+ vcard required/);
   await assert.rejects(() => card.searchContacts({}), /query required/);
 });
+
+// Google's ICS carries a VTIMEZONE whose DST rules have their OWN DTSTART — typically
+// 19700308T020000 — and it comes FIRST in the document. Reading DTSTART from the whole body
+// reported every event as starting in 1970. Tested against the real parser, not a copy of it.
+const ICS = [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VTIMEZONE', 'TZID:America/New_York', 'BEGIN:DAYLIGHT',
+  'DTSTART:19700308T020000',            // the trap
+  'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU', 'END:DAYLIGHT', 'END:VTIMEZONE',
+  'BEGIN:VEVENT', 'UID:abc123', 'SUMMARY:Read to a Dog',
+  'DTSTART;TZID=America/New_York:20261121T100000',
+  'DTEND;TZID=America/New_York:20261121T110000',
+  'END:VEVENT', 'END:VCALENDAR',
+].join('\r\n');
+
+test('event dates come from VEVENT, not from the VTIMEZONE DST rules', () => {
+  const e = caldav.summarise(ICS);
+  assert.equal(e.summary, 'Read to a Dog');
+  assert.ok(!String(e.start).startsWith('1970'), `start must not come from VTIMEZONE, got ${e.start}`);
+  assert.equal(e.start, '2026-11-21T10:00:00');
+  assert.equal(e.end, '2026-11-21T11:00:00');
+  assert.equal(e.tzid, 'America/New_York');
+  assert.equal(e.all_day, false);
+  assert.equal(e.uid, 'abc123');
+});
+
+test('veventOf isolates the event, and an all-day date is flagged', () => {
+  assert.ok(!/VTIMEZONE/.test(caldav.veventOf(ICS)));
+  const allDay = ICS.replace('DTSTART;TZID=America/New_York:20261121T100000', 'DTSTART;VALUE=DATE:20261209');
+  const e = caldav.summarise(allDay);
+  assert.equal(e.all_day, true);
+  assert.equal(e.start, '2026-12-09');
+});
+
+test('icalToIso handles local, UTC and date-only forms', () => {
+  assert.equal(caldav.icalToIso('20261121T100000'), '2026-11-21T10:00:00');
+  assert.equal(caldav.icalToIso('20261121T150000Z'), '2026-11-21T15:00:00Z');
+  assert.equal(caldav.icalToIso('20261209'), '2026-12-09');
+  assert.equal(caldav.icalToIso('nonsense'), null);
+});
+
+test('the shared client can list plain resources, for servers that refuse an open REPORT', () => {
+  const c = dav.makeClient({ base_url: 'https://h/a/', username: 'u', password: 'p' });
+  // Google's CardDAV answers addressbook-query with 400 and expects PROPFIND + fetch instead,
+  // so contacts() needs this path to exist.
+  assert.equal(typeof c.listResources, 'function');
+});

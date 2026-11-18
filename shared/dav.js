@@ -92,6 +92,23 @@ function makeClient(cfg) {
         .filter((r) => { const k = r.href.replace(/\/+$/, ''); if (seen.has(k)) return false; seen.add(k); return true; })
         .map((r) => ({ href: r.href, url: abs(r.href), name: r.displayname, ctag: r.ctag }));
     },
+    /**
+     * List the RESOURCES in a collection (not sub-collections) via PROPFIND. Needed where a server
+     * refuses an open-ended REPORT — Google's CardDAV answers addressbook-query with 400 and
+     * expects PROPFIND + multiget instead.
+     */
+    async listResources(collectionUrl) {
+      const url = collectionUrl || base + '/';
+      const { text } = await req('PROPFIND', url, {
+        depth: 1,
+        body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>',
+      });
+      const selfPath = new URL(url).pathname.replace(/\/+$/, '');
+      return responses(text)
+        .filter((r) => r.href && r.href.replace(/\/+$/, '') !== selfPath)
+        .filter((r) => !/collection/i.test((one(r.raw, 'resourcetype') || '')))   // resources only
+        .map((r) => ({ href: r.href, url: abs(r.href), etag: r.etag }));
+    },
     /** REPORT with a caller-supplied body; returns href + etag + payload per item. */
     async report(collectionUrl, body, payloadTag) {
       const { text } = await req('REPORT', collectionUrl, { depth: 1, body });
