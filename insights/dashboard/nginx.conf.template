@@ -59,6 +59,22 @@ server {
         proxy_set_header Authorization $http_authorization;
     }
 
+    # Google's OAuth redirect lands HERE, as a top-level browser navigation from accounts.google.com.
+    # It must not sit behind auth_request: the arriving request carries Google's `code` and `state`
+    # and nothing else guaranteed, so requiring a session would 401 the operator at the very END of
+    # consent — after they had already approved — which is the worst possible place to fail.
+    #
+    # Safe to leave open because the `state` is minted and held SERVER-SIDE with a 15-minute TTL and
+    # is swept, so a code cannot be redeemed without a live authorization that this core started.
+    # Same reasoning as the enroll-script exception above: the credential is in the payload, not in
+    # a cookie, which is all auth_request knows how to look at.
+    location = /v2/integrations/google/callback {
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+    }
+
     # More specific than /v2/ so it wins — and no auth_request (can't require a login to log in).
     location /v2/auth/ {
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
