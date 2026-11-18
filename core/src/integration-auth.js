@@ -129,7 +129,7 @@ async function start(id) {
   sweep();
   pending.set(s, { integration_id: id, account, mode: st.mode, created: Date.now() });
   return { state: s, mode: st.mode, account, callback_url: st.callback_url,
-    auth_url: google.authUrl({ client_id: c.client_id, redirect_uri: st.mode === 'redirect' ? st.callback_url : LOOPBACK, login_hint: account || undefined }),
+    auth_url: google.authUrl({ client_id: c.client_id, redirect_uri: st.mode === 'redirect' ? st.callback_url : LOOPBACK, login_hint: account || undefined, state: s }),
     ...(st.mode === 'paste' ? { instructions: 'Approve in the browser. The page it lands on WILL FAIL TO LOAD — that is expected. Copy the whole address-bar URL and paste it back here.' } : {}) };
 }
 

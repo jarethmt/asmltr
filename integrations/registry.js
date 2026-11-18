@@ -42,11 +42,30 @@ function get(iid) { const it = load()[iid]; return it ? shape(it) : null; }
 const KINDS = ['storage', 'tools', 'transport'];
 const LIFECYCLES = ['passive', 'supervised'];
 
-function create({ type, name, config = {}, kind = 'storage', lifecycle = 'passive' }) {
-  if (!KINDS.includes(kind)) throw new Error(`kind must be one of: ${KINDS.join(', ')}`);
-  if (!LIFECYCLES.includes(lifecycle)) throw new Error(`lifecycle must be one of: ${LIFECYCLES.join(', ')}`);
+/**
+ * A driver KNOWS what it yields and who runs it, so those are read from the driver rather than
+ * trusted from the caller. Defaulting them to `storage`/`passive` instead meant any client that
+ * omitted `kind` — the dashboard did — created mail/caldav/carddav links as STORAGE, which then
+ * failed with "unknown storage driver 'mail'" at open time. The caller may still pass them
+ * explicitly (for a driver that predates the fields), but the driver wins when it declares them.
+ */
+function kindFromDriver(type) {
+  if (type === 'local') return { kind: 'storage', lifecycle: 'passive' };
+  try {
+    const d = require('./types/' + type);
+    return { kind: d && d.kind, lifecycle: d && d.lifecycle };
+  } catch (_) { return {}; }
+}
+
+function create({ type, name, config = {}, kind, lifecycle }) {
+  if (!type) throw new Error('type is required');
+  const declared = kindFromDriver(type);
+  const k = declared.kind || kind || 'storage';
+  const lc = declared.lifecycle || lifecycle || 'passive';
+  if (!KINDS.includes(k)) throw new Error(`kind must be one of: ${KINDS.join(', ')}`);
+  if (!LIFECYCLES.includes(lc)) throw new Error(`lifecycle must be one of: ${LIFECYCLES.join(', ')}`);
   const d = load();
-  const it = { id: id(), type, name, kind, lifecycle, config, created_at: Date.now() };
+  const it = { id: id(), type, name, kind: k, lifecycle: lc, config, created_at: Date.now() };
   d[it.id] = it; save(d); return it;
 }
 function update(iid, patch) { const d = load(); if (!d[iid]) return null; d[iid] = { ...d[iid], ...patch, id: iid, updated_at: Date.now() }; save(d); return d[iid]; }

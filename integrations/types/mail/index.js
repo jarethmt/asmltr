@@ -55,6 +55,9 @@ function imapAuth(cfg, token) {
 /** Open a live handle. Caller MUST call close(). */
 async function open(cfg = {}) {
   const address = cfg.email_address || cfg.user;
+  // For Gmail the IMAP/SMTP username IS the address, so a separate `user_ref` is noise — and
+  // demanding one made an otherwise-complete OAuth integration fail with "user required".
+  if (!cfg.user && address) cfg = { ...cfg, user: address };
   const token = cfg.auth === 'oauth2' ? await resolveAccessToken(cfg) : null;
   const imapOpts = {
     host: need(cfg, 'imap_host'), port: Number(cfg.imap_port) || 993, secure: true,

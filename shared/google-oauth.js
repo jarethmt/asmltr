@@ -27,7 +27,7 @@ function scopeList(which = Object.keys(SCOPES)) {
 }
 
 /** Consent URL for the installed-app flow. `redirect_uri` must match the client registration. */
-function authUrl({ client_id, redirect_uri = 'http://127.0.0.1:8765', scopes, login_hint } = {}) {
+function authUrl({ client_id, redirect_uri = 'http://127.0.0.1:8765', scopes, login_hint, state } = {}) {
   if (!client_id) throw new Error('google-oauth: client_id required');
   const p = new URLSearchParams({
     client_id, redirect_uri, response_type: 'code',
@@ -37,6 +37,12 @@ function authUrl({ client_id, redirect_uri = 'http://127.0.0.1:8765', scopes, lo
     include_granted_scopes: 'true',
   });
   if (login_hint) p.set('login_hint', login_hint);
+  // `state` is the ONLY thing tying Google's redirect back to the authorization we started.
+  // Omitting it meant the callback arrived with code+scope and no way to identify the
+  // integration, so every redirect-mode consent died on "unknown or expired authorization"
+  // AFTER the operator had already approved. Minting a state server-side is useless unless it
+  // is actually sent.
+  if (state) p.set('state', state);
   return 'https://accounts.google.com/o/oauth2/v2/auth?' + p.toString();
 }
 
