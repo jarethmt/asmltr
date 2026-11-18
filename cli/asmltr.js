@@ -900,7 +900,31 @@ async function cmdDevice(argv, f) {
       return;
     }
     console.log(A.grn('\u2713 mesh client installed on the host'));
-    if (!bool('no-victory')) {
+
+    // VERIFY, do not trust the exit code. On 2026-11-18 the bootstrap reported success while
+    // installing nothing: the dashboard's nginx was 401-ing the script path, curl -f wrote an
+    // empty file, and `sh` on empty input exited 0. A green tick for a total no-op. The host is
+    // the only authority on whether the mesh client is actually there, so ask it.
+    const vg = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', target,
+      'systemctl is-active "newt-*-mesh" 2>/dev/null | grep -qx active || ' +
+      'systemctl list-units --all --no-legend 2>/dev/null | grep -qE "newt-.*-mesh.*active" || ' +
+      'test -x /opt/newt/bin/newt'], { encoding: 'utf8', timeout: 60000 });
+    if (vg.status !== 0) {
+      console.log(A.red('\u2717 verification FAILED \u2014 no mesh client found on the host after bootstrap'));
+      console.log(A.dim('  the bootstrap reported success but installed nothing. Run this on the host to see why:'));
+      console.log('  ' + r.bootstrapCommand);
+    } else {
+      console.log(A.dim('  verified: mesh client present on the host'));
+
+      // The device is on the mesh and reachable BY ITS OWN client — but the operator's client has
+      // no grant to it yet, so `ssh <name>-ssh.mesh` from the admin box will resolve and then
+      // time out. Pangolin models that as rows in `clientSiteResources` (clientId x
+      // siteResourceId); newt only accepts source subnets it has been told about, so BOTH the
+      // grant and a newt restart are needed. Cost an hour to work out on 2026-11-18 — say it here
+      // so nobody rediscovers it.
+      console.log(A.dim('  note: to reach it from THIS host, grant your olm client access to the'));
+      console.log(A.dim('        new site resources, then restart newt on the target:'));
+      console.log(A.dim('        asmltr mesh grant --client <yourClientId> --site ' + (r.mesh && r.mesh.site ? r.mesh.site : '<site>')));    }    if (!bool('no-victory')) {
       const v = await coreApi(`/v2/portal/${encodeURIComponent(r.device.id)}/victory`, 'POST').catch((e) => ({ ok: false, error: e.message }));
       console.log(v.ok
         ? A.grn(`\u2713 victory lap (${v.method})`)

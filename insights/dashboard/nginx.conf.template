@@ -43,6 +43,22 @@ server {
     }
 
     # Auth endpoints stay reachable WITHOUT a session (login / setup / status / verify).
+    # Device self-enrollment. Same reasoning as /v2/auth/ below: you cannot require a login to
+    # enroll a machine that does not have one yet. A host bootstrapping onto the mesh fetches its
+    # install script from here and authorizes with a short-lived (15 min) Bearer enroll token that
+    # core validates itself - so the credential IS present, just not as a session cookie, which is
+    # all auth_request knows how to check.
+    #
+    # Added 2026-11-18. Without it this path fell through to `location /v2/` below, auth_request
+    # returned 401, and the whole enrollment chain failed in a way that LOOKED like success:
+    # curl -f exited 22, the empty body piped to sh exited 0, and the CLI printed a tick. That
+    # broke the USB dongle path too, not just the CLI verb - both fetch this same URL.
+    location = /v2/portal/enroll/script {
+        proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+    }
+
     # More specific than /v2/ so it wins — and no auth_request (can't require a login to log in).
     location /v2/auth/ {
         proxy_pass http://${ASMLTR_UPSTREAM_HOST}:3023;

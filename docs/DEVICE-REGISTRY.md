@@ -437,3 +437,44 @@ its own; nothing handled the whole job. This verb does.
 `workstation · server · phone · sbc · appliance · printer · other`. `server` was added 2026-11-16 —
 the fleet holds headless hosts (johto: storage + PBS) that are neither a workstation nor an
 appliance, and filing them as `appliance` lost that distinction.
+
+### What the first real `device provision` run exposed (2026-11-18)
+
+Enrolling zapdos end-to-end surfaced a four-link failure chain. Three of the four were **not** in
+the new CLI verb — they were pre-existing and broke the **USB dongle path too**, because both
+paths fetch the same install script from the same URL.
+
+**1. The portal base URL pointed at the wrong host.** `portalBaseUrl()` fell through to
+`meshConfig().dashboardUrl`, which is *Pangolin's* dashboard (`mesh.eve.…`). That host answers
+`/health` but carries no asmltr routes, so the generated one-liner fetched the install script from
+the wrong service and got a 404. The asmltr API lives at `asmltr.eve.…`.
+
+**2. The dashboard's nginx gated the script path.** `location /v2/` applies `auth_request`, so a
+host bootstrapping itself was refused with an nginx 401 before core could evaluate its bearer
+token. The config already had the right precedent one block down — `/v2/auth/` is exempt, with the
+comment *"can't require a login to log in."* Enrolling a machine that has no login yet is the same
+case, so `location = /v2/portal/enroll/script` is now exempt too.
+
+**3. `curl … | sh` reported success for a complete no-op.** This is the one worth remembering:
+`curl -f` exits 22 on an HTTP error and writes nothing, and **`sh` reading empty stdin exits 0**.
+The pipeline's status is therefore 0 and the CLI printed a green tick while nothing whatsoever was
+installed. Now the script is downloaded to a temp file, checked non-empty, and only then executed,
+with the real exit code propagated. It also no longer assumes `sudo` exists — Proxmox and most
+minimal Debian images omit it, and when you are already root it is pointless.
+
+**4. The operator's client has no grant to the new device.** This one is by design but undocumented
+and cost an hour. `provision` creates the device with *its own* mesh client, so the host is on the
+mesh and reachable by itself — but your admin box's olm client has no access, and
+`ssh <name>-ssh.mesh` will resolve and then **time out**. Pangolin models access as rows in
+`clientSiteResources` (clientId × siteResourceId), and **newt only accepts source subnets it has
+been told about**, so two things are needed:
+
+```
+# grant the operator's client the new site's resources, then
+systemctl restart newt-<org>-mesh    # on the TARGET, so it reloads its accepted subnets
+```
+
+The verb now prints this as a reminder on success.
+
+**Verification is not optional.** The CLI now re-checks the host after bootstrap rather than
+trusting the exit status, because trusting it is exactly what produced the false green tick.

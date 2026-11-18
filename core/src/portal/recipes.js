@@ -70,8 +70,25 @@ function shInstall(os, token, baseUrl) {
   // curl → sudo sh. The fetched script writes the systemd unit (Linux) / launchd plist (macOS) and
   // enables it. `sudo` because the mesh client needs host-netns privileges to bring up WireGuard.
   const url = `${String(baseUrl).replace(/\/$/, '')}${ENROLL_SCRIPT_PATH}?os=${os}`;
-  return `curl -fsSL -H "Authorization: Bearer ${token}" "${url}" | sudo sh`;
+  // Download, VERIFY, then execute - never pipe curl straight into a shell.
+  //
+  // `curl -fsSL ... | sh` fails silently in the worst possible way: curl exits 22 on an HTTP
+  // error, writes nothing, and `sh` reading empty stdin exits 0. The pipeline therefore reports
+  // SUCCESS for a complete no-op. That is exactly what happened on 2026-11-18 while enrolling
+  // zapdos - the dashboard's nginx was returning 401 for this path, nothing was installed, and
+  // the CLI printed a green tick.
+  //
+  // Escalate only if not already root: sudo may not be installed at all (Proxmox and most
+  // minimal Debian images omit it), and when you are already root it is pointless.
+  return (
+    `t=$(mktemp) && ` +
+    `curl -fsSL -H "Authorization: Bearer ${token}" "${url}" -o "$t" && ` +
+    `[ -s "$t" ] && ` +
+    `{ if [ "$(id -u)" = 0 ]; then sh "$t"; else sudo sh "$t"; fi; }; ` +
+    `rc=$?; rm -f "$t"; exit $rc`
+  );
 }
+
 function psUninstall(org) {
   const task = `newt-${org}-mesh`;
   return (

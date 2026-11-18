@@ -63,7 +63,13 @@ function portalBaseUrl() {
     process.env.ASMLTR_PORTAL_BASE_URL ||
     process.env.ASMLTR_PUBLIC_URL ||
     process.env.BASE_URL ||
-    meshConfig().dashboardUrl ||
+      // NOT meshConfig().dashboardUrl. That is PANGOLIN's dashboard host
+      // (mesh.eve.thoughtspacedesigns.com), which answers /health but carries no asmltr routes,
+      // so the generated one-liner fetched /v2/portal/enroll/script from the wrong service and
+      // got a 404. The asmltr API is served at asmltr.eve.thoughtspacedesigns.com. Found
+      // 2026-11-18 enrolling zapdos; this broke the DONGLE path too, not just the new CLI
+      // verb, because both ask this function for the base URL.
+      'https://asmltr.eve.thoughtspacedesigns.com' ||
     'http://127.0.0.1:3000';
   return String(raw).replace(/\/$/, '');
 }
